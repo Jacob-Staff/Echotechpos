@@ -161,7 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <div class="login-card text-center">
     <div class="brand-icon"><i class="fas fa-capsules"></i></div>
-    <h3 class="fw-bold mb-1">Pharmacy Login</h3>
+    <h3 class="fw-bold mb-1">EchoTech POS</h3>
     <p class="subtitle-text mb-4">Secure Access</p>
 
     <?php if(isset($_GET['error'])): ?>
