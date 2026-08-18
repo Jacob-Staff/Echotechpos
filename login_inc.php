@@ -74,16 +74,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
     <style>
-        :root { --accent: #00d2ff; --bg-dark: #0f111a; --card-bg: #161b22; --text-muted: #8b949e; }
-        body { background-color: var(--bg-dark); color: #fff; font-family: 'Inter', sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; }
+        :root { 
+            --accent: #00d2ff; 
+            --bg-dark: #0f111a; 
+            --card-bg: #161b22; 
+            --text-muted: #a3b1c2; /* Brighter, high-contrast gray */
+        }
+        body { 
+            background-color: var(--bg-dark); 
+            color: #fff; 
+            font-family: 'Inter', sans-serif; 
+            height: 100vh; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            margin: 0; 
+        }
         
-        .login-card { background: var(--card-bg); border: 1px solid #30363d; border-radius: 20px; padding: 2.5rem; width: 100%; max-width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .brand-icon { font-size: 3rem; color: var(--accent); margin-bottom: 1rem; }
-        .form-control { background: #0d1117; border: 1px solid #30363d; color: #fff; padding: 12px 15px; border-radius: 10px; }
-        .form-control:focus { background: #0d1117; border-color: var(--accent); color: #fff; box-shadow: none; }
-        .btn-login { background: linear-gradient(45deg, #00d2ff, #3a7bd5); border: none; font-weight: bold; padding: 12px; border-radius: 10px; transition: 0.3s; }
-        .btn-login:hover { opacity: 0.9; transform: translateY(-2px); color: #fff; }
-        .alert { border-radius: 10px; border: none; font-size: 0.9rem; margin-bottom: 1.5rem; }
+        .login-card { 
+            background: var(--card-bg); 
+            border: 1px solid #30363d; 
+            border-radius: 20px; 
+            padding: 2.5rem; 
+            width: 100%; 
+            max-width: 400px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
+        }
+        .brand-icon { 
+            font-size: 3rem; 
+            color: var(--accent); 
+            margin-bottom: 1rem; 
+        }
+        
+        /* High-contrast form controls */
+        .form-control { 
+            background: #0d1117; 
+            border: 1px solid #30363d; 
+            color: #ffffff !important; 
+            padding: 12px 15px; 
+            border-radius: 10px; 
+        }
+        
+        /* High-visibility input labels */
+        .form-label {
+            color: #c9d1d9 !important;
+            font-weight: 500;
+        }
+
+        /* Explicit Placeholder contrast fix across all browsers */
+        .form-control::placeholder {
+            color: #8b949e !important;
+            opacity: 1 !important; /* Overrides default browser dimming */
+        }
+
+        .form-control:focus { 
+            background: #0d1117; 
+            border-color: var(--accent); 
+            color: #fff; 
+            box-shadow: none; 
+        }
+        .btn-login { 
+            background: linear-gradient(45deg, #00d2ff, #3a7bd5); 
+            border: none; 
+            font-weight: bold; 
+            padding: 12px; 
+            border-radius: 10px; 
+            transition: 0.3s; 
+        }
+        .btn-login:hover { 
+            opacity: 0.9; 
+            transform: translateY(-2px); 
+            color: #fff; 
+        }
+        .alert { 
+            border-radius: 10px; 
+            border: none; 
+            font-size: 0.9rem; 
+            margin-bottom: 1.5rem; 
+        }
+        .subtitle-text {
+            color: #a3b1c2 !important;
+        }
     </style>
 </head>
 <body>
@@ -91,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="login-card text-center">
     <div class="brand-icon"><i class="fas fa-capsules"></i></div>
     <h3 class="fw-bold mb-1">Pharmacy Login</h3>
-    <p class="text-muted mb-4">Secure Access Terminal</p>
+    <p class="subtitle-text mb-4">Secure Access</p>
 
     <?php if(isset($_GET['error'])): ?>
         <div class="alert alert-danger text-start">
@@ -115,11 +186,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <form action="login_inc.php" method="POST">
         <div class="mb-3 text-start">
-            <label class="form-label small text-muted">Username</label>
+            <label class="form-label small">Username</label>
             <input type="text" name="username" class="form-control" placeholder="Enter your username" required autofocus>
         </div>
         <div class="mb-4 text-start">
-            <label class="form-label small text-muted">Password</label>
+            <label class="form-label small">Password</label>
             <input type="password" name="password" class="form-control" placeholder="••••••••" required>
         </div>
         <button type="submit" class="btn btn-login w-100 text-white">
