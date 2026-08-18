@@ -9,11 +9,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $password = isset($_POST['password']) ? trim($_POST['password']) : '';
 
     if (empty($username) || empty($password)) {
-        header("Location: login_inc.php?error=empty_fields");
+        header("Location: index.php?error=empty_fields");
         exit();
     }
 
-    // 1. Fetch user data - ADDED pharmacy_id to the SELECT statement
+    // 1. Fetch user data
     $stmt = $conn->prepare("SELECT id, pharmacy_id, username, password, role, branch_id, status FROM users WHERE username = ? LIMIT 1");
     $stmt->bind_param("s", $username);
     $stmt->execute();
@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // 2. CHECK ACCOUNT STATUS: If Frozen, stop them here
         if ($user['status'] === 'Frozen') {
-            header("Location: login_inc.php?error=account_frozen");
+            header("Location: index.php?error=account_frozen");
             exit();
         }
 
@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // 5. SET SESSION VARIABLES
             $_SESSION['user_id']         = $user['id'];
-            $_SESSION['pharmacy_id']     = $user['pharmacy_id']; // Now correctly populated from DB
+            $_SESSION['pharmacy_id']     = $user['pharmacy_id'];
             $_SESSION['sessionUsername'] = $user['username'];
             $_SESSION['role']            = $user['role'];      
             $_SESSION['branch_id']       = $user['branch_id']; 
@@ -52,12 +52,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         } else {
             // Wrong Password
-            header("Location: login_inc.php?error=wrong_password");
+            header("Location: index.php?error=wrong_password");
             exit();
         }
     } else {
         // User not found
-        header("Location: login_inc.php?error=user_not_found");
+        header("Location: index.php?error=user_not_found");
         exit();
     }
 
@@ -78,7 +78,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             --accent: #00d2ff; 
             --bg-dark: #0f111a; 
             --card-bg: #161b22; 
-            --text-muted: #a3b1c2; /* Brighter, high-contrast gray */
         }
         body { 
             background-color: var(--bg-dark); 
@@ -90,7 +89,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             justify-content: center; 
             margin: 0; 
         }
-        
         .login-card { 
             background: var(--card-bg); 
             border: 1px solid #30363d; 
@@ -105,8 +103,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: var(--accent); 
             margin-bottom: 1rem; 
         }
-        
-        /* High-contrast form controls */
         .form-control { 
             background: #0d1117; 
             border: 1px solid #30363d; 
@@ -114,19 +110,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             padding: 12px 15px; 
             border-radius: 10px; 
         }
-        
-        /* High-visibility input labels */
         .form-label {
             color: #c9d1d9 !important;
             font-weight: 500;
         }
-
-        /* Explicit Placeholder contrast fix across all browsers */
         .form-control::placeholder {
             color: #8b949e !important;
-            opacity: 1 !important; /* Overrides default browser dimming */
+            opacity: 1 !important;
         }
-
         .form-control:focus { 
             background: #0d1117; 
             border-color: var(--accent); 
@@ -161,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <div class="login-card text-center">
     <div class="brand-icon"><i class="fas fa-capsules"></i></div>
-    <h3 class="fw-bold mb-1">EchoTech POS</h3>
+    <h3 class="fw-bold mb-1">Pharmacy Login</h3>
     <p class="subtitle-text mb-4">Secure Access</p>
 
     <?php if(isset($_GET['error'])): ?>
@@ -184,7 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     <?php endif; ?>
 
-    <form action="login_inc.php" method="POST">
+    <form action="index.php" method="POST">
         <div class="mb-3 text-start">
             <label class="form-label small">Username</label>
             <input type="text" name="username" class="form-control" placeholder="Enter your username" required autofocus>
