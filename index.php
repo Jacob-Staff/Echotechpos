@@ -1,6 +1,11 @@
 <?php
-header("Location: login_inc.php");
-exit();
+session_start();
+
+// If user is already logged in, redirect straight to dashboard
+if (isset($_SESSION['user_id'])) {
+    header("Location: dashboard.php");
+    exit();
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -16,7 +21,7 @@ exit();
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
     <style>
         body {
-            background-color: #0f111a; /* Matching your dashboard dark theme */
+            background-color: #0f111a;
             font-family: 'Poppins', sans-serif;
             display: flex;
             justify-content: center;
@@ -28,7 +33,7 @@ exit();
             max-width: 420px;
             width: 100%;
             padding: 3rem;
-            background-color: #161b22; /* Darker card */
+            background-color: #161b22;
             border: 1px solid #30363d;
             border-radius: 1.5rem;
             box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
@@ -78,7 +83,7 @@ exit();
         <?php
         if (isset($_SESSION['status'])) {
             $alert_class = ($_SESSION['status'] == 'success') ? 'alert-success' : 'alert-danger';
-            echo '<div class="alert ' . $alert_class . ' py-2 text-center small" role="alert">' . $_SESSION['message'] . '</div>';
+            echo '<div class="alert ' . $alert_class . ' py-2 text-center small" role="alert">' . htmlspecialchars($_SESSION['message']) . '</div>';
             unset($_SESSION['status'], $_SESSION['message']);
         }
         ?>
@@ -106,10 +111,7 @@ exit();
             </div>
         </form>
 
-        <?php
-        // Register link only visible if an Admin happens to be logged in 
-        // (Useful for quickly adding staff without going to dashboard)
-        if (isset($_SESSION['role']) && $_SESSION['role'] === 'Admin'): ?>
+        <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'Admin'): ?>
             <p class="text-center mt-4 small">
                 Add new personnel? <a href="register.php" class="text-decoration-none" style="color:#00d2ff;">Register here</a>
             </p>
