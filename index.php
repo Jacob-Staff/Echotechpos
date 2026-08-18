@@ -18,7 +18,7 @@ if (isset($_SESSION['user_id'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pharmacy Login | PHARMA-JACOBS</title>
+    <title>Pharmacy Login | EchoTech POS</title>
     <link rel="icon" type="image/png" sizes="16x16" href="assets/images/a+.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -82,7 +82,7 @@ if (isset($_SESSION['user_id'])) {
     <div class="container login-container">
         <div class="text-center">
             <i class="fas fa-capsules brand-icon"></i>
-            <h3 class="fw-bold mb-1">PHARMA-JACOBS</h3>
+            <h3 class="fw-bold mb-1">EchoTech POS</h3>
             <p class="text-muted small mb-4">Secure POS Access</p>
         </div>
 
