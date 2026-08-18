@@ -97,7 +97,7 @@ if (isset($_SESSION['user_id'])) {
         <form id="loginForm" method="post" action="login_inc.php" novalidate>
             <div class="mb-3">
                 <label for="username" class="form-label small text-muted">Username</label>
-                <input type="text" class="form-control" id="username" name="username" placeholder="e.g. nkoloso" required>
+                <input type="text" class="form-control" id="username" name="username" placeholder="enter name here.." required>
                 <div class="invalid-feedback">Please enter your username.</div>
             </div>
             <div class="mb-3">
