@@ -1,23 +1,24 @@
 <?php
-// Detect the base URL of the project
-$protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+// Dynamic Base URL detection (Works for local XAMPP and live Render)
+$protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || $_SERVER['SERVER_PORT'] == 443) ? "https://" : "http://";
 $host = $_SERVER['HTTP_HOST'];
-// This identifies your project folder (e.g., /pharmacy_v1-master/)
-$base_dir = str_replace(basename($_SERVER['SCRIPT_NAME']), '', $_SERVER['SCRIPT_NAME']);
-// We force the base directory to be the root of the project
-$project_root = "/pharmacy_v1-master/"; 
 
 if (!defined('BASE_URL')) {
-    define('BASE_URL', $protocol . $host . $project_root);
+    define('BASE_URL', $protocol . $host . '/');
 }
-$host = "localhost";
-$user = "root";
-$pass = "";
-$db   = "pharmacy_v1"; // Based on your previous project data
 
-$conn = new mysqli($host, $user, $pass, $db);
+// Database Credentials (Reads Render Environment Variables, defaults to XAMPP local)
+$db_host = getenv('DB_HOST') ?: "localhost";
+$db_user = getenv('DB_USER') ?: "root";
+$db_pass = getenv('DB_PASS') ?: "";
+$db_name = getenv('DB_NAME') ?: "pharmacy_v1";
+$db_port = getenv('DB_PORT') ?: 3306;
+
+// Connection with error suppression to prevent fatal page crashes
+$conn = @new mysqli($db_host, $db_user, $db_pass, $db_name, (int)$db_port);
 
 if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+    // Log error locally/silently without crashing the UI layout
+    error_log("Database Connection Error: " . $conn->connect_error);
 }
 ?>
