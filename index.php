@@ -1,17 +1,6 @@
 <?php
-// Start the session and include database connection
-session_start();
-require('includes/conn.php');
-
-// AUTO-REDIRECT: If already logged in, skip the login page
-if (isset($_SESSION['user_id'])) {
-    if ($_SESSION['role'] === 'Admin') {
-        header("Location: admin/admin_dashboard.php");
-    } else {
-        header("Location: dashboard/index.php");
-    }
-    exit();
-}
+header("Location: login_inc.php");
+exit();
 ?>
 <!DOCTYPE html>
 <html lang="en">
