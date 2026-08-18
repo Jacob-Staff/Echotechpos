@@ -14,11 +14,11 @@ $db_pass = getenv('DB_PASS') ?: "";
 $db_name = getenv('DB_NAME') ?: "pharmacy_v1";
 $db_port = getenv('DB_PORT') ?: 3306;
 
-// Connection with error suppression to prevent fatal page crashes
-$conn = @new mysqli($db_host, $db_user, $db_pass, $db_name, (int)$db_port);
-
-if ($conn->connect_error) {
-    // Log error locally/silently without crashing the UI layout
-    error_log("Database Connection Error: " . $conn->connect_error);
+// Catch database connection exceptions to prevent fatal site crashes in PHP 8.1+
+try {
+    $conn = new mysqli($db_host, $db_user, $db_pass, $db_name, (int)$db_port);
+} catch (mysqli_sql_exception $e) {
+    error_log("Database Connection Error: " . $e->getMessage());
+    $conn = null; // Set connection to null so UI elements can still render safely
 }
 ?>
