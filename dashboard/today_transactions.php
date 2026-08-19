@@ -7,9 +7,10 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+ob_start();
+
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
-require_once "../includes/header.php";
 
 date_default_timezone_set('Africa/Lusaka');
 
@@ -64,6 +65,26 @@ if ($result) {
 }
 ?>
 
+<style>
+    .stat-card { border: none; border-radius: 4px; color: white; margin-bottom: 20px; }
+    .bg-matrix-cyan { background: #22a7f0 !important; box-shadow: 0 4px 10px rgba(34, 167, 240, 0.2); }
+    .bg-matrix-orange { background: #ffb848 !important; box-shadow: 0 4px 10px rgba(255, 184, 72, 0.2); }
+    .stat-card .card-body { padding: 18px 22px; }
+    .stat-card h2 { font-size: 1.8rem; margin: 0; font-weight: 700; color: #fff; }
+    .stat-card p { margin: 0; opacity: 0.9; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #fff; }
+
+    .table-box { background: #fff; border-radius: 4px; border: 1px solid #e9ecef; }
+    .table thead th { background-color: #1f262d !important; color: #fff !important; font-size: 12px; padding: 15px 12px; }
+    .table tbody td { font-size: 13.5px; padding: 12px; vertical-align: middle; border-bottom: 1px solid #f8f9fa; }
+    
+    .item-list { color: #444; max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    @media print {
+        .no-print { display: none !important; }
+        .page-wrapper { padding: 0; }
+    }
+</style>
+
 <div class="container-fluid page-wrapper">
     <div class="row align-items-center mb-4">
         <div class="col-md-6">
@@ -71,7 +92,7 @@ if ($result) {
             <span class="text-muted small">Report for: <b><?php echo $display_date; ?></b></span>
         </div>
         <div class="col-md-6 text-end no-print">
-            <form method="GET" class="d-inline-flex align-items-center">
+            <form method="GET" class="d-inline-flex align-items-center justify-content-end">
                 <input type="date" name="filter_date" class="form-control form-control-sm me-2" value="<?php echo $filter_date; ?>" onchange="this.form.submit()">
                 <button type="button" class="btn btn-dark btn-sm px-3" onclick="window.print()">
                     <i class="mdi mdi-printer me-1"></i> Print
@@ -138,7 +159,6 @@ if ($result) {
 </div>
 
 <?php 
-if (file_exists("../includes/footer.php")) {
-    require_once "../includes/footer.php"; 
-}
+$content = ob_get_clean();
+require_once "../includes/header.php"; 
 ?>
