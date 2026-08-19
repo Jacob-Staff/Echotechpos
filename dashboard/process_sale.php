@@ -6,6 +6,8 @@ if (session_status() === PHP_SESSION_NONE) {
 require_once '../includes/conn.php';
 header('Content-Type: application/json');
 
+$in_transaction = false;
+
 try {
     // 1. Validate Session & Get User Info
     $pharmacy_id = $_SESSION['pharmacy_id'] ?? null; 
@@ -39,7 +41,9 @@ try {
     // Generate unique invoice number
     $invoice_no = "PH-" . date('ymd') . "-" . strtoupper(substr(uniqid(), -4));
 
+    // Begin MySQLi Transaction
     $conn->begin_transaction();
+    $in_transaction = true;
 
     // 4. Insert Sale into 'sales' table
     $stmt = $conn->prepare("INSERT INTO sales (pharmacy_id, branch_id, issued_by, invoice, total, total_amount, subtotal, vat_amount, payment_method, user_id, sale_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
@@ -100,7 +104,7 @@ try {
     ]);
 
 } catch (Exception $e) {
-    if (isset($conn) && $conn->inTransaction()) {
+    if (isset($conn) && $in_transaction) {
         $conn->rollback();
     }
     echo json_encode([
