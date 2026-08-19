@@ -9,7 +9,6 @@ if (session_status() === PHP_SESSION_NONE) {
 
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
-require_once "../includes/header.php";
 
 date_default_timezone_set('Africa/Lusaka');
 
@@ -61,11 +60,50 @@ if($result){
 }
 ?>
 
-<div class="page-wrapper" style="padding-top: 15px;">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Sales Report | <?php echo htmlspecialchars($display_pharm); ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Poppins', sans-serif; background-color: #f4f6f9; margin: 0; padding: 0; }
+        .page-wrapper { padding: 25px; }
+        .stat-card { border: none; border-radius: 6px; color: white; margin-bottom: 20px; }
+        .bg-matrix-cyan { background: #22a7f0 !important; box-shadow: 0 4px 10px rgba(34, 167, 240, 0.2); }
+        .bg-matrix-orange { background: #ffb848 !important; box-shadow: 0 4px 10px rgba(255, 184, 72, 0.2); }
+        .stat-card .card-body { padding: 20px 24px; }
+        .stat-card h2 { font-size: 1.8rem; margin: 0; font-weight: 700; color: #fff; }
+        .stat-card p { margin: 0; opacity: 0.9; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #fff; }
+
+        .table-box { background: #fff; border-radius: 6px; border: 1px solid #e9ecef; }
+        .table thead th { background-color: #1f262d !important; color: #fff !important; font-size: 12px; padding: 15px 12px; border: none; }
+        .table tbody td { font-size: 13.5px; padding: 12px; vertical-align: middle; border-bottom: 1px solid #f8f9fa; }
+        
+        .item-list { color: #444; max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        @media print {
+            .no-print { display: none !important; }
+            .page-wrapper { padding: 0; }
+        }
+    </style>
+</head>
+<body>
+
+<?php 
+if (file_exists("../includes/header.php")) {
+    require_once "../includes/header.php";
+}
+?>
+
+<div class="page-wrapper">
     <div class="container-fluid">
         <div class="row align-items-center mb-4">
             <div class="col-md-6">
-                <h4 class="fw-bold text-dark mb-0"><?php echo strtoupper($display_pharm); ?></h4>
+                <h4 class="fw-bold text-dark mb-0"><?php echo strtoupper(htmlspecialchars($display_pharm)); ?></h4>
                 <span class="text-muted small">Report for: <b><?php echo $display_date; ?></b></span>
             </div>
             <div class="col-md-6 text-end no-print">
@@ -136,4 +174,11 @@ if($result){
     </div>
 </div>
 
-<?php require_once "../includes/footer.php"; ?>
+<?php 
+if (file_exists("../includes/footer.php")) {
+    require_once "../includes/footer.php"; 
+}
+?>
+
+</body>
+</html>
