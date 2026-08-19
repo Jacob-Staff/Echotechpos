@@ -1,32 +1,40 @@
 <?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 $user_id = $_SESSION['user_id'] ?? 19;
-$user_q = mysqli_query($conn, "SELECT full_name, username, role, profile_pic FROM users WHERE id = '$user_id'");
-$user_data = mysqli_fetch_assoc($user_q);
 
-$display_name = !empty($user_data['full_name']) ? $user_data['full_name'] : ($user_data['username'] ?? 'User');
-$display_role = $user_data['role'] ?? 'Staff';
+// Fetch User Profile Details Dynamically from Table 'users'
+$display_name = $_SESSION['username'] ?? 'Jac';
+$display_role = 'Pharmacist';
+
+if (isset($conn) && $conn) {
+    $user_q = mysqli_query($conn, "SELECT full_name, username, role FROM users WHERE id = '$user_id'");
+    if ($user_q && $user_data = mysqli_fetch_assoc($user_q)) {
+        if (!empty($user_data['full_name'])) {
+            $display_name = $user_data['full_name'];
+        } elseif (!empty($user_data['username'])) {
+            $display_name = $user_data['username'];
+        }
+        
+        if (!empty($user_data['role'])) {
+            $display_role = $user_data['role'];
+        }
+    }
+}
 ?>
-
-<div class="user-profile-box">
-    <div class="user-avatar">
-        <i class="fas fa-user"></i>
-    </div>
-    <div class="user-info">
-        <h6 class="mb-0 text-white fw-bold"><?php echo htmlspecialchars($display_name); ?></h6>
-        <small class="text-muted"><?php echo htmlspecialchars($display_role); ?></small>
-    </div>
-</div>
 
 <aside class="left-sidebar">
     <div>
-        <!-- High Contrast Staff Profile Container -->
+        <!-- High Contrast Dynamic Staff Profile Container -->
         <div class="user-profile-box">
             <div class="user-avatar">
                 <i class="fas fa-user-tie"></i>
             </div>
             <div>
-                <div class="fw-bold small" style="color: #ffffff !important;">Staff: <?php echo htmlspecialchars($_SESSION['username'] ?? 'Jac'); ?></div>
-                <div class="extra-small" style="color: #92a4b5 !important; font-size: 0.78rem;">Pharmacist</div>
+                <div class="fw-bold small text-white">Staff: <?php echo htmlspecialchars($display_name); ?></div>
+                <div class="extra-small" style="color: #92a4b5 !important; font-size: 0.78rem;"><?php echo htmlspecialchars($display_role); ?></div>
             </div>
         </div>
 
