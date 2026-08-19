@@ -7,11 +7,10 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// Include core backend files
+// Include backend & header files
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
 require_once "../includes/head.php";
-require_once "../includes/header.php";
 
 // START BRANCH FILTER SETUP
 $branch_id = isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : 1; 
@@ -66,61 +65,36 @@ $waiting_patients_result = safe_mysqli_query($conn, $waiting_patients_query);
 $waiting_patients_data = $waiting_patients_result ? mysqli_fetch_assoc($waiting_patients_result) : ['waiting_patients_count' => 0];
 $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PHARMANOVA - Dashboard</title>
 
-    <!-- Core CSS (Bootstrap + Icons) -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<style>
+    .card-stats { 
+        border-radius: 0.75rem; 
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); 
+        transition: transform 0.3s ease; 
+        color: #fff; 
+        border: none;
+    }
+    .card-stats:hover { 
+        transform: translateY(-5px); 
+    }
+    .stat-card-sales { background: linear-gradient(135deg, #4a90e2, #50b0f0); }
+    .stat-card-stock { background: linear-gradient(135deg, #6b7a8f, #4d5e7a); }
+    .stat-card-out-of-stock { background: linear-gradient(135deg, #f5a623, #d0021b); }
+    .stat-card-expired { background: linear-gradient(135deg, #d0021b, #9b1e22); }
+    .stat-card-items { background: linear-gradient(135deg, #34495e, #2c3e50); }
+    .page-breadcrumb { 
+        background-color: #fff; 
+        padding: 1rem; 
+        border-radius: 0.75rem; 
+        margin-bottom: 2rem; 
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); 
+    }
+</style>
 
-    <!-- Theme CSS (Root relative paths) -->
-    <link href="/assets/libs/flot/css/float-chart.css" rel="stylesheet">
-    <link href="/dist/css/style.min.css" rel="stylesheet">
-
-    <style>
-        body { 
-            font-family: 'Poppins', sans-serif; 
-            background-color: #f0f2f5; 
-        }
-        .page-wrapper { 
-            min-height: 100vh; 
-            padding: 20px; 
-        }
-        .card-stats { 
-            border-radius: 0.75rem; 
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); 
-            transition: transform 0.3s ease; 
-            color: #fff; 
-            border: none;
-        }
-        .card-stats:hover { 
-            transform: translateY(-5px); 
-        }
-        .stat-card-sales { background: linear-gradient(135deg, #4a90e2, #50b0f0); }
-        .stat-card-stock { background: linear-gradient(135deg, #6b7a8f, #4d5e7a); }
-        .stat-card-out-of-stock { background: linear-gradient(135deg, #f5a623, #d0021b); }
-        .stat-card-expired { background: linear-gradient(135deg, #d0021b, #9b1e22); }
-        .stat-card-items { background: linear-gradient(135deg, #34495e, #2c3e50); }
-        .page-breadcrumb { 
-            background-color: #fff; 
-            padding: 1rem; 
-            border-radius: 0.75rem; 
-            margin-bottom: 2rem; 
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); 
-        }
-    </style>
-</head>
-<body>
-
-<div id="main-wrapper" data-layout="vertical" data-navbarbg="skin5">
+<div id="main-wrapper">
 
     <?php 
-    // Re-include top header and sidebar navigation
+    // Navigation includes
     require_once "../includes/header.php"; 
     require_once "../includes/aside.php"; 
     ?>
@@ -249,7 +223,6 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
     </div>
 </div>
 
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
