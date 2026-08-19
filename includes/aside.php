@@ -1,13 +1,13 @@
 <aside class="left-sidebar">
     <div>
-        <!-- Staff Profile Container -->
+        <!-- High Contrast Staff Profile Container -->
         <div class="user-profile-box">
             <div class="user-avatar">
                 <i class="fas fa-user-tie"></i>
             </div>
             <div>
-                <div class="text-white fw-bold small">Staff: <?php echo htmlspecialchars($_SESSION['username'] ?? 'Jac'); ?></div>
-                <div class="text-muted extra-small" style="font-size: 0.75rem;">Pharmacist</div>
+                <div class="fw-bold small" style="color: #ffffff !important;">Staff: <?php echo htmlspecialchars($_SESSION['username'] ?? 'Jac'); ?></div>
+                <div class="extra-small" style="color: #92a4b5 !important; font-size: 0.78rem;">Pharmacist</div>
             </div>
         </div>
 
@@ -47,8 +47,8 @@
         </nav>
     </div>
 
-    <!-- Fixed Logout Button -->
+    <!-- Fixed Bright Red Logout Button -->
     <div class="logout-btn-container">
-        <a href="../logout.php" class="btn btn-danger w-100 fw-bold py-2">Logout</a>
+        <a href="../logout.php" class="btn logout-btn w-100 text-center text-decoration-none">Logout</a>
     </div>
 </aside>
