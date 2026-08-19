@@ -126,8 +126,8 @@ require_once "../includes/head.php";
                                 $num_per_page = 15;
                                 $start_from = ($page - 1) * $num_per_page;
 
-                                // Filter by Branch and Pharmacy
-                                $where_clause = " WHERE branch_id = '$branch_id' AND pharmacy_id = '$pharmacy_id' AND (expiry_date > '$current_date' OR expiry_date = '0000-00-00') AND quantity > 0 ";
+                                // Filter by Branch and Pharmacy (Strict SQL compatible)
+                                $where_clause = " WHERE branch_id = '$branch_id' AND pharmacy_id = '$pharmacy_id' AND (expiry_date > '$current_date' OR expiry_date IS NULL OR CAST(expiry_date AS CHAR) = '0000-00-00') AND quantity > 0 ";
 
                                 $sql = "SELECT * FROM store_items $where_clause ORDER BY item_name ASC LIMIT $start_from, $num_per_page";
                                 $res = mysqli_query($conn, $sql);
@@ -147,7 +147,7 @@ require_once "../includes/head.php";
                                         $row_total = $price * $qty;
                                         $total_inventory_value += $row_total;
                                         
-                                        $is_expired = ($row['expiry_date'] < $current_date && $row['expiry_date'] != '0000-00-00');
+                                        $is_expired = ($row['expiry_date'] < $current_date && $row['expiry_date'] != '0000-00-00' && !empty($row['expiry_date']));
                                         $stock_status = ($qty <= 10) ? 'bg-danger' : 'bg-success';
                                 ?>
                                     <tr data-id="<?php echo $row['id']; ?>">
@@ -166,7 +166,7 @@ require_once "../includes/head.php";
                                         </td>
                                         <td class="text-dark fw-bold">K <?php echo number_format($row_total, 2); ?></td>
                                         <td>
-                                            <?php if ($row['expiry_date'] != '0000-00-00'): ?>
+                                            <?php if ($row['expiry_date'] != '0000-00-00' && !empty($row['expiry_date'])): ?>
                                                 <span class="<?php echo $is_expired ? 'text-danger fw-bold' : 'text-muted'; ?>">
                                                     <?php echo date('d M Y', strtotime($row['expiry_date'])); ?>
                                                 </span>
@@ -232,7 +232,6 @@ if (file_exists("../includes/footer.php")) {
 
 <script>
 $(document).ready(function(){
-    // Live Search for Inventory
     $("#search").on("keyup", function(){
         var query = $(this).val();
         $.ajax({
@@ -245,7 +244,6 @@ $(document).ready(function(){
         });
     });
 
-    // Delete Action
     $(document).on("click", ".delete-btn", function(){
         var id = $(this).data("id");
         var row = $(this).closest("tr");
