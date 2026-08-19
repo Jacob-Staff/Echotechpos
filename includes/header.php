@@ -1,11 +1,26 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+// Ensure pharmacy name is fetched dynamically
+$pharmacy_id = $_SESSION['pharmacy_id'] ?? 10;
+$branch_id   = $_SESSION['branch_id'] ?? 13;
 
-$branch_name = $_SESSION['branch_name'] ?? 'Nova Lsk';
-$today_date = date('d M Y');
+$pharm_q = mysqli_query($conn, "SELECT name FROM pharmacies WHERE id = '$pharmacy_id'");
+$pharm_data = mysqli_fetch_assoc($pharm_q);
+$pharmacy_name = $pharm_data['name'] ?? 'EchoTech';
+
+$branch_q = mysqli_query($conn, "SELECT branch_name FROM branches WHERE id = '$branch_id'");
+$branch_data = mysqli_fetch_assoc($branch_q);
+$branch_name = $branch_data['branch_name'] ?? 'Main Branch';
 ?>
+
+<!-- Brand Name in Header -->
+<a href="dashboard.php" class="logo-icon text-decoration-none">
+    <?php echo htmlspecialchars($pharmacy_name); ?>
+</a>
+
+<!-- Branch Name Badge -->
+<span class="badge bg-secondary">
+    <i class="mdi mdi-city me-1"></i><?php echo htmlspecialchars($branch_name); ?>
+</span>
 
 <header class="topbar">
     <nav class="navbar top-navbar navbar-expand-md navbar-dark p-0">
