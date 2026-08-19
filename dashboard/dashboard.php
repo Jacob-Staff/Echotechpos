@@ -69,46 +69,40 @@ require_once "../includes/head.php";
 
         <div class="container-fluid p-0">
             <div class="row g-3">
-                <!-- Main Tiles: Adapts to 2 Columns on Mobile -->
-                <div class="col-lg-9">
-                    <div class="mobile-tile-grid">
-                        <div>
-                            <a href="sell_now.php" class="card card-dash bg-tile-sellnow">
-                                <span class="card-title">Sell Now</span>
-                                <span class="card-value">All Items</span>
-                            </a>
-                        </div>
-                        <div>
-                            <a href="today_transactions.php" class="card card-dash bg-tile-tx">
-                                <span class="card-title">Today's Tx</span>
-                                <span class="card-value" style="color: #eec136 !important;"><?php echo $today_tx_data['total'] ?? 0; ?></span>
-                            </a>
-                        </div>
-                        <div>
-                            <a href="out_of_stock.php" class="card card-dash bg-tile-outstock">
-                                <span class="card-title">Out of Stock</span>
-                                <span class="card-value"><?php echo $out_of_stock_data['total'] ?? 2; ?></span>
-                            </a>
-                        </div>
-                        <div>
-                            <a href="expired_products.php" class="card card-dash bg-tile-expired">
-                                <span class="card-title">Expired Items</span>
-                                <span class="card-value"><?php echo $expired_data['expired'] ?? 2; ?></span>
-                            </a>
-                        </div>
-                        <div>
-                            <a href="customers.php" class="card card-dash bg-tile-customer">
-                                <span class="card-title">Customer</span>
-                                <span class="card-value">Service</span>
-                            </a>
-                        </div>
-                        <div>
-                            <a href="online_manager.php" class="card card-dash bg-tile-online">
-                                <span class="card-title">Prescription</span>
-                                <span class="card-value">Online</span>
-                            </a>
-                        </div>
-                    </div>
+ <!-- Main Tiles Grid -->
+<div class="col-lg-9">
+    <div class="tile-grid">
+        <a href="sell_now.php" class="card card-dash bg-tile-sellnow">
+            <span class="card-title">Sell Now</span>
+            <span class="card-value">All Items</span>
+        </a>
+
+        <a href="today_transactions.php" class="card card-dash bg-tile-tx">
+            <span class="card-title">Today's Tx</span>
+            <span class="card-value" style="color: #eec136 !important;"><?php echo $today_tx_data['total'] ?? 0; ?></span>
+        </a>
+
+        <a href="out_of_stock.php" class="card card-dash bg-tile-outstock">
+            <span class="card-title">Out of Stock</span>
+            <span class="card-value"><?php echo $out_of_stock_data['total'] ?? 2; ?></span>
+        </a>
+
+        <a href="expired_products.php" class="card card-dash bg-tile-expired">
+            <span class="card-title">Expired Products</span>
+            <span class="card-value"><?php echo $expired_data['expired'] ?? 2; ?></span>
+        </a>
+
+        <a href="customers.php" class="card card-dash bg-tile-customer">
+            <span class="card-title">Customer</span>
+            <span class="card-value">Service</span>
+        </a>
+
+        <a href="online_manager.php" class="card card-dash bg-tile-online">
+            <span class="card-title">Prescription</span>
+            <span class="card-value">Online</span>
+        </a>
+    </div>
+</div>
                 </div>
 
                 <!-- Urgent Alerts Widget -->
