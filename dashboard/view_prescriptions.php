@@ -328,13 +328,11 @@ require_once "../includes/head.php";
                     </table>
                 </div>
             </div>
-
-        </div>
-    </div>
-
     <?php 
     if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"; 
     ?>
+        </div>
+    </div>
 </div>
 
 <!-- Image Modal -->
