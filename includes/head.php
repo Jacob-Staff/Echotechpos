@@ -11,10 +11,6 @@
     <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 
-    <!-- Theme Styles -->
-    <link href="/assets/libs/flot/css/float-chart.css" rel="stylesheet">
-    <link href="/dist/css/style.min.css" rel="stylesheet">
-
     <!-- Core Scripts -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 
@@ -43,7 +39,7 @@
         background: #3e4f5f !important;
     }
 
-    /* Far-left dark header box for company logo/name */
+    /* Header logo box */
     .topbar .navbar-header {
         position: absolute !important;
         left: 0 !important;
@@ -65,14 +61,14 @@
         letter-spacing: 0.5px;
     }
 
-    /* Search bar container offset */
+    /* Top navbar right section */
     .navbar-collapse {
         margin-left: 250px !important;
         height: 64px;
         background: #3e4f5f !important;
     }
 
-    /* Left sidebar layout and dark theme */
+    /* Fixed Left sidebar */
     .left-sidebar {
         position: fixed !important;
         top: 64px !important;
@@ -81,7 +77,7 @@
         height: calc(100vh - 64px) !important;
         background: #2c3e50 !important;
         z-index: 1000;
-        overflow-y: auto;
+        display: block !important;
     }
 
     .scroll-sidebar {
@@ -89,13 +85,16 @@
         overflow-y: auto !important;
     }
 
-    /* Main content container offset */
+    /* Main page content area offset */
     .page-wrapper {
         margin-left: 250px !important;
-        margin-top: 64px !important;
-        padding: 20px !important;
+        padding-top: 80px !important;
+        padding-left: 20px !important;
+        padding-right: 20px !important;
+        padding-bottom: 20px !important;
         min-height: calc(100vh - 64px);
-        background: #f4f6f9;
+        background: #f4f6f9 !important;
+        display: block !important;
     }
 
     @media (max-width: 768px) {
