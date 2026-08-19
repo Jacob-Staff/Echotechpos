@@ -7,12 +7,12 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-ob_start();
+// 1. INCLUDES FIRST
+require_once "../includes/conn.php";[cite: 6]
+require_once "../includes/auth.php";[cite: 6]
+require_once "../includes/header.php";
 
-require_once "../includes/conn.php";
-require_once "../includes/auth.php";
-
-date_default_timezone_set('Africa/Lusaka');
+date_default_timezone_set('Africa/Lusaka');[cite: 6]
 
 $pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
 $branch_id   = (int)($_SESSION['branch_id'] ?? 0);
@@ -21,7 +21,7 @@ if (!$pharmacy_id || !$branch_id) {
     die("<div class='alert alert-danger text-center mt-3'>Session expired. Please log in again.</div>");
 }
 
-// 🏢 FETCH BRANCH AND PHARMACY NAME FROM DB
+// 2. FETCH BRANCH AND PHARMACY NAME FROM DB
 $branch_name = "Unknown Branch";
 $pharmacy_name = "Pharmacy";
 
@@ -41,7 +41,7 @@ if ($info_stmt) {
     }
 }
 
-// 📦 FETCH PRESCRIPTIONS
+// 3. FETCH PRESCRIPTIONS
 $rx_stmt = $conn->prepare("
     SELECT p.*, c.full_name, c.phone 
     FROM prescriptions p 
@@ -225,7 +225,6 @@ function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
                     $date = isset($row['uploaded_at']) ? date('d M Y, H:i', strtotime($row['uploaded_at'])) : 'N/A';
                     $isPending = (strtolower($status) == 'pending');
                     
-                    // Clean phone for WhatsApp Link
                     $clean_phone = preg_replace('/[^0-9]/', '', $phone);
                     $msg = "Hello " . $name . ", this is " . $pharmacy_name . " (" . $branch_name . "). Your prescription request is processed and ready.";
                     $wa_link = "https://wa.me/" . $clean_phone . "?text=" . urlencode($msg);
@@ -301,7 +300,5 @@ function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
         });
     });
 </script>
-<?php
-$content = ob_get_clean();
-require "../includes/myheader.php"; 
-?>
+
+<?php require_once "../includes/footer.php"; ?>
