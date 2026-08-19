@@ -126,9 +126,16 @@ require_once "../includes/head.php";
                                 $num_per_page = 15;
                                 $start_from = ($page - 1) * $num_per_page;
 
-                                // Filter by Branch and Pharmacy (Strict SQL compatible)
+                                // Filter by Branch and Pharmacy
                                 $where_clause = " WHERE branch_id = '$branch_id' AND pharmacy_id = '$pharmacy_id' AND (expiry_date > '$current_date' OR expiry_date IS NULL OR CAST(expiry_date AS CHAR) = '0000-00-00') AND quantity > 0 ";
 
+                                // 1. Calculate TOTAL Branch Asset Valuation for ALL items in stock
+                                $total_val_q = "SELECT SUM(price * quantity) AS total_valuation FROM store_items $where_clause";
+                                $total_val_res = mysqli_query($conn, $total_val_q);
+                                $total_val_row = mysqli_fetch_assoc($total_val_res);
+                                $total_inventory_value = floatval($total_val_row['total_valuation'] ?? 0);
+
+                                // 2. Paginated Query for UI display
                                 $sql = "SELECT * FROM store_items $where_clause ORDER BY item_name ASC LIMIT $start_from, $num_per_page";
                                 $res = mysqli_query($conn, $sql);
 
@@ -137,15 +144,12 @@ require_once "../includes/head.php";
                                 $total_row = mysqli_fetch_assoc($total_res);
                                 $total_page = ceil(($total_row['total'] ?? 0) / $num_per_page);
 
-                                $total_inventory_value = 0;
-
                                 if ($res && mysqli_num_rows($res) > 0) {
                                     $sn = $start_from + 1;
                                     while ($row = mysqli_fetch_assoc($res)) {
                                         $price = floatval($row['price']);
                                         $qty = intval($row['quantity']);
                                         $row_total = $price * $qty;
-                                        $total_inventory_value += $row_total;
                                         
                                         $is_expired = ($row['expiry_date'] < $current_date && $row['expiry_date'] != '0000-00-00' && !empty($row['expiry_date']));
                                         $stock_status = ($qty <= 10) ? 'bg-danger' : 'bg-success';
@@ -193,7 +197,7 @@ require_once "../includes/head.php";
                             <div class="row justify-content-end">
                                 <div class="col-md-4 text-end">
                                     <h6 class="text-muted text-uppercase mb-1" style="font-size: 0.75rem; letter-spacing: 1px;">Branch Asset Valuation</h6>
-                                    <h3 class="text-success fw-bold mb-0">K <?php echo number_format($total_inventory_value ?? 0, 2); ?></h3>
+                                    <h3 class="text-success fw-bold mb-0">K <?php echo number_format($total_inventory_value, 2); ?></h3>
                                 </div>
                             </div>
                         </div>
@@ -218,15 +222,14 @@ require_once "../includes/head.php";
             <?php endif; ?>
 
         </div>
-    </div>
-</div>
-
-<?php 
+        <?php 
 if (file_exists("../includes/footer.php")) {
     require_once "../includes/footer.php"; 
 }
 ?>
 
+    </div>
+</div>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
