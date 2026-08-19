@@ -7,10 +7,10 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-ob_start();
-
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
+require_once "header.php"; 
+
 date_default_timezone_set('Africa/Lusaka');
 
 $p_id = (int)($_SESSION['pharmacy_id'] ?? 0);
@@ -46,7 +46,7 @@ $sql = "SELECT s.*,
 
 $stmt = mysqli_prepare($conn, $sql);
 
-// Exactly 3 bound parameters: $p_id (int), $b_id (int), $filter_date (string)
+// Exactly 3 bound parameters matching 'iis'
 mysqli_stmt_bind_param($stmt, "iis", $p_id, $b_id, $filter_date);
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
@@ -63,39 +63,6 @@ if ($result) {
     }
 }
 ?>
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Sales Report | <?php echo htmlspecialchars($display_pharm); ?></title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
-
-    <style>
-        body { font-family: 'Poppins', sans-serif; background-color: #f4f6f9; }
-        .page-wrapper { padding-top: 15px; }
-        .stat-card { border: none; border-radius: 4px; color: white; margin-bottom: 20px; }
-        .bg-matrix-cyan { background: #22a7f0; box-shadow: 0 4px 10px rgba(34, 167, 240, 0.2); }
-        .bg-matrix-orange { background: #ffb848; box-shadow: 0 4px 10px rgba(255, 184, 72, 0.2); }
-        .stat-card .card-body { padding: 18px 22px; }
-        .stat-card h2 { font-size: 1.8rem; margin: 0; font-weight: 700; }
-        .stat-card p { margin: 0; opacity: 0.85; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
-
-        .table-box { background: #fff; border-radius: 4px; border: 1px solid #e9ecef; }
-        .table thead th { background-color: #1f262d; color: #fff; font-size: 12px; padding: 15px 12px; }
-        .table tbody td { font-size: 13.5px; padding: 12px; vertical-align: middle; border-bottom: 1px solid #f8f9fa; }
-        
-        .item-list { color: #444; max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-        @media print {
-            .no-print { display: none !important; }
-            .page-wrapper { padding: 0; }
-        }
-    </style>
-</head>
-<body>
 
 <div class="container-fluid page-wrapper">
     <div class="row align-items-center mb-4">
@@ -132,7 +99,7 @@ if ($result) {
         </div>
     </div>
 
-    <div class="table-box shadow-sm">
+    <div class="table-box shadow-sm mt-3">
         <div class="table-responsive">
             <table class="table table-hover mb-0">
                 <thead>
@@ -171,15 +138,9 @@ if ($result) {
 </div>
 
 <?php 
-if (file_exists("../includes/footer.php")) {
+if (file_exists("footer.php")) {
+    require_once "footer.php"; 
+} elseif (file_exists("../includes/footer.php")) {
     require_once "../includes/footer.php"; 
 }
-?>
-
-</body>
-</html>
-
-<?php
-$content = ob_get_clean();
-require_once "../includes/myheader.php"; 
 ?>
