@@ -10,7 +10,7 @@
     <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 
-   <style>
+    <style>
     body { 
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; 
         background-color: #f4f6f9 !important; 
@@ -142,7 +142,13 @@
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04); 
     }
 
-    /* Responsive Grid Tiles */
+    /* Desktop Responsive 3-Column Grid */
+    .mobile-tile-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 15px;
+    }
+
     .card-dash {
         border-radius: 0.5rem;
         border: none;
@@ -242,7 +248,6 @@
 
         /* Mobile 2-Column Tile Grid */
         .mobile-tile-grid {
-            display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 10px;
         }
@@ -263,6 +268,6 @@
             max-width: 160px;
         }
     }
-</style>
+    </style>
 </head>
 <body>
