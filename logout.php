@@ -16,7 +16,7 @@ if (ini_get("session.use_cookies")) {
     );
 }
 
-// 4. Redirect to login_inc.php
-header("Location: login_inc.php?status=logged_out");
+// 4. Redirect to index.php
+header("Location: index.php?status=logged_out");
 exit();
 ?>
