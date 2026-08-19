@@ -130,17 +130,14 @@ require_once "../includes/head.php";
                         </div>
                     </div>
                 </div>
-
-            </div>
-        </div>
-    </div>
-
     <?php 
     if (file_exists("../includes/footer.php")) {
         require_once "../includes/footer.php"; 
     }
     ?>
-
+            </div>
+        </div>
+    </div>
 </div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
