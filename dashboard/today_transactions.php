@@ -85,8 +85,13 @@ if($result){
         
         .item-list { color: #444; max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+        /* Navigation contrast fix */
+        .topbar, header.topbar, .navbar { background-color: #1f262d !important; }
+        .topbar *, header.topbar * { color: #ffffff !important; }
+        .topbar input, header.topbar input { color: #333333 !important; }
+
         @media print {
-            .no-print { display: none !important; }
+            .no-print, header, .topbar { display: none !important; }
             .page-wrapper { padding: 0; }
         }
     </style>
