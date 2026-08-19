@@ -7,31 +7,24 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-ob_start();
-
-// Include database & auth files
+// Include core backend files only
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
 
 // START BRANCH FILTER SETUP
 $branch_id = isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : 1; 
 $pharmacy_id = $_SESSION['pharmacy_id'] ?? ''; 
-// END BRANCH FILTER SETUP
 
 // Generate unique invoice number
 function generateInvoiceNumber() {
-    $number = mt_rand(1000000, 9797977);
-    return 'INV-' . $number;
+    return 'INV-' . mt_rand(1000000, 9797977);
 }
 $invoice_number = generateInvoiceNumber();
 
 // Safe query execution function
 function safe_mysqli_query($conn, $query) {
     $result = @mysqli_query($conn, $query);
-    if ($result === false) {
-        return null;
-    }
-    return $result;
+    return ($result === false) ? null : $result;
 }
 
 // --- Dashboard Data Queries ---
@@ -50,7 +43,7 @@ $items_list_query = "SELECT COUNT(*) AS total_items FROM store_items WHERE branc
 $today_transactions_query = "SELECT COUNT(*) AS total_transactions FROM sales WHERE DATE(sale_date) = CURDATE() AND branch_id = {$branch_id}"; 
 $waiting_patients_query = "SELECT COUNT(*) AS waiting_patients_count FROM patients WHERE status = '0' AND branch_id = {$branch_id}";
 
-// --- Execute Queries and Fetch Data ---
+// --- Execute Queries ---
 $sales_result = safe_mysqli_query($conn, $sales_query);
 $sales_data = $sales_result ? mysqli_fetch_assoc($sales_result) : ['total_sales' => 0];
 
@@ -71,36 +64,56 @@ $waiting_patients_result = safe_mysqli_query($conn, $waiting_patients_query);
 $waiting_patients_data = $waiting_patients_result ? mysqli_fetch_assoc($waiting_patients_result) : ['waiting_patients_count' => 0];
 $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
 ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PHARMANOVA - Dashboard</title>
 
-<style>
-    .page-wrapper { 
-        min-height: 100vh; 
-        padding: 20px; 
-        background-color: #f0f2f5; 
-    }
-    .card-stats { 
-        border-radius: 0.75rem; 
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); 
-        transition: transform 0.3s ease; 
-        color: #fff; 
-        border: none;
-    }
-    .card-stats:hover { 
-        transform: translateY(-5px); 
-    }
-    .stat-card-sales { background: linear-gradient(135deg, #4a90e2, #50b0f0); }
-    .stat-card-stock { background: linear-gradient(135deg, #6b7a8f, #4d5e7a); }
-    .stat-card-out-of-stock { background: linear-gradient(135deg, #f5a623, #d0021b); }
-    .stat-card-expired { background: linear-gradient(135deg, #d0021b, #9b1e22); }
-    .stat-card-items { background: linear-gradient(135deg, #34495e, #2c3e50); }
-    .page-breadcrumb { 
-        background-color: #fff; 
-        padding: 1rem; 
-        border-radius: 0.75rem; 
-        margin-bottom: 2rem; 
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); 
-    }
-</style>
+    <!-- Core CSS (Bootstrap + Icons) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <!-- Theme CSS (Root relative paths with leading slashes) -->
+    <link href="/assets/libs/flot/css/float-chart.css" rel="stylesheet">
+    <link href="/dist/css/style.min.css" rel="stylesheet">
+
+    <style>
+        body { 
+            font-family: 'Poppins', sans-serif; 
+            background-color: #f0f2f5; 
+        }
+        .page-wrapper { 
+            min-height: 100vh; 
+            padding: 20px; 
+        }
+        .card-stats { 
+            border-radius: 0.75rem; 
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); 
+            transition: transform 0.3s ease; 
+            color: #fff; 
+            border: none;
+        }
+        .card-stats:hover { 
+            transform: translateY(-5px); 
+        }
+        .stat-card-sales { background: linear-gradient(135deg, #4a90e2, #50b0f0); }
+        .stat-card-stock { background: linear-gradient(135deg, #6b7a8f, #4d5e7a); }
+        .stat-card-out-of-stock { background: linear-gradient(135deg, #f5a623, #d0021b); }
+        .stat-card-expired { background: linear-gradient(135deg, #d0021b, #9b1e22); }
+        .stat-card-items { background: linear-gradient(135deg, #34495e, #2c3e50); }
+        .page-breadcrumb { 
+            background-color: #fff; 
+            padding: 1rem; 
+            border-radius: 0.75rem; 
+            margin-bottom: 2rem; 
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); 
+        }
+    </style>
+</head>
+<body>
 
 <div class="page-wrapper">
     <div class="page-breadcrumb">
@@ -225,7 +238,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
     </div>
 </div>
 
-<?php
-$content = ob_get_clean();
-require_once "../includes/header.php"; 
-?>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
