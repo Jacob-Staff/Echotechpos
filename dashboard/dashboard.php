@@ -7,22 +7,19 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// Include backend & header files
+// Include backend core
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
-require_once "../includes/head.php";
 
 // START BRANCH FILTER SETUP
 $branch_id = isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : 1; 
 $pharmacy_id = $_SESSION['pharmacy_id'] ?? ''; 
 
-// Generate unique invoice number
 function generateInvoiceNumber() {
     return 'INV-' . mt_rand(1000000, 9797977);
 }
 $invoice_number = generateInvoiceNumber();
 
-// Safe query execution function
 function safe_mysqli_query($conn, $query) {
     $result = @mysqli_query($conn, $query);
     return ($result === false) ? null : $result;
@@ -64,37 +61,15 @@ $today_transactions_data = $today_transactions_result ? mysqli_fetch_assoc($toda
 $waiting_patients_result = safe_mysqli_query($conn, $waiting_patients_query);
 $waiting_patients_data = $waiting_patients_result ? mysqli_fetch_assoc($waiting_patients_result) : ['waiting_patients_count' => 0];
 $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
-?>
 
-<style>
-    .card-stats { 
-        border-radius: 0.75rem; 
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); 
-        transition: transform 0.3s ease; 
-        color: #fff; 
-        border: none;
-    }
-    .card-stats:hover { 
-        transform: translateY(-5px); 
-    }
-    .stat-card-sales { background: linear-gradient(135deg, #4a90e2, #50b0f0); }
-    .stat-card-stock { background: linear-gradient(135deg, #6b7a8f, #4d5e7a); }
-    .stat-card-out-of-stock { background: linear-gradient(135deg, #f5a623, #d0021b); }
-    .stat-card-expired { background: linear-gradient(135deg, #d0021b, #9b1e22); }
-    .stat-card-items { background: linear-gradient(135deg, #34495e, #2c3e50); }
-    .page-breadcrumb { 
-        background-color: #fff; 
-        padding: 1rem; 
-        border-radius: 0.75rem; 
-        margin-bottom: 2rem; 
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); 
-    }
-</style>
+// Output HTML Head
+require_once "../includes/head.php";
+?>
 
 <div id="main-wrapper">
 
     <?php 
-    // Navigation includes
+    // Render Layout Sections
     require_once "../includes/header.php"; 
     require_once "../includes/aside.php"; 
     ?>
@@ -135,7 +110,6 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
             <div class="row g-4">
                 <div class="col-lg-9">
                     <div class="row g-4 mb-4">
-                        <!-- Sell Now -->
                         <div class="col-md-4 col-sm-6">
                             <a href="sell_now.php" class="card card-stats stat-card-sales text-center text-decoration-none h-100">
                                 <div class="card-body py-4">
@@ -144,7 +118,6 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                                 </div>
                             </a>
                         </div>
-                        <!-- Today's Transactions -->
                         <div class="col-md-4 col-sm-6">
                             <a href="today_transactions.php" class="card card-stats stat-card-stock text-center text-decoration-none h-100">
                                 <div class="card-body py-4">
@@ -153,7 +126,6 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                                 </div>
                             </a>
                         </div>
-                        <!-- Out of Stock -->
                         <div class="col-md-4 col-sm-6">
                             <a href="out_of_stock.php" class="card card-stats stat-card-out-of-stock text-center text-decoration-none h-100">
                                 <div class="card-body py-4">
@@ -162,7 +134,6 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                                 </div>
                             </a>
                         </div>
-                        <!-- Expired Products -->
                         <div class="col-md-4 col-sm-6">
                             <a href="expired_products.php" class="card card-stats stat-card-expired text-center text-decoration-none h-100">
                                 <div class="card-body py-4">
@@ -171,7 +142,6 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                                 </div>
                             </a>
                         </div>
-                        <!-- Customer Service -->
                         <div class="col-md-4 col-sm-6">
                             <a href="customers.php" class="card card-stats stat-card-items text-center text-decoration-none h-100">
                                 <div class="card-body py-4">
@@ -180,7 +150,6 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                                 </div>
                             </a>
                         </div>
-                        <!-- Prescription Online -->
                         <div class="col-md-4 col-sm-6">
                             <a href="online_manager.php" class="card card-stats stat-card-out-of-stock text-center text-decoration-none h-100">
                                 <div class="card-body py-4">
@@ -192,7 +161,6 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                     </div>
                 </div>
 
-                <!-- Alerts Sidebar -->
                 <div class="col-lg-3">
                     <div class="card border-0 shadow-sm rounded-3">
                         <div class="card-header bg-white py-3 border-bottom">
@@ -223,6 +191,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
     </div>
 </div>
 
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
