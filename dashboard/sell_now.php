@@ -16,7 +16,7 @@ if (!isset($_SESSION['pharmacy_id']) || !isset($_SESSION['branch_id'])) {
 
 $pharmacy_id = intval($_SESSION['pharmacy_id']);
 $branch_id   = intval($_SESSION['branch_id']);
-$issued_by   = htmlspecialchars($_SESSION['sessionUsername'] ?? 'Staff');
+$issued_by   = htmlspecialchars($_SESSION['sessionUsername'] ?? $_SESSION['full_name'] ?? 'Staff');
 
 // Fetch pharmacy info
 $p_query = mysqli_prepare($conn, "SELECT name, address, phone FROM pharmacies WHERE id = ? LIMIT 1");
@@ -26,11 +26,11 @@ $p_res = mysqli_stmt_get_result($p_query);
 $pharm = mysqli_fetch_assoc($p_res) ?: ['name' => 'Echo Prime Pharmacy', 'address' => 'Zambia', 'phone' => ''];
 
 // Fetch branch info
-$b_query = mysqli_prepare($conn, "SELECT branch_name FROM branches WHERE id = ? LIMIT 1");
+$b_query = mysqli_prepare($conn, "SELECT branch_name, location, phone FROM branches WHERE id = ? LIMIT 1");
 mysqli_stmt_bind_param($b_query, "i", $branch_id);
 mysqli_stmt_execute($b_query);
 $b_res = mysqli_stmt_get_result($b_query);
-$branch = mysqli_fetch_assoc($b_res) ?: ['branch_name' => 'Main Branch'];
+$branch = mysqli_fetch_assoc($b_res) ?: ['branch_name' => 'Main Branch', 'location' => 'Lusaka', 'phone' => ''];
 
 require_once "../includes/head.php";
 ?>
@@ -64,7 +64,7 @@ require_once "../includes/head.php";
     }
 }
 
-/* Search Box & Inputs - High Contrast */
+/* Search Box & Inputs */
 .search-section { position: relative; }
 #product_search { 
     background: #1e1e1e !important; 
@@ -174,6 +174,48 @@ require_once "../includes/head.php";
 
 #empty-cart-msg { text-align: center; margin-top: 60px; color: #aaaaaa; padding: 20px; }
 #empty-cart-msg i { font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.6; }
+
+/* Thermal Receipt Printable Area Styling */
+#receipt-printable {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    color: #000;
+    line-height: 1.3;
+}
+
+.receipt-divider {
+    border-top: 1px dashed #000;
+    margin: 6px 0;
+}
+
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    #receiptModal, #receiptModal * {
+        visibility: visible;
+    }
+    #receiptModal {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        background: #fff !important;
+    }
+    .modal-dialog {
+        max-width: 100% !important;
+        margin: 0 !important;
+    }
+    .modal-content {
+        border: none !important;
+        box-shadow: none !important;
+    }
+    .modal-footer, .btn-close-modal {
+        display: none !important;
+    }
+}
 </style>
 
 <div id="main-wrapper">
@@ -263,52 +305,95 @@ require_once "../includes/head.php";
 <!-- Receipt Modal -->
 <div class="modal fade" id="receiptModal" data-bs-backdrop="static" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-sm modal-dialog-centered">
-        <div class="modal-content shadow-lg border-0">
-            <div class="modal-body text-dark" id="receipt-content" style="font-family: 'Courier New', monospace; font-size: 13px;">
-                <div class="text-center border-bottom pb-2 mb-2">
-                    <h5 class="fw-bold mb-0"><?= strtoupper($pharm['name']) ?></h5>
-                    <small><?= $branch['branch_name'] ?></small><br>
-                    <small><?= $pharm['phone'] ?></small>
-                </div>
-                <div class="d-flex justify-content-between small mb-1">
-                    <span>Invoice: #<span id="rec_invoice"></span></span>
-                    <span id="rec_date"></span>
-                </div>
-                <div class="small mb-2 text-muted">
-                    <span>Issued By: <?= $issued_by ?></span>
+        <div class="modal-content shadow-lg border-0 bg-white">
+            <div class="modal-body text-dark" id="receipt-printable">
+                
+                <!-- Pharmacy Header -->
+                <div class="text-center">
+                    <div class="fw-bold fs-6 text-uppercase"><?= htmlspecialchars($pharm['name']) ?></div>
+                    <div class="small fw-bold"><?= htmlspecialchars($branch['branch_name']) ?></div>
+                    <div class="small"><?= htmlspecialchars($branch['location'] ?? $pharm['address']) ?></div>
+                    <?php if(!empty($pharm['phone'])): ?>
+                        <div class="small">Tel: <?= htmlspecialchars($pharm['phone']) ?></div>
+                    <?php endif; ?>
                 </div>
 
-                <table class="w-100 mb-2" style="border-bottom: 1px dashed #ccc;">
+                <div class="receipt-divider"></div>
+
+                <!-- Transaction Details -->
+                <div class="small">
+                    <div class="d-flex justify-content-between">
+                        <span>Invoice:</span>
+                        <span class="fw-bold" id="rec_invoice"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Date:</span>
+                        <span id="rec_date"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Issued By:</span>
+                        <span><?= htmlspecialchars($issued_by) ?></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Method:</span>
+                        <span class="fw-bold" id="rec_method">CASH</span>
+                    </div>
+                </div>
+
+                <div class="receipt-divider"></div>
+
+                <!-- Items Table -->
+                <table class="w-100 small mb-1">
+                    <thead>
+                        <tr class="border-bottom">
+                            <th class="text-start pb-1">Item</th>
+                            <th class="text-center pb-1">Qty</th>
+                            <th class="text-end pb-1">Total (K)</th>
+                        </tr>
+                    </thead>
                     <tbody id="rec_items"></tbody>
                 </table>
 
-                <div class="d-flex justify-content-between small">
-                    <span>Subtotal</span>
-                    <span>K<span id="rec_subtotal"></span></span>
+                <div class="receipt-divider"></div>
+
+                <!-- Totals Section -->
+                <div class="small">
+                    <div class="d-flex justify-content-between">
+                        <span>Subtotal:</span>
+                        <span>K<span id="rec_subtotal">0.00</span></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>VAT (16%):</span>
+                        <span>K<span id="rec_vat">0.00</span></span>
+                    </div>
+                    <div class="d-flex justify-content-between fw-bold fs-6 mt-1 pt-1 border-top border-dark">
+                        <span>TOTAL:</span>
+                        <span>K<span id="rec_total">0.00</span></span>
+                    </div>
                 </div>
-                <div class="d-flex justify-content-between small mb-1">
-                    <span>VAT (16%)</span>
-                    <span>K<span id="rec_vat"></span></span>
+
+                <div class="receipt-divider"></div>
+
+                <!-- Receipt Footer -->
+                <div class="text-center small mt-2">
+                    <div>Thank you for your business!</div>
+                    <div>Medicines sold are non-refundable.</div>
+                    <div class="fw-bold mt-1">*** Get Well Soon ***</div>
                 </div>
-                <div class="d-flex justify-content-between fw-bold h5 mt-1">
-                    <span>TOTAL</span>
-                    <span>K<span id="rec_total"></span></span>
-                </div>
-                
-                <div class="text-center mt-3 pt-2 border-top">
-                    <small>Thank you for your business!</small>
-                </div>
+
             </div>
-            <div class="modal-footer p-2 border-0">
-                <button type="button" class="btn btn-dark btn-sm flex-grow-1" data-bs-dismiss="modal">Close</button>
+            
+            <div class="modal-footer p-2 border-0 bg-light btn-close-modal">
+                <button type="button" class="btn btn-secondary btn-sm flex-grow-1" data-bs-dismiss="modal">Close</button>
                 <button type="button" class="btn btn-success btn-sm flex-grow-1" onclick="window.print()">Print</button>
             </div>
         </div>
-        <?php 
-if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"; 
-?>
     </div>
 </div>
+
+<?php 
+if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"; 
+?>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -441,7 +526,7 @@ function checkReady() {
 
 function processSale() {
     if(cart.length === 0 || !selectedMethod) return;
-    const total = $('#txt_total').text();
+    const total = parseFloat($('#txt_total').text());
     $('#finalize_btn').prop('disabled', true).text('PROCESSING...');
 
     $.ajax({
@@ -458,22 +543,31 @@ function processSale() {
         success: function(res) {
             if(res.status === 'success') {
                 $('#rec_invoice').text(res.invoice);
-                $('#rec_date').text(new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString());
-                $('#rec_total').text(total);
+                $('#rec_date').text(new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
+                $('#rec_method').text(selectedMethod.toUpperCase());
+                $('#rec_total').text(total.toFixed(2));
                 
-                let subTotalVal = parseFloat(total) / 1.16;
-                let vatVal = parseFloat(total) - subTotalVal;
+                let subTotalVal = total / 1.16;
+                let vatVal = total - subTotalVal;
                 $('#rec_subtotal').text(subTotalVal.toFixed(2));
                 $('#rec_vat').text(vatVal.toFixed(2));
 
                 let itemsHtml = '';
                 cart.forEach(i => {
-                    itemsHtml += `<tr><td>${i.name} x${i.qty}</td><td class='text-end'>K${(i.price * i.qty).toFixed(2)}</td></tr>`;
+                    itemsHtml += `
+                    <tr>
+                        <td class="py-1">${i.name}</td>
+                        <td class="text-center py-1">x${i.qty}</td>
+                        <td class="text-end py-1">K${(i.price * i.qty).toFixed(2)}</td>
+                    </tr>`;
                 });
                 $('#rec_items').html(itemsHtml);
                 
-                new bootstrap.Modal(document.getElementById('receiptModal')).show();
+                // Show thermal receipt modal
+                let receiptModal = new bootstrap.Modal(document.getElementById('receiptModal'));
+                receiptModal.show();
 
+                // Clear POS State
                 cart = []; 
                 renderCart(); 
                 selectedMethod = null;
