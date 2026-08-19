@@ -4,14 +4,14 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start(); 
 } 
 
-require_once "conn.php"; 
+require "conn.php"; 
 
 // 🔹 1. Get IDs from Session
 $pharmacy_id = $_SESSION['pharmacy_id'] ?? 0;
 $user_id = intval($_SESSION['user_id'] ?? 0);
 $branch_id = intval($_SESSION['branch_id'] ?? 0);
 
-// 🔹 2. Fetch Pharmacy Name (Dynamic)
+// 🔹 2. Fetch Pharmacy Name (Dynamic - No Hardcoding)
 $pharmacy_name = "SYSTEM POS"; 
 if ($pharmacy_id > 0) {
     $p_stmt = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
