@@ -2,37 +2,34 @@
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-session_start();
-ob_start();
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
-date_default_timezone_set('Africa/Lusaka');
 
-$pharmacy_id = $_SESSION['pharmacy_id'] ?? null;
-$branch_id   = $_SESSION['branch_id'] ?? null;
-$current_date = date('Y-m-d');
-
-$pharmacy_name = "Pharmacy System";
-$branch_name   = "Main Branch";
-
-if ($pharmacy_id && $branch_id) {
-    $info_sql = "SELECT p.name AS p_name, b.branch_name AS b_name 
-                 FROM pharmacies p 
-                 JOIN branches b ON p.id = b.pharmacy_id 
-                 WHERE p.id = '$pharmacy_id' AND b.id = '$branch_id' LIMIT 1";
-    
-    $info_res = mysqli_query($conn, $info_sql);
-    if ($info_res && $info_row = mysqli_fetch_assoc($info_res)) {
-        $pharmacy_name = $info_row['p_name'];
-        $branch_name   = $info_row['b_name'];
-    }
+if (!isset($_SESSION['pharmacy_id']) || !isset($_SESSION['branch_id'])) {
+    die("<div class='alert alert-danger text-center mt-3'>Session expired. Please log in again.</div>");
 }
 
-/**
- * THE FIX: Added MAX() for cost, price, and expiry_date 
- * so they are available for the while loop and CSV export.
- */
+date_default_timezone_set('Africa/Lusaka');
+
+$p_id = (int)$_SESSION['pharmacy_id'];
+$b_id = (int)$_SESSION['branch_id'];
+
+// 1. Fetch Branding Info
+$info_stmt = mysqli_prepare($conn, "SELECT p.name, b.branch_name FROM pharmacies p JOIN branches b ON b.pharmacy_id = p.id WHERE p.id = ? AND b.id = ? LIMIT 1");
+mysqli_stmt_bind_param($info_stmt, "ii", $p_id, $b_id);
+mysqli_stmt_execute($info_stmt);
+$info_res = mysqli_stmt_get_result($info_stmt);
+$info = mysqli_fetch_assoc($info_res);
+
+$display_pharm = $info['name'] ?? 'PHARMANOVA';
+$display_bran  = $info['branch_name'] ?? 'Main Branch';
+
+// 2. Fetch Out of Stock Items (Grouped by item_name, strength, category, barcode)
 $sql = "SELECT 
             MAX(id) as id, 
             item_name, 
@@ -44,92 +41,184 @@ $sql = "SELECT
             MAX(price) as price,
             MAX(expiry_date) as latest_expiry
         FROM store_items 
-        WHERE pharmacy_id = '$pharmacy_id' 
-        AND branch_id = '$branch_id'
+        WHERE pharmacy_id = ? 
+        AND branch_id = ?
         GROUP BY item_name, strength, category, barcode
         HAVING total_qty <= 0
         ORDER BY item_name ASC";
 
-$out_of_stock_res = mysqli_query($conn, $sql);
+$stmt = mysqli_prepare($conn, $sql);
+mysqli_stmt_bind_param($stmt, "ii", $p_id, $b_id);
+mysqli_stmt_execute($stmt);
+$out_of_stock_res = mysqli_stmt_get_result($stmt);
+
 $export_data = [];
+
+require_once "../includes/head.php";
 ?>
-    <style>
-        body { font-family: 'Poppins', sans-serif; background-color: #f4f6f9; }
-        .page-wrapper { padding: 30px; min-height: 100vh; }
-        .header-section { background: #fff; padding: 25px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 30px; border-left: 5px solid #dc3545; }
-        .table thead th { background-color: #dc3545; color: #fff; text-transform: uppercase; font-size: 11px; padding: 15px; border: none; }
-        .badge-qty { background-color: #ffeded; color: #dc3545; font-weight: 700; padding: 5px 12px; border-radius: 6px; border: 1px solid #ffcccc; }
-    </style>
 
-        <div class="header-section d-flex justify-content-between align-items-center">
-            <div>
-                <h2 class="fw-bold text-dark mb-1"><?php echo strtoupper($pharmacy_name); ?></h2>
-                <p class="text-muted mb-0">Branch: <strong><?php echo $branch_name; ?></strong> | <?php echo date('d F Y'); ?></p>
+<style>
+.report-wrapper {
+    background-color: #ffffff !important;
+    min-height: calc(100vh - 70px);
+    padding: 1.5rem;
+    color: #212529;
+}
+
+.header-section {
+    background: #ffffff;
+    padding: 1.25rem 1.5rem;
+    border-radius: 10px;
+    border: 1px solid #dee2e6;
+    border-left: 5px solid #dc3545;
+    margin-bottom: 1.5rem;
+}
+
+.report-table-container {
+    background-color: #ffffff;
+    border-radius: 10px;
+    border: 1px solid #dee2e6;
+    overflow: hidden;
+}
+
+.report-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.report-table thead th {
+    background: #dc3545;
+    padding: 14px;
+    text-align: left;
+    font-size: 12px;
+    color: #ffffff !important;
+    text-transform: uppercase;
+    border-bottom: 2px solid #b02a37;
+}
+
+.report-table tbody td {
+    padding: 14px;
+    color: #212529;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 14px;
+    vertical-align: middle;
+}
+
+.report-table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.badge-qty {
+    background-color: #ffeded;
+    color: #dc3545;
+    font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid #ffcccc;
+}
+
+@media print {
+    .no-print { display: none !important; }
+    .report-wrapper { padding: 0 !important; }
+}
+</style>
+
+<div id="main-wrapper">
+
+    <?php 
+    if (file_exists("../includes/header.php")) require_once "../includes/header.php"; 
+    if (file_exists("../includes/aside.php")) require_once "../includes/aside.php"; 
+    ?>
+
+    <div class="page-wrapper report-wrapper">
+        <div class="container-fluid p-0">
+            
+            <div class="header-section d-flex justify-content-between align-items-center">
+                <div>
+                    <h3 class="fw-bold text-dark mb-0"><?php echo strtoupper(htmlspecialchars($display_pharm)); ?></h3>
+                    <span class="text-muted small">Branch: <b><?php echo htmlspecialchars($display_bran); ?></b> | Date: <b class="text-dark"><?php echo date('d F Y'); ?></b></span>
+                </div>
+                <div class="no-print">
+                    <button onclick="downloadCSV()" class="btn btn-dark btn-sm px-3 shadow-sm">
+                        <i class="fas fa-file-download me-1"></i> Download Restock List
+                    </button>
+                </div>
             </div>
-            <button onclick="downloadCSV()" class="btn btn-dark btn-lg px-4 shadow-sm">
-                <i class="mdi mdi-file-download"></i> DOWNLOAD RESTOCK LIST
-            </button>
-        </div>
 
-        <div class="card shadow-sm border-0 rounded-3">
-            <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead>
-                        <tr>
-                            <th width="60">#</th>
-                            <th>Product Description</th>
-                            <th>Category</th>
-                            <th>Current Stock</th>
-                            <th class="text-center">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    <?php
-                    $i = 1;
-                    if ($out_of_stock_res && mysqli_num_rows($out_of_stock_res) > 0) {
-                        while ($row = mysqli_fetch_assoc($out_of_stock_res)) {
-                            
-                            // Prepare CSV Data using the correct aggregated keys
-                            $export_data[] = [
-                                $row['item_name'], 
-                                $row['strength'], 
-                                $row['cost'], 
-                                $row['price'],
-                                $row['total_qty'], 
-                                $row['category'], 
-                                $row['barcode'],
-                                ($row['latest_expiry'] != '0000-00-00' && !empty($row['latest_expiry']) ? date('d/m/Y', strtotime($row['latest_expiry'])) : 'N/A')
-                            ];
+            <div class="report-table-container">
+                <div class="table-responsive">
+                    <table class="report-table">
+                        <thead>
+                            <tr>
+                                <th class="ps-3" width="60">#</th>
+                                <th>Product Description</th>
+                                <th>Category</th>
+                                <th>Current Stock</th>
+                                <th class="text-center no-print">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php
+                            $i = 1;
+                            if ($out_of_stock_res && mysqli_num_rows($out_of_stock_res) > 0) {
+                                while ($row = mysqli_fetch_assoc($out_of_stock_res)) {
+                                    
+                                    // Collect data for CSV Export
+                                    $export_data[] = [
+                                        $row['item_name'], 
+                                        $row['strength'], 
+                                        $row['cost'], 
+                                        $row['price'],
+                                        $row['total_qty'], 
+                                        $row['category'], 
+                                        $row['barcode'],
+                                        (!empty($row['latest_expiry']) && $row['latest_expiry'] !== '0000-00-00' ? date('d/m/Y', strtotime($row['latest_expiry'])) : 'N/A')
+                                    ];
 
-                            echo "<tr>
-                                    <td>$i</td>
-                                    <td>
-                                        <div class='fw-bold'>".htmlspecialchars($row['item_name'])."</div>
-                                        <div class='text-muted small'>".htmlspecialchars($row['strength'])."</div>
-                                    </td>
-                                    <td><span class='badge bg-light text-dark border'>".htmlspecialchars($row['category'])."</span></td>
-                                    <td><span class='badge-qty'>{$row['total_qty']}</span></td>
-                                    <td class='text-center'>
-                                        <a href='update_items_stock.php?id={$row['id']}' class='btn btn-success btn-sm px-3'>RESTOCK</a>
-                                    </td>
-                                  </tr>";
-                            $i++;
-                        }
-                    } else {
-                        echo "<tr><td colspan='5' class='text-center p-5 text-muted'>All items are currently in stock for this branch.</td></tr>";
-                    }
-                    ?>
-                    </tbody>
-                </table>
+                                    ?>
+                                    <tr>
+                                        <td class="ps-3 fw-bold text-muted"><?php echo $i; ?></td>
+                                        <td>
+                                            <div class="fw-bold text-dark"><?php echo htmlspecialchars($row['item_name']); ?></div>
+                                            <div class="text-muted small"><?php echo htmlspecialchars($row['strength'] ?: 'N/A'); ?></div>
+                                        </td>
+                                        <td><span class="badge bg-light text-dark border"><?php echo htmlspecialchars($row['category'] ?: 'General'); ?></span></td>
+                                        <td><span class="badge-qty"><?php echo (int)$row['total_qty']; ?></span></td>
+                                        <td class="text-center no-print">
+                                            <a href="update_items_stock.php?id=<?php echo $row['id']; ?>" class="btn btn-success btn-sm px-3">
+                                                <i class="fas fa-plus-circle me-1"></i> RESTOCK
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    <?php
+                                    $i++;
+                                }
+                            } else {
+                                echo "<tr><td colspan='5' class='text-center py-5 text-muted'>All items are currently in stock for this branch.</td></tr>";
+                            }
+                            ?>
+                        </tbody>
+                    </table>
+                </div>
             </div>
+
         </div>
-    </div> 
+    </div>
 </div>
+
+<?php 
+if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"; 
+?>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
 function downloadCSV() {
     const data = <?php echo json_encode($export_data); ?>;
-    if (data.length === 0) return alert("No items to export!");
+    if (!data || data.length === 0) {
+        alert("No items to export!");
+        return;
+    }
     const headers = ["Product Name", "Strength", "Cost Price", "Selling Price", "Quantity", "Category", "Barcode", "Expiry Date (DD/MM/YYYY)"];
     let csvContent = headers.join(",") + "\n";
     data.forEach(row => {
@@ -140,10 +229,10 @@ function downloadCSV() {
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.setAttribute("download", "RESTOCK_<?php echo date('d_m_Y'); ?>.csv");
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
 }
 </script>
-<?php
-$content = ob_get_clean();
-require "../includes/myheader.php"; 
-?>
+</body>
+</html>
