@@ -5,15 +5,14 @@ error_reporting(E_ALL);
 session_start();
 ob_start();
 
-// Include header and core files
-//require "../includes/myheader.php"; 
+// Include database and authentication setup
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
 
-// 💥 START BRANCH FILTER SETUP 💥
+// START BRANCH FILTER SETUP
 $branch_id = isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : 1; 
 $pharmacy_id = $_SESSION['pharmacy_id'] ?? ''; 
-// 💥 END BRANCH FILTER SETUP 💥
+// END BRANCH FILTER SETUP
 
 // Generate unique invoice number
 function generateInvoiceNumber() {
@@ -73,10 +72,11 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
 <html dir="ltr" lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard</title>
     <style>
         body { font-family: 'Poppins', sans-serif; background-color: #f0f2f5; }
-        .page-wrapper { flex-grow: 1; padding: 2rem; min-height: 100vh; display: flex; flex-direction: column; }
+        .page-wrapper { flex-grow: 1; padding: 1rem; min-height: 100vh; display: flex; flex-direction: column; }
         .card-stats { background-color: #fff; border-radius: 0.75rem; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); transition: transform 0.3s ease; color: #fff; }
         .card-stats:hover { transform: translateY(-5px); }
         .card-stats .card-body { background-color: rgba(0, 0, 0, 0.1); border-radius: 0.75rem; }
@@ -85,37 +85,45 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
         .stat-card-out-of-stock { background-image: linear-gradient(to right, #f5a623, #d0021b); }
         .stat-card-expired { background-image: linear-gradient(to right, #d0021b, #9b1e22); }
         .stat-card-items { background-image: linear-gradient(to right, #34495e, #2c3e50); }
-        .page-breadcrumb { background-color: #fff; padding: 1rem; border-radius: 0.75rem; margin-bottom: 2rem; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
-        
+        .page-breadcrumb { background-color: #fff; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
+
+        /* Responsive Mobile Adjustments */
+        @media (max-width: 768px) {
+            .page-breadcrumb .row { flex-direction: column; gap: 0.75rem; text-align: center; }
+            .action-links { flex-wrap: wrap; justify-content: center !important; gap: 0.5rem; }
+            .action-links a { margin: 0.2rem !important; font-size: 0.875rem; }
+            .btn-add-patient { width: 100%; margin-top: 0.5rem; }
+            .page-wrapper { padding: 0.5rem; }
+        }
     </style>
 </head>
 <body>
     <div class="page-breadcrumb">
         <div class="row align-items-center">
-            <div class="col">
-                <h4 class="page-title">Dashboard</h4>
+            <div class="col-12 col-md-3 text-center text-md-start mb-2 mb-md-0">
+                <h4 class="page-title mb-0">Dashboard</h4>
                 <nav aria-label="breadcrumb">
-                    <ol class="breadcrumb mb-0 p-0">
+                    <ol class="breadcrumb mb-0 p-0 justify-content-center justify-content-md-start">
                         <li class="breadcrumb-item"><a href="#">Home</a></li>
                     </ol>
                 </nav>
             </div>
-            <div class="col-auto d-flex justify-content-center align-items-center">
+            <div class="col-12 col-md-6 d-flex justify-content-center align-items-center action-links mb-2 mb-md-0">
                 <a href="sell_now.php" class="text-dark mx-2"><i class="mdi mdi-cash-multiple me-1"></i> Sell Now</a>
                 <a href="lay_by_sell.php" class="text-dark mx-2"><i class="mdi mdi-credit-card-plus me-1"></i> Lay-By Sell</a>
                 <a href="expenses.php" class="text-dark mx-2"><i class="mdi mdi-chart-bar me-1"></i> Expenses</a>
                 <a href="sales_report.php" class="text-dark mx-2"><i class="mdi mdi-chart-line me-1"></i> Sales Report</a>
                 <a class="text-dark mx-2" href="sales_trend.php"><i class="fas fa-chart-line me-1"></i> Sales Trend</a>
             </div>
-            <div class="col-auto ms-auto">
-                <a href="add_patients.php?invoice=<?php echo $invoice_number; ?>" class="btn btn-primary text-white shadow-sm">
+            <div class="col-12 col-md-3 text-center text-md-end">
+                <a href="add_patients.php?invoice=<?php echo $invoice_number; ?>" class="btn btn-primary text-white shadow-sm btn-add-patient">
                     <i class="fas fa-user-plus me-2"></i> Add Patient
                 </a>
             </div>
         </div>
     </div>
 
-    <div class="container-fluid">
+    <div class="container-fluid p-0">
         <?php if (isset($_SESSION['status'])): ?>
             <div class="alert alert-<?php echo $_SESSION['status'] == 'success' ? 'success' : 'danger'; ?> alert-dismissible fade show" role="alert">
                 <?php echo $_SESSION['message']; ?>
@@ -124,12 +132,12 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
             <?php unset($_SESSION['status'], $_SESSION['message']); ?>
         <?php endif; ?>
 
-        <div class="row g-4">
-            <div class="col-lg-9">
-                <div class="row g-4 mb-4">
+        <div class="row g-3">
+            <div class="col-12 col-lg-9">
+                <div class="row g-3 mb-3">
                     <!-- Dashboard Cards -->
                     <!-- Sell Now -->
-                    <div class="col-sm-4">
+                    <div class="col-12 col-sm-6 col-md-4">
                         <a href="sell_now.php" class="card card-stats stat-card-sales text-center text-decoration-none h-100">
                             <div class="card-body py-4">
                                 <h4 class="mb-0 text-white">Sell Now</h4>
@@ -138,7 +146,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                         </a>
                     </div>
                     <!-- Today's Transactions -->
-                    <div class="col-sm-4">
+                    <div class="col-12 col-sm-6 col-md-4">
                         <a href="today_transactions.php" class="card card-stats stat-card-stock text-center text-decoration-none h-100">
                             <div class="card-body py-4">
                                 <h5 class="mb-0 text-white">Today's Transactions</h5>
@@ -147,7 +155,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                         </a>
                     </div>
                     <!-- Out of Stock -->
-                    <div class="col-sm-4">
+                    <div class="col-12 col-sm-6 col-md-4">
                         <a href="out_of_stock.php" class="card card-stats stat-card-out-of-stock text-center text-decoration-none h-100">
                             <div class="card-body py-4">
                                 <h4 class="mb-0 text-white">Out of Stock</h4>
@@ -156,7 +164,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                         </a>
                     </div>
                     <!-- Expired Products -->
-                    <div class="col-sm-4">
+                    <div class="col-12 col-sm-6 col-md-4">
                         <a href="expired_products.php" class="card card-stats stat-card-expired text-center text-decoration-none h-100">
                             <div class="card-body py-4">
                                 <h4 class="mb-0 text-white">Expired Products</h4>
@@ -165,7 +173,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                         </a>
                     </div>
                     <!-- Customer Service -->
-                    <div class="col-sm-4">
+                    <div class="col-12 col-sm-6 col-md-4">
                         <a href="customers.php" class="card card-stats stat-card-items text-center text-decoration-none h-100">
                             <div class="card-body py-4">
                                 <h4 class="mb-0 text-white">Customer</h4>
@@ -174,7 +182,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
                         </a>
                     </div>
                     <!-- Prescription Online -->
-                    <div class="col-sm-4">
+                    <div class="col-12 col-sm-6 col-md-4">
                         <a href="online_manager.php" class="text-decoration-none">
                             <div class="card card-stats stat-card-out-of-stock text-center h-100">
                                 <div class="card-body py-4">
@@ -188,7 +196,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
             </div>
 
             <!-- Alerts Sidebar -->
-            <div class="col-lg-3">
+            <div class="col-12 col-lg-3">
                 <div class="card border-0 shadow-sm rounded-3">
                     <div class="card-header bg-white py-3">
                         <h5 class="fw-bold mb-0 text-primary"><i class="mdi mdi-bell-ring-outline me-2"></i>Urgent Alerts</h5>
@@ -215,11 +223,8 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
             </div>
         </div>
     </div>
-</div>
-
 </body>
 </html>
-</script>
 
 <?php
 $content = ob_get_clean();
