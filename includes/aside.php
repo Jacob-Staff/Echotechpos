@@ -1,3 +1,22 @@
+<?php
+$user_id = $_SESSION['user_id'] ?? 19;
+$user_q = mysqli_query($conn, "SELECT full_name, username, role, profile_pic FROM users WHERE id = '$user_id'");
+$user_data = mysqli_fetch_assoc($user_q);
+
+$display_name = !empty($user_data['full_name']) ? $user_data['full_name'] : ($user_data['username'] ?? 'User');
+$display_role = $user_data['role'] ?? 'Staff';
+?>
+
+<div class="user-profile-box">
+    <div class="user-avatar">
+        <i class="fas fa-user"></i>
+    </div>
+    <div class="user-info">
+        <h6 class="mb-0 text-white fw-bold"><?php echo htmlspecialchars($display_name); ?></h6>
+        <small class="text-muted"><?php echo htmlspecialchars($display_role); ?></small>
+    </div>
+</div>
+
 <aside class="left-sidebar">
     <div>
         <!-- High Contrast Staff Profile Container -->
