@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>PHARMANOVA - Dashboard</title>
 
-    <!-- CDN Libraries (No local file dependence) -->
+    <!-- Core CDN CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
@@ -73,9 +73,29 @@
             display: block !important;
         }
 
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: #b2c0ce;
+            text-decoration: none;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+
+        .sidebar-link:hover, .sidebar-link.active {
+            color: #fff;
+            background: #34495e;
+        }
+
+        .sidebar-link i {
+            margin-right: 12px;
+            font-size: 1.1rem;
+        }
+
         .page-wrapper { 
             margin-left: 250px !important;
-            padding-top: 80px !important;
+            padding-top: 84px !important;
             padding-left: 20px !important;
             padding-right: 20px !important;
             padding-bottom: 20px !important;
@@ -91,9 +111,11 @@
             color: #fff; 
             border: none;
         }
+
         .card-stats:hover { 
             transform: translateY(-5px); 
         }
+
         .stat-card-sales { background: linear-gradient(135deg, #4a90e2, #50b0f0); }
         .stat-card-stock { background: linear-gradient(135deg, #6b7a8f, #4d5e7a); }
         .stat-card-out-of-stock { background: linear-gradient(135deg, #f5a623, #d0021b); }
@@ -104,7 +126,7 @@
             background-color: #fff; 
             padding: 1rem; 
             border-radius: 0.75rem; 
-            margin-bottom: 2rem; 
+            margin-bottom: 1.5rem; 
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); 
         }
 
