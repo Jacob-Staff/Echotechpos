@@ -7,10 +7,9 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-ob_start();
-
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
+require_once "../includes/header.php";
 
 date_default_timezone_set('Africa/Lusaka');
 
@@ -65,27 +64,7 @@ if ($result) {
 }
 ?>
 
-<style>
-    .stat-card { border: none; border-radius: 4px; color: white; margin-bottom: 20px; }
-    .bg-matrix-cyan { background: #22a7f0 !important; box-shadow: 0 4px 10px rgba(34, 167, 240, 0.2); }
-    .bg-matrix-orange { background: #ffb848 !important; box-shadow: 0 4px 10px rgba(255, 184, 72, 0.2); }
-    .stat-card .card-body { padding: 18px 22px; }
-    .stat-card h2 { font-size: 1.8rem; margin: 0; font-weight: 700; color: #fff; }
-    .stat-card p { margin: 0; opacity: 0.9; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #fff; }
-
-    .table-box { background: #fff; border-radius: 4px; border: 1px solid #e9ecef; }
-    .table thead th { background-color: #1f262d !important; color: #fff !important; font-size: 12px; padding: 15px 12px; }
-    .table tbody td { font-size: 13.5px; padding: 12px; vertical-align: middle; border-bottom: 1px solid #f8f9fa; }
-    
-    .item-list { color: #444; max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-    @media print {
-        .no-print { display: none !important; }
-        .page-wrapper { padding: 0; }
-    }
-</style>
-
-<div class="container-fluid page-wrapper">
+<div class="page-wrapper" style="padding: 20px;">
     <div class="row align-items-center mb-4">
         <div class="col-md-6">
             <h4 class="fw-bold text-dark mb-0"><?php echo strtoupper(htmlspecialchars($display_pharm)); ?></h4>
@@ -103,34 +82,34 @@ if ($result) {
 
     <div class="row g-3">
         <div class="col-md-3">
-            <div class="card stat-card bg-matrix-cyan">
-                <div class="card-body">
-                    <p>REVENUE (<?php echo strtoupper(date('d M Y', strtotime($filter_date))); ?>)</p>
-                    <h2>K<?php echo number_format($total_revenue, 2); ?></h2>
+            <div class="card stat-card" style="background-color: #22a7f0; color: white; border: none; border-radius: 4px;">
+                <div class="card-body" style="padding: 18px 22px;">
+                    <p style="margin:0; opacity:0.9; font-size:0.75rem; font-weight:600; text-transform:uppercase;">REVENUE (<?php echo strtoupper(date('d M Y', strtotime($filter_date))); ?>)</p>
+                    <h2 style="font-size: 1.8rem; margin:0; font-weight:700; color:#fff;">K<?php echo number_format($total_revenue, 2); ?></h2>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card stat-card bg-matrix-orange">
-                <div class="card-body">
-                    <p>TOTAL INVOICES</p>
-                    <h2><?php echo $total_invoices; ?></h2>
+            <div class="card stat-card" style="background-color: #ffb848; color: white; border: none; border-radius: 4px;">
+                <div class="card-body" style="padding: 18px 22px;">
+                    <p style="margin:0; opacity:0.9; font-size:0.75rem; font-weight:600; text-transform:uppercase;">TOTAL INVOICES</p>
+                    <h2 style="font-size: 1.8rem; margin:0; font-weight:700; color:#fff;"><?php echo $total_invoices; ?></h2>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="table-box shadow-sm mt-3">
+    <div class="table-box shadow-sm mt-4" style="background: #fff; border-radius: 4px; border: 1px solid #e9ecef;">
         <div class="table-responsive">
             <table class="table table-hover mb-0">
                 <thead>
-                    <tr>
-                        <th class="ps-3">Invoice #</th>
-                        <th>Medicines Sold</th>
-                        <th>Time</th>
-                        <th>Handled By</th>
-                        <th class="text-end pe-3">Total (ZMW)</th>
-                        <th class="text-center no-print">Action</th>
+                    <tr style="background-color: #1f262d; color: #fff;">
+                        <th class="ps-3" style="background-color: #1f262d; color: #fff; padding: 15px 12px;">Invoice #</th>
+                        <th style="background-color: #1f262d; color: #fff; padding: 15px 12px;">Medicines Sold</th>
+                        <th style="background-color: #1f262d; color: #fff; padding: 15px 12px;">Time</th>
+                        <th style="background-color: #1f262d; color: #fff; padding: 15px 12px;">Handled By</th>
+                        <th class="text-end pe-3" style="background-color: #1f262d; color: #fff; padding: 15px 12px;">Total (ZMW)</th>
+                        <th class="text-center no-print" style="background-color: #1f262d; color: #fff; padding: 15px 12px;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -138,7 +117,7 @@ if ($result) {
                         <?php foreach ($sales_data as $row): ?>
                             <tr>
                                 <td class="ps-3 fw-bold text-info">#<?php echo htmlspecialchars($row['invoice']); ?></td>
-                                <td class="item-list"><?php echo htmlspecialchars($row['items_sold'] ?: 'No items'); ?></td>
+                                <td style="max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><?php echo htmlspecialchars($row['items_sold'] ?: 'No items'); ?></td>
                                 <td><?php echo date('h:i A', strtotime($row['created_at'])); ?></td>
                                 <td><?php echo htmlspecialchars($row['issuer']); ?></td>
                                 <td class="text-end pe-3 fw-bold text-dark">K<?php echo number_format($row['total_amount'] ?? $row['total'], 2); ?></td>
@@ -159,6 +138,7 @@ if ($result) {
 </div>
 
 <?php 
-$content = ob_get_clean();
-require_once "../includes/header.php"; 
+if (file_exists("../includes/footer.php")) {
+    require_once "../includes/footer.php"; 
+}
 ?>
