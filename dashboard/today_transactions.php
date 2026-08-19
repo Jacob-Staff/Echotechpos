@@ -2,18 +2,20 @@
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+session_start();
+ob_start();
 
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
 
+if (!isset($_SESSION['pharmacy_id']) || !isset($_SESSION['branch_id'])) {
+    die("<div class='alert alert-danger text-center mt-3'>Session expired. Please log in again.</div>");
+}
+
 date_default_timezone_set('Africa/Lusaka');
 
-$p_id = (int)($_SESSION['pharmacy_id'] ?? 0);
-$b_id = (int)($_SESSION['branch_id'] ?? 0);
+$p_id = (int)$_SESSION['pharmacy_id'];
+$b_id = (int)$_SESSION['branch_id'];
 
 // Capture Date from GET request, default to Today
 $filter_date = isset($_GET['filter_date']) ? $_GET['filter_date'] : date('Y-m-d');
@@ -29,7 +31,7 @@ $info = mysqli_fetch_assoc($info_res);
 $display_pharm = $info['name'] ?? 'PHARMANOVA';
 $display_bran  = $info['branch_name'] ?? 'Pharmanova LSK';
 
-// 2. Query sales data with 9 prepared statement placeholders ("iisiisiis")
+// 2. Query sales data (9 bound parameters matching 'iisiisiis')
 $sql = "SELECT s.*, u.username as issuer,
         (SELECT GROUP_CONCAT(st.item_name SEPARATOR ', ') 
          FROM sales_items si 
@@ -49,7 +51,9 @@ mysqli_stmt_bind_param($stmt, "iisiisiis", $p_id, $b_id, $filter_date, $p_id, $b
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
 
-$total_revenue = 0; $total_invoices = 0; $sales_data = [];
+$total_revenue = 0; 
+$total_invoices = 0; 
+$sales_data = [];
 
 if ($result) {
     while ($row = mysqli_fetch_assoc($result)) {
@@ -58,46 +62,107 @@ if ($result) {
         $total_invoices = $row['day_count'] ?? 0;
     }
 }
-
-// Import header layout template (includes <head>, header bar, and sidebar)
-require_once "../includes/header.php";
 ?>
+
+<style>
+:root { --neon-green: #00ffae; --dark-bg: #0f0f0f; --panel-bg: #1a1a1a; --row-hover: #252525; }
+
+.page-wrapper { 
+    background-color: var(--dark-bg) !important;
+    margin-left: 250px !important; 
+    padding-top: 64px !important; 
+    min-height: 100vh !important; 
+    color: #eee;
+}
+
+.stat-card {
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 1.25rem;
+}
+
+.stat-card-cyan {
+    border-left: 4px solid #00a8ff;
+}
+
+.stat-card-orange {
+    border-left: 4px solid #fbc531;
+}
+
+.report-table-container {
+    background-color: var(--panel-bg);
+    border-radius: 15px;
+    border: 1px solid #222;
+    overflow: hidden;
+}
+
+.report-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.report-table thead th {
+    background: #222;
+    padding: 15px;
+    text-align: left;
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+}
+
+.report-table tbody td {
+    padding: 15px;
+    color: #eee;
+    border-bottom: 1px solid #222;
+    font-size: 13.5px;
+}
+
+.report-table tbody tr:hover {
+    background: var(--row-hover);
+}
+
+@media print {
+    .no-print { display: none !important; }
+    .page-wrapper { margin-left: 0 !important; padding-top: 0 !important; background: white !important; color: black !important; }
+}
+</style>
 
 <div class="page-wrapper p-4">
     <div class="container-fluid">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <div>
-                <h3 class="fw-bold text-light mb-0"><?php echo strtoupper(htmlspecialchars($display_pharm)); ?></h3>
-                <span class="text-muted small">Report for: <b><?php echo $display_date; ?></b></span>
+                <h3 class="fw-bold text-white mb-0"><?php echo strtoupper(htmlspecialchars($display_pharm)); ?></h3>
+                <span class="text-muted small">Report for: <b class="text-white"><?php echo $display_date; ?></b></span>
             </div>
             <div class="no-print">
                 <form method="GET" class="d-inline-flex gap-2">
-                    <input type="date" name="filter_date" class="form-control form-control-sm bg-dark text-light border-secondary" value="<?php echo $filter_date; ?>" onchange="this.form.submit()">
-                    <button type="button" class="btn btn-secondary btn-sm px-3" onclick="window.print()">
-                        <i class="bi bi-printer me-1"></i> Print
+                    <input type="date" name="filter_date" class="form-control form-control-sm bg-dark text-white border-secondary" value="<?php echo $filter_date; ?>" onchange="this.form.submit()">
+                    <button type="button" class="btn btn-outline-light btn-sm px-3" onclick="window.print()">
+                        <i class="fas fa-print me-1"></i> Print
                     </button>
                 </form>
             </div>
         </div>
 
-        <div class="row g-3">
+        <div class="row g-3 mb-4">
             <div class="col-md-3">
-                <div class="p-3 rounded text-white" style="background-color: #00a8ff;">
-                    <div class="small fw-bold text-uppercase opacity-75">Revenue (<?php echo $display_date; ?>)</div>
-                    <div class="fs-2 fw-bold">K<?php echo number_format($total_revenue, 2); ?></div>
+                <div class="stat-card stat-card-cyan">
+                    <div class="small fw-bold text-uppercase text-muted">Revenue (<?php echo $display_date; ?>)</div>
+                    <div class="h2 mb-0 fw-bold text-info">K<?php echo number_format($total_revenue, 2); ?></div>
                 </div>
             </div>
             <div class="col-md-3">
-                <div class="p-3 rounded text-dark" style="background-color: #fbc531;">
-                    <div class="small fw-bold text-uppercase opacity-75">Total Invoices</div>
-                    <div class="fs-2 fw-bold"><?php echo $total_invoices; ?></div>
+                <div class="stat-card stat-card-orange">
+                    <div class="small fw-bold text-uppercase text-muted">Total Invoices</div>
+                    <div class="h2 mb-0 fw-bold text-warning"><?php echo $total_invoices; ?></div>
                 </div>
             </div>
         </div>
 
-        <div class="card bg-dark text-light border-secondary mt-4">
+        <div class="report-table-container">
             <div class="table-responsive">
-                <table class="table table-dark table-hover mb-0">
+                <table class="report-table">
                     <thead>
                         <tr>
                             <th class="ps-3">Invoice #</th>
@@ -116,10 +181,10 @@ require_once "../includes/header.php";
                                     <td><?php echo htmlspecialchars($row['items_sold'] ?: 'No items'); ?></td>
                                     <td><?php echo date('h:i A', strtotime($row['created_at'])); ?></td>
                                     <td><?php echo htmlspecialchars($row['issuer'] ?? 'System'); ?></td>
-                                    <td class="text-end pe-3 fw-bold">K<?php echo number_format($row['total_amount'], 2); ?></td>
+                                    <td class="text-end pe-3 fw-bold text-success">K<?php echo number_format($row['total_amount'], 2); ?></td>
                                     <td class="text-center no-print">
                                         <a href="view_invoice.php?id=<?php echo $row['id']; ?>" class="text-info">
-                                            <i class="bi bi-eye"></i>
+                                            <i class="fas fa-eye"></i>
                                         </a>
                                     </td>
                                 </tr>
@@ -136,7 +201,7 @@ require_once "../includes/header.php";
     </div>
 </div>
 
-<?php 
-// Import footer template
-require_once "../includes/footer.php"; 
+<?php
+$content = ob_get_clean();
+require "../includes/myheader.php"; 
 ?>
