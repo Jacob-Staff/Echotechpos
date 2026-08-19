@@ -137,11 +137,10 @@ require_once "../includes/head.php";
                         </div>
                     </div>
                 </div>
-                <?php 
-
             </div>
         </div>
     </div>
+    <?php 
                     // Add your footer component here
     if (file_exists("../includes/footer.php")) {
         require_once "../includes/footer.php"; 
