@@ -26,6 +26,21 @@ $branch_id   = (int)$_SESSION['branch_id'];
 $today       = date('Y-m-d');
 
 // ==============================
+// 🏢 FETCH BRANCH NAME FROM DB
+// ==============================
+$branch_name = "Unknown Branch";
+$branch_stmt = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ?");
+if ($branch_stmt) {
+    $branch_stmt->bind_param("ii", $branch_id, $pharmacy_id);
+    $branch_stmt->execute();
+    $b_res = $branch_stmt->get_result();
+    if ($b_row = $b_res->fetch_assoc()) {
+        $branch_name = $b_row['branch_name'];
+        $_SESSION['branch_name'] = $branch_name; // Sync back to session
+    }
+}
+
+// ==============================
 // 🔒 SAFE INPUT HANDLING
 // ==============================
 $search   = trim($_GET['search'] ?? '');
@@ -64,7 +79,7 @@ $pending_labs = getCount($conn, "lab_results", $pharmacy_id, $branch_id);
 $pending_help = getCount($conn, "help_inquiries", $pharmacy_id, $branch_id);
 
 // ==============================
-// 🔍 BUILD FILTER QUERY (STRICT MODE COMPATIBLE)
+// 🔍 BUILD FILTER QUERY
 // ==============================
 $where = "WHERE pharmacy_id = ? AND branch_id = ? 
           AND quantity > 0 
@@ -173,7 +188,6 @@ require_once "../includes/head.php";
     padding: 10px;
 }
 
-/* Dynamic responsive rules */
 @media (max-width: 767.98px) {
     .page-wrapper-full {
         padding: 0.75rem;
@@ -199,7 +213,6 @@ require_once "../includes/head.php";
 <div id="main-wrapper">
 
     <?php 
-    // Included Top Header ONLY (No sidebar)
     if (file_exists("../includes/header.php")) require_once "../includes/header.php"; 
     ?>
 
@@ -211,7 +224,7 @@ require_once "../includes/head.php";
                     <div>
                         <h2 class="fw-bold text-dark mb-0 page-title">ONLINE INVENTORY MANAGER</h2>
                         <span class="badge bg-light text-dark border mt-1">
-                            📍 <?php echo e($_SESSION['branch_name'] ?? 'Main Branch'); ?>
+                            📍 <?php echo e($branch_name); ?>
                         </span>
                     </div>
 
@@ -461,17 +474,14 @@ if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"
 
 <script>
 $(document).ready(function() {
-    // 1. SELECT ALL LOGIC
     $('#selectAll').on('click', function(){
         $('.item-checkbox').prop('checked', this.checked);
     });
 
-    // 2. HELP MODAL HANDLING
     $('#helpModal').on('shown.bs.modal', function () {
         loadHelpMessages();
     });
 
-    // 3. CLINICAL FORM SUBMISSION
     $(document).on('submit', '#clinicalForm', function(e) {
         e.preventDefault();
         e.stopPropagation();
@@ -505,7 +515,6 @@ $(document).ready(function() {
     });
 });
 
-// 4. LOAD HELP DATA
 function loadHelpMessages() {
     $('#helpContent').html('<div class="text-center p-4"><div class="spinner-border text-primary"></div><p class="mt-2 text-muted">Fetching inquiries...</p></div>');
     $.ajax({
@@ -521,7 +530,6 @@ function loadHelpMessages() {
     });
 }
 
-// 5. OPEN CLINICAL MODAL & FETCH DATA
 function openClinicalModal(id, name) {
     $('#clinicalProdName').text(name);
     $('#clin_prod_id').val(id);
@@ -548,7 +556,6 @@ function openClinicalModal(id, name) {
     });
 }
 
-// 6. OTHER TOOLS
 function toggleOffer(id, name, price, isOffer){
     if(isOffer){
         if(confirm("Remove offer from " + name + "?")){
