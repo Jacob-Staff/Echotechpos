@@ -6,7 +6,7 @@ session_start();
 ob_start();
 
 // Include header and core files
-//require "../includes/myheader.php"; 
+//require "../includes/header.php"; 
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
 
