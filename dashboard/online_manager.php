@@ -64,7 +64,7 @@ $pending_labs = getCount($conn, "lab_results", $pharmacy_id, $branch_id);
 $pending_help = getCount($conn, "help_inquiries", $pharmacy_id, $branch_id);
 
 // ==============================
-// 🔍 BUILD FILTER QUERY (FIXED STRICT MODE)
+// 🔍 BUILD FILTER QUERY (STRICT MODE COMPATIBLE)
 // ==============================
 $where = "WHERE pharmacy_id = ? AND branch_id = ? 
           AND quantity > 0 
@@ -110,40 +110,37 @@ require_once "../includes/head.php";
 ?>
 
 <style>
-/* Layout fix for fixed header spacing */
+/* Header & Layout spacing fix */
 #main-wrapper {
-    padding-top: 75px !important; /* Pushes page content below top header bar */
+    padding-top: 75px !important;
 }
 
 .page-wrapper-full {
     background-color: #f8f9fa !important;
     min-height: calc(100vh - 75px);
-    padding: 1.5rem;
-    margin-left: 0 !important; /* Header only - no sidebar */
+    padding: 1rem;
+    margin-left: 0 !important;
 }
 
 .header-section { 
     background: #ffffff;
-    padding: 20px 25px;
+    padding: 15px 20px;
     border-radius: 12px;
-    margin-bottom: 20px;
+    margin-bottom: 15px;
     border: 1px solid #dee2e6;
 }
 
 .bulk-action-bar { 
     background: #212529;
     color: #ffffff;
-    padding: 12px 20px;
+    padding: 12px 15px;
     border-radius: 10px;
     margin-bottom: 15px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center; 
 }
 
 .prod-img { 
-    width: 55px; 
-    height: 55px; 
+    width: 50px; 
+    height: 50px; 
     object-fit: cover; 
     border-radius: 8px; 
     border: 1px solid #dee2e6; 
@@ -168,19 +165,41 @@ require_once "../includes/head.php";
     font-size: 11px; 
     text-transform: uppercase; 
     border: none; 
-    padding: 12px; 
+    padding: 10px; 
 }
 
 .table tbody td {
     vertical-align: middle;
-    padding: 12px;
+    padding: 10px;
+}
+
+/* Dynamic responsive rules */
+@media (max-width: 767.98px) {
+    .page-wrapper-full {
+        padding: 0.75rem;
+    }
+    .header-section {
+        padding: 15px;
+    }
+    .page-title {
+        font-size: 1.35rem;
+    }
+    .btn-action-group {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+    .btn-action-group .btn {
+        width: 100%;
+    }
 }
 </style>
 
 <div id="main-wrapper">
 
     <?php 
-    // Included Top Header ONLY (No aside.php / Sidebar)
+    // Included Top Header ONLY (No sidebar)
     if (file_exists("../includes/header.php")) require_once "../includes/header.php"; 
     ?>
 
@@ -188,30 +207,30 @@ require_once "../includes/head.php";
         <div class="container-fluid p-0">
 
             <div class="header-section shadow-sm">
-                <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
-                    <div class="mt-2">
-                        <h2 class="fw-bold text-dark mb-0">ONLINE INVENTORY MANAGER</h2>
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3 mb-3">
+                    <div>
+                        <h2 class="fw-bold text-dark mb-0 page-title">ONLINE INVENTORY MANAGER</h2>
                         <span class="badge bg-light text-dark border mt-1">
                             📍 <?php echo e($_SESSION['branch_name'] ?? 'Main Branch'); ?>
                         </span>
                     </div>
 
-                    <div class="d-flex gap-2 flex-wrap align-items-center pt-2">
-                        <a href="view_prescriptions.php" class="btn btn-warning position-relative btn-sm px-3 fw-bold">
+                    <div class="btn-action-group">
+                        <a href="view_prescriptions.php" class="btn btn-warning position-relative btn-sm fw-bold">
                             Prescriptions
                             <?php if($pending_rx): ?>
                                 <span class="badge bg-danger position-absolute top-0 start-100 translate-middle"><?php echo $pending_rx; ?></span>
                             <?php endif; ?>
                         </a>
 
-                        <a href="view_lab_results.php" class="btn btn-primary position-relative btn-sm px-3 fw-bold">
+                        <a href="view_lab_results.php" class="btn btn-primary position-relative btn-sm fw-bold">
                             Lab Results
                             <?php if($pending_labs): ?>
                                 <span class="badge bg-danger position-absolute top-0 start-100 translate-middle"><?php echo $pending_labs; ?></span>
                             <?php endif; ?>
                         </a>
 
-                        <button type="button" class="btn btn-info position-relative text-white btn-sm px-3 fw-bold" data-bs-toggle="modal" data-bs-target="#helpModal">
+                        <button type="button" class="btn btn-info position-relative text-white btn-sm fw-bold" data-bs-toggle="modal" data-bs-target="#helpModal">
                             <i class="fas fa-question-circle me-1"></i> Help
                             <?php if($pending_help): ?>
                                 <span class="badge bg-danger position-absolute top-0 start-100 translate-middle">
@@ -220,15 +239,15 @@ require_once "../includes/head.php";
                             <?php endif; ?>
                         </button>
 
-                        <a href="dashboard.php" class="btn btn-dark btn-sm px-3 fw-bold">Dashboard</a>
+                        <a href="dashboard.php" class="btn btn-dark btn-sm fw-bold">Dashboard</a>
                     </div>
                 </div>
 
-                <form method="GET" class="row g-3">
-                    <div class="col-md-5">
+                <form method="GET" class="row g-2">
+                    <div class="col-12 col-md-5">
                         <input type="text" name="search" class="form-control" placeholder="Search item or barcode..." value="<?php echo e($search); ?>">
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-12 col-md-4">
                         <select name="category" class="form-select" onchange="this.form.submit()">
                             <option value="">All Categories</option>
                             <?php while($c = $cat_res->fetch_assoc()): ?>
@@ -238,28 +257,28 @@ require_once "../includes/head.php";
                             <?php endwhile; ?>
                         </select>
                     </div>
-                    <div class="col-md-3">
-                        <button type="submit" class="btn btn-primary w-100">Apply Filter</button>
+                    <div class="col-12 col-md-3">
+                        <button type="submit" class="btn btn-primary w-100 fw-bold">Apply Filter</button>
                     </div>
                 </form>
             </div>
 
             <form method="POST" action="process_bulk_online.php" id="bulkForm">
-                <div class="bulk-action-bar shadow-sm">
+                <div class="bulk-action-bar shadow-sm d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
                     <label class="mb-0 cursor-pointer fw-bold"><input type="checkbox" id="selectAll" class="me-2"> Select All Items</label>
-                    <div>
-                        <button name="action" value="online" class="btn btn-sm btn-success me-2 fw-bold">Bulk Online</button>
-                        <button name="action" value="offline" class="btn btn-sm btn-danger fw-bold">Bulk Offline</button>
+                    <div class="w-100 w-sm-auto d-flex gap-2">
+                        <button name="action" value="online" class="btn btn-sm btn-success flex-fill flex-sm-grow-0 fw-bold">Bulk Online</button>
+                        <button name="action" value="offline" class="btn btn-sm btn-danger flex-fill flex-sm-grow-0 fw-bold">Bulk Offline</button>
                     </div>
                 </div>
 
                 <div class="card shadow-sm border-0">
                     <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0">
+                        <table class="table table-hover align-middle mb-0" style="min-width: 780px;">
                             <thead>
                                 <tr>
                                     <th width="40"></th>
-                                    <th style="width: 80px;" class="text-center">Image</th>
+                                    <th style="width: 70px;" class="text-center">Image</th>
                                     <th>Product Details</th>
                                     <th>Stock</th>
                                     <th>Price</th>
@@ -343,14 +362,14 @@ require_once "../includes/head.php";
 
 <!-- Help Modal -->
 <div class="modal fade" id="helpModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content" style="border-radius: 12px; overflow: hidden;">
             <div class="modal-header bg-light border-0">
                 <h5 class="fw-bold mb-0"><i class="fas fa-envelope-open-text me-2"></i> Client Inquiries</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0">
-                <div id="helpContent" style="max-height: 70vh; overflow-y: auto; padding: 20px;"></div>
+                <div id="helpContent" style="max-height: 70vh; overflow-y: auto; padding: 15px;"></div>
             </div>
         </div>
     </div>
@@ -358,7 +377,7 @@ require_once "../includes/head.php";
 
 <!-- Clinical Modal -->
 <div class="modal fade" id="clinicalModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content" style="border-radius: 12px; overflow: hidden;">
             <div class="modal-header bg-primary text-white border-0">
                 <h5 class="fw-bold mb-0 text-white"><i class="fas fa-pills me-2"></i> Clinical Info: <span id="clinicalProdName"></span></h5>
@@ -366,33 +385,33 @@ require_once "../includes/head.php";
             </div>
             <form id="clinicalForm">
                 <input type="hidden" name="product_id" id="clin_prod_id">
-                <div class="modal-body">
+                <div class="modal-body p-3">
                     <div id="clin_loading" class="text-center p-4 d-none">
                         <div class="spinner-border text-primary"></div>
                     </div>
                     <div id="clin_fields">
-                        <div class="row g-3">
-                            <div class="col-md-12">
+                        <div class="row g-2">
+                            <div class="col-12">
                                 <label class="form-label fw-bold">About / Description</label>
                                 <textarea name="about_text" class="form-control" rows="2"></textarea>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-12 col-md-6">
                                 <label class="form-label fw-bold">Medical Uses</label>
                                 <textarea name="uses" class="form-control" rows="2"></textarea>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-12 col-md-6">
                                 <label class="form-label fw-bold">Directions for Use</label>
                                 <textarea name="directions" class="form-control" rows="2"></textarea>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-12 col-md-6">
                                 <label class="form-label fw-bold">Side Effects</label>
                                 <textarea name="side_effects" class="form-control" rows="2"></textarea>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-12 col-md-6">
                                 <label class="form-label fw-bold">How it Works</label>
                                 <textarea name="how_it_works" class="form-control" rows="2"></textarea>
                             </div>
-                            <div class="col-md-12">
+                            <div class="col-12">
                                 <label class="form-label fw-bold">Storage Info</label>
                                 <input type="text" name="storage_info" class="form-control" placeholder="e.g., Store below 30°C">
                             </div>
@@ -400,8 +419,8 @@ require_once "../includes/head.php";
                     </div>
                 </div>
                 <div class="modal-footer bg-light border-0">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-primary btn-sm fw-bold">Save Changes</button>
                 </div>
             </form>
         </div>
@@ -410,7 +429,7 @@ require_once "../includes/head.php";
 
 <!-- Upload Image Modal -->
 <div class="modal fade" id="uploadImageModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content" style="border-radius: 12px;">
             <form action="actions/upload_product_image.php" method="POST" enctype="multipart/form-data">
                 <div class="modal-header">
@@ -426,8 +445,8 @@ require_once "../includes/head.php";
                     </div>
                 </div>
                 <div class="modal-footer border-0">
-                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Upload Now</button>
+                    <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm fw-bold">Upload Now</button>
                 </div>
             </form>
         </div>
@@ -488,7 +507,7 @@ $(document).ready(function() {
 
 // 4. LOAD HELP DATA
 function loadHelpMessages() {
-    $('#helpContent').html('<div class="text-center p-5"><div class="spinner-border text-primary"></div><p class="mt-2 text-muted">Fetching inquiries...</p></div>');
+    $('#helpContent').html('<div class="text-center p-4"><div class="spinner-border text-primary"></div><p class="mt-2 text-muted">Fetching inquiries...</p></div>');
     $.ajax({
         url: 'actions/fetch_help_messages.php',
         method: 'GET',
