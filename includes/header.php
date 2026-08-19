@@ -9,7 +9,7 @@ $pharmacy_id = $_SESSION['pharmacy_id'] ?? 0;
 $user_id = intval($_SESSION['user_id'] ?? 0);
 $branch_id = intval($_SESSION['branch_id'] ?? 0);
 
-// Dynamic Pharmacy Name
+// Fetch dynamic pharmacy name
 $pharmacy_name = "PHARMANOVA"; 
 if ($pharmacy_id > 0) {
     $p_stmt = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
@@ -23,7 +23,7 @@ if ($pharmacy_id > 0) {
     }
 }
 
-// Dynamic Branch Name
+// Fetch dynamic branch name
 $branch_name = "Nova Lsk";
 if ($branch_id > 0) {
     $q = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? LIMIT 1");
@@ -38,7 +38,7 @@ if ($branch_id > 0) {
     }
 }
 
-// User details
+// Fetch user info
 $display_full_name = 'Guest';
 $user_mobile = "";
 if ($user_id > 0) {
@@ -49,7 +49,7 @@ if ($user_id > 0) {
     }
 }
 
-// Fetch branches for selection
+// Fetch branches
 $branches = [];
 if ($pharmacy_id > 0) {
     $b_stmt = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? ORDER BY branch_name ASC");
