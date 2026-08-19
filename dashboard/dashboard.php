@@ -6,9 +6,10 @@ session_start();
 ob_start();
 
 // Include header and core files
-require "../includes/header.php"; 
-require_once "../includes/conn.php";
+require_once "../includes/head.php";
 require_once "../includes/auth.php";
+require_once "../includes/header.php";
+require_once "../includes/aside.php";
 
 // 💥 START BRANCH FILTER SETUP 💥
 $branch_id = isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : 1; 
