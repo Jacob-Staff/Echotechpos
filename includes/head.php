@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>PHARMANOVA - Dashboard</title>
+    <title>Dashboard</title>
 
     <!-- Core CDN Libraries -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -51,9 +51,15 @@
 
     .logo-icon {
         color: #00ffd0 !important;
-        font-size: 1.25rem !important;
+        font-size: 1.15rem !important;
         font-weight: 900 !important;
         letter-spacing: 0.5px;
+        text-transform: uppercase;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 170px;
+        display: inline-block;
     }
 
     .navbar-collapse {
@@ -81,12 +87,14 @@
     }
 
     .user-profile-box {
-        padding: 18px 15px;
+        padding: 15px;
         display: flex;
         align-items: center;
         gap: 12px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        background-color: #24303c;
     }
+
     .user-avatar {
         width: 38px;
         height: 38px;
@@ -96,6 +104,7 @@
         align-items: center;
         justify-content: center;
         color: #b2c0ce;
+        flex-shrink: 0;
     }
 
     .sidebar-link {
@@ -142,7 +151,7 @@
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04); 
     }
 
-    /* Desktop Responsive 3-Column Grid */
+    /* Desktop Responsive Grid */
     .mobile-tile-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -171,7 +180,7 @@
         font-weight: 800;
     }
 
-    /* Exact Tile Themes */
+    /* Tile Themes */
     .bg-tile-sellnow { background: linear-gradient(180deg, #449cd5, #3586ba); }
     .bg-tile-tx { background: #3f4d5b; }
     .bg-tile-outstock { background: linear-gradient(180deg, #ed850e, #d8311a); }
@@ -200,7 +209,6 @@
         border-radius: 6px;
     }
 
-    /* Touch-friendly horizontal nav bar for quick actions */
     .quick-actions-nav {
         display: flex;
         align-items: center;
@@ -214,9 +222,7 @@
         display: none;
     }
 
-    /* =================================================== */
-    /* Mobile Off-Canvas / Responsive Layout Rules        */
-    /* =================================================== */
+    /* Mobile Responsive Rules */
     @media (max-width: 768px) {
         .topbar .navbar-header {
             width: 100% !important;
@@ -224,7 +230,7 @@
 
         .navbar-collapse {
             margin-left: 0 !important;
-            display: none !important; /* Hide non-essential desktop header widgets on mobile */
+            display: none !important;
         }
 
         .left-sidebar {
@@ -234,7 +240,6 @@
             box-shadow: 4px 0 12px rgba(0,0,0,0.25);
         }
 
-        /* Sidebar Toggle Active Class */
         body.mobile-nav-open .left-sidebar {
             transform: translateX(0);
         }
@@ -246,7 +251,6 @@
             padding-right: 12px !important;
         }
 
-        /* Mobile 2-Column Tile Grid */
         .mobile-tile-grid {
             grid-template-columns: repeat(2, 1fr);
             gap: 10px;
