@@ -87,7 +87,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
         .stat-card-items { background-image: linear-gradient(to right, #34495e, #2c3e50); }
         .page-breadcrumb { background-color: #fff; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
 
-        /* Responsive Mobile Adjustments */
+        /* Mobile layout styling */
         @media (max-width: 768px) {
             .page-breadcrumb .row { flex-direction: column; gap: 0.75rem; text-align: center; }
             .action-links { flex-wrap: wrap; justify-content: center !important; gap: 0.5rem; }
