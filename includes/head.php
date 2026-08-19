@@ -5,19 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>PHARMANOVA - Dashboard</title>
 
-    <!-- Core CSS (Bootstrap + Icons) -->
+    <!-- Core CSS (Bootstrap + Icons via CDN) -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 
-    <!-- Theme CSS -->
-    <link href="/assets/libs/flot/css/float-chart.css" rel="stylesheet">
-    <link href="/dist/css/style.min.css" rel="stylesheet">
+    <!-- Relative Asset Paths (prevents root-domain 404 errors) -->
+    <link href="../assets/libs/flot/css/float-chart.css" rel="stylesheet">
+    <link href="../dist/css/style.min.css" rel="stylesheet">
 
     <style>
         body { 
             font-family: 'Poppins', sans-serif; 
-            background-color: #f0f2f5; 
+            background-color: #f0f2f5 !important; 
             margin: 0;
             padding: 0;
         }
