@@ -19,20 +19,72 @@ date_default_timezone_set('Africa/Lusaka');
 $p_id = (int)$_SESSION['pharmacy_id'];
 $b_id = (int)$_SESSION['branch_id'];
 
-// 1. Fetch Branding Info
-$info_stmt = mysqli_prepare($conn, "SELECT p.name, b.branch_name FROM pharmacies p JOIN branches b ON b.pharmacy_id = p.id WHERE p.id = ? AND b.id = ? LIMIT 1");
-mysqli_stmt_bind_param($info_stmt, "ii", $p_id, $b_id);
-mysqli_stmt_execute($info_stmt);
-$info_res = mysqli_stmt_get_result($info_stmt);
-$info = mysqli_fetch_assoc($info_res);
+$success = '';
+$error = '';
 
-$display_pharm = $info['name'] ?? 'PHARMANOVA';
-$display_bran  = $info['branch_name'] ?? 'Main Branch';
-
-// 2. Filter Parameters
+// Filter Parameters
 $status_filter = $_GET['status'] ?? 'all';
 $date_filter   = $_GET['date_range'] ?? 'all';
 
+// --- 1. HANDLE SINGLE DELETE ---
+if (isset($_POST['delete_single'])) {
+    $rx_id = (int)$_POST['rx_id'];
+    
+    // Optional: Get file path first to remove image file from server
+    $file_stmt = $conn->prepare("SELECT file_path FROM prescriptions WHERE id = ? AND pharmacy_id = ? AND branch_id = ?");
+    $file_stmt->bind_param("iii", $rx_id, $p_id, $b_id);
+    $file_stmt->execute();
+    $file_res = $file_stmt->get_result()->fetch_assoc();
+    $file_stmt->close();
+
+    $del_stmt = $conn->prepare("DELETE FROM prescriptions WHERE id = ? AND pharmacy_id = ? AND branch_id = ?");
+    $del_stmt->bind_param("iii", $rx_id, $p_id, $b_id);
+    if ($del_stmt->execute() && $del_stmt->affected_rows > 0) {
+        if (!empty($file_res['file_path'])) {
+            $target_file = "../api/uploads/prescriptions/" . $file_res['file_path'];
+            if (file_exists($target_file)) {
+                @unlink($target_file);
+            }
+        }
+        $success = "Prescription deleted successfully.";
+    } else {
+        $error = "Could not delete prescription or item not found.";
+    }
+    $del_stmt->close();
+}
+
+// --- 2. HANDLE BULK DELETE / PURGE ---
+if (isset($_POST['delete_all'])) {
+    $bulk_sql = "DELETE FROM prescriptions WHERE pharmacy_id = ? AND branch_id = ?";
+    $params = [$p_id, $b_id];
+    $types = "ii";
+
+    if ($status_filter === 'pending') {
+        $bulk_sql .= " AND LOWER(status) = 'pending'";
+    } elseif ($status_filter === 'ready') {
+        $bulk_sql .= " AND LOWER(status) = 'ready'";
+    }
+
+    if ($date_filter === 'today') {
+        $bulk_sql .= " AND DATE(uploaded_at) = CURDATE()";
+    } elseif ($date_filter === 'week') {
+        $bulk_sql .= " AND YEARWEEK(uploaded_at, 1) = YEARWEEK(CURDATE(), 1)";
+    } elseif ($date_filter === 'month') {
+        $bulk_sql .= " AND MONTH(uploaded_at) = MONTH(CURDATE()) AND YEAR(uploaded_at) = YEAR(CURDATE())";
+    }
+
+    $bulk_stmt = $conn->prepare($bulk_sql);
+    $bulk_stmt->bind_param($types, ...$params);
+    if ($bulk_stmt->execute()) {
+        $deleted_count = $bulk_stmt->affected_rows;
+        $success = "Successfully deleted $deleted_count prescription record(s).";
+    } else {
+        $error = "Error bulk deleting items: " . $bulk_stmt->error;
+    }
+    $bulk_stmt->close();
+}
+
+// --- 3. FETCH PRESCRIPTIONS WITH FILTERS ---
 $query = "
     SELECT p.*, c.full_name, c.phone 
     FROM prescriptions p 
@@ -40,17 +92,15 @@ $query = "
     WHERE p.pharmacy_id = ? AND p.branch_id = ?
 ";
 
-$params = [$p_id, $b_id];
-$types  = "ii";
+$fetch_params = [$p_id, $b_id];
+$fetch_types  = "ii";
 
-// Apply Status Filter
 if ($status_filter === 'pending') {
     $query .= " AND LOWER(p.status) = 'pending'";
 } elseif ($status_filter === 'ready') {
     $query .= " AND LOWER(p.status) = 'ready'";
 }
 
-// Apply Date Range Filter
 if ($date_filter === 'today') {
     $query .= " AND DATE(p.uploaded_at) = CURDATE()";
 } elseif ($date_filter === 'week') {
@@ -62,11 +112,21 @@ if ($date_filter === 'today') {
 $query .= " ORDER BY p.uploaded_at DESC";
 
 $rx_stmt = $conn->prepare($query);
-$rx_stmt->bind_param($types, ...$params);
+$rx_stmt->bind_param($fetch_types, ...$fetch_params);
 $rx_stmt->execute();
 $rx_res = $rx_stmt->get_result();
 
 $total_requests = $rx_res ? $rx_res->num_rows : 0;
+
+// Fetch Branding Info
+$info_stmt = mysqli_prepare($conn, "SELECT p.name, b.branch_name FROM pharmacies p JOIN branches b ON b.pharmacy_id = p.id WHERE p.id = ? AND b.id = ? LIMIT 1");
+mysqli_stmt_bind_param($info_stmt, "ii", $p_id, $b_id);
+mysqli_stmt_execute($info_stmt);
+$info_res = mysqli_stmt_get_result($info_stmt);
+$info = mysqli_fetch_assoc($info_res);
+
+$display_pharm = $info['name'] ?? 'PHARMANOVA';
+$display_bran  = $info['branch_name'] ?? 'Main Branch';
 
 function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
 
@@ -181,7 +241,7 @@ require_once "../includes/head.php";
     <div class="page-wrapper rx-wrapper">
         <div class="container-fluid p-0">
             
-            <!-- Page Header -->
+            <!-- Header Section -->
             <div class="header-section d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
                 <div>
                     <h3 class="fw-bold text-dark mb-0">Prescription Inbox</h3>
@@ -189,12 +249,29 @@ require_once "../includes/head.php";
                         <i class="fas fa-map-marker-alt me-1"></i> Branch: <b><?php echo e($display_bran); ?></b> | <b><?php echo e($display_pharm); ?></b>
                     </span>
                 </div>
-                <div>
+                <div class="d-flex align-items-center gap-2">
                     <span class="badge bg-success px-3 py-2 rounded-pill fs-6 fw-normal">
                         Total Requests: <b><?php echo $total_requests; ?></b>
                     </span>
+                    
+                    <!-- Delete All Button -->
+                    <?php if ($total_requests > 0): ?>
+                        <form method="post" onsubmit="return confirm('Are you sure you want to delete ALL matching prescription records? This cannot be undone.');" class="d-inline">
+                            <button type="submit" name="delete_all" class="btn btn-outline-danger btn-sm shadow-sm">
+                                <i class="fas fa-trash-alt me-1"></i> Purge All Filtered
+                            </button>
+                        </form>
+                    <?php endif; ?>
                 </div>
             </div>
+
+            <!-- Alerts -->
+            <?php if ($success): ?> 
+                <div class="alert alert-success border-0 shadow-sm mb-3"><?php echo htmlspecialchars($success); ?></div> 
+            <?php endif; ?>
+            <?php if ($error): ?> 
+                <div class="alert alert-danger border-0 shadow-sm mb-3"><?php echo htmlspecialchars($error); ?></div> 
+            <?php endif; ?>
 
             <!-- Filters Section -->
             <div class="filter-card shadow-sm">
@@ -219,7 +296,7 @@ require_once "../includes/head.php";
                     </div>
                     <div class="col-12 col-md-2 text-end">
                         <a href="view_prescriptions.php" class="btn btn-outline-secondary btn-sm w-100">
-                            <i class="fas fa-undo me-1"></i> Reset
+                            <i class="fas fa-undo me-1"></i> Reset Filters
                         </a>
                     </div>
                 </form>
@@ -237,7 +314,7 @@ require_once "../includes/head.php";
                                 <th>Uploaded Date</th>
                                 <th>Notes / Instructions</th>
                                 <th>Status</th>
-                                <th class="text-center" width="220">Actions</th>
+                                <th class="text-center" width="240">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="rxTableBody">
@@ -285,13 +362,15 @@ require_once "../includes/head.php";
                                         </td>
                                         <td class="text-center">
                                             <div class="d-flex justify-content-center gap-1">
+                                                <!-- Preview -->
                                                 <button type="button" 
                                                         class="btn btn-sm btn-outline-secondary" 
                                                         onclick="openImageModal('<?php echo $filePath; ?>', '<?php echo e($name); ?>')" 
-                                                        title="View Full Image">
+                                                        title="View Image">
                                                     <i class="fas fa-eye"></i>
                                                 </button>
 
+                                                <!-- Status Action -->
                                                 <?php if($isPending): ?>
                                                     <a href="update_rx_status.php?id=<?php echo $row['id']; ?>&status=Ready" 
                                                        class="btn btn-sm btn-success fw-bold" 
@@ -299,19 +378,28 @@ require_once "../includes/head.php";
                                                         <i class="fas fa-check"></i> Ready
                                                     </a>
                                                 <?php else: ?>
-                                                    <button class="btn btn-sm btn-light text-success fw-bold" disabled>
+                                                    <button class="btn btn-sm btn-light text-success fw-bold" disabled title="Already Ready">
                                                         <i class="fas fa-check-double"></i>
                                                     </button>
                                                 <?php endif; ?>
 
+                                                <!-- WhatsApp -->
                                                 <?php if(!empty($clean_phone)): ?>
                                                     <a href="<?php echo $wa_link; ?>" 
                                                        target="_blank" 
                                                        class="btn btn-sm btn-whatsapp" 
-                                                       title="Send WhatsApp Notification">
+                                                       title="WhatsApp Notification">
                                                         <i class="fab fa-whatsapp"></i>
                                                     </a>
                                                 <?php endif; ?>
+
+                                                <!-- Single Delete Form -->
+                                                <form method="post" class="d-inline" onsubmit="return confirm('Delete this prescription permanently?');">
+                                                    <input type="hidden" name="rx_id" value="<?php echo $row['id']; ?>">
+                                                    <button type="submit" name="delete_single" class="btn btn-sm btn-outline-danger" title="Delete Prescription">
+                                                        <i class="fas fa-trash-alt"></i>
+                                                    </button>
+                                                </form>
                                             </div>
                                         </td>
                                     </tr>
@@ -320,7 +408,7 @@ require_once "../includes/head.php";
                                 <tr>
                                     <td colspan="7" class="text-center py-5 text-muted">
                                         <i class="fas fa-prescription-bottle-alt display-6 opacity-25 d-block mb-2"></i>
-                                        No prescriptions match the selected filters.
+                                        No prescriptions match the selected criteria.
                                     </td>
                                 </tr>
                             <?php endif; ?>
@@ -328,14 +416,16 @@ require_once "../includes/head.php";
                     </table>
                 </div>
             </div>
+
+        </div>
+    </div>
+
     <?php 
     if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"; 
     ?>
-        </div>
-    </div>
 </div>
 
-<!-- Image Modal -->
+<!-- Modal Image Preview -->
 <div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
@@ -369,7 +459,7 @@ require_once "../includes/head.php";
         });
     });
 
-    // Modal Image Preview Launcher
+    // Image Modal Launcher
     function openImageModal(imgSrc, patientName) {
         document.getElementById('imageModalTitle').innerText = 'Prescription: ' + patientName;
         document.getElementById('modalImagePreview').src = imgSrc;
