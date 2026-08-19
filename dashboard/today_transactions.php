@@ -19,9 +19,10 @@ date_default_timezone_set('Africa/Lusaka');
 $p_id = (int)$_SESSION['pharmacy_id'];
 $b_id = (int)$_SESSION['branch_id'];
 
-// Capture Date from GET request, default to Today
-$filter_date = isset($_GET['filter_date']) ? $_GET['filter_date'] : date('Y-m-d');
-$display_date = date('d M Y', strtotime($filter_date));
+// Capture Filters from GET request
+$filter_date   = isset($_GET['filter_date']) ? $_GET['filter_date'] : date('Y-m-d');
+$filter_method = isset($_GET['filter_method']) ? $_GET['filter_method'] : 'All';
+$display_date  = date('d M Y', strtotime($filter_date));
 
 // 1. Fetch Branding Info
 $info_stmt = mysqli_prepare($conn, "SELECT p.name, b.branch_name FROM pharmacies p JOIN branches b ON b.pharmacy_id = p.id WHERE p.id = ? AND b.id = ? LIMIT 1");
@@ -33,20 +34,30 @@ $info = mysqli_fetch_assoc($info_res);
 $display_pharm = $info['name'] ?? 'PHARMANOVA';
 $display_bran  = $info['branch_name'] ?? 'Main Branch';
 
-// 2. Query sales data joining store_items, sales_items, and users
+// 2. Build SQL query with optional Payment Method filter
+$method_where = "";
+if ($filter_method !== 'All') {
+    if ($filter_method === 'Mobile') {
+        $method_where = " AND (s.payment_method = 'Mobile' OR s.payment_method = 'Mobile Money') ";
+    } else {
+        $method_where = " AND s.payment_method = '" . mysqli_real_escape_string($conn, $filter_method) . "' ";
+    }
+}
+
 $sql = "SELECT s.*, 
         COALESCE(u.username, u.full_name, s.issued_by, 'System') as issuer,
         (SELECT GROUP_CONCAT(CONCAT(st.item_name, ' (x', si.quantity, ')') SEPARATOR ', ') 
          FROM sales_items si 
          JOIN store_items st ON si.product_id = st.id 
          WHERE si.sale_id = s.id) as items_sold,
-        (SELECT SUM(total) FROM sales WHERE pharmacy_id = ? AND branch_id = ? AND DATE(created_at) = ?) as day_total,
-        (SELECT COUNT(*) FROM sales WHERE pharmacy_id = ? AND branch_id = ? AND DATE(created_at) = ?) as day_count
+        (SELECT SUM(total) FROM sales s_sub WHERE s_sub.pharmacy_id = ? AND s_sub.branch_id = ? AND DATE(s_sub.created_at) = ? {$method_where}) as day_total,
+        (SELECT COUNT(*) FROM sales s_sub WHERE s_sub.pharmacy_id = ? AND s_sub.branch_id = ? AND DATE(s_sub.created_at) = ? {$method_where}) as day_count
         FROM sales s
         LEFT JOIN users u ON s.user_id = u.id
         WHERE s.pharmacy_id = ? 
         AND s.branch_id = ? 
         AND DATE(s.created_at) = ? 
+        {$method_where}
         ORDER BY s.id DESC";
 
 $stmt = mysqli_prepare($conn, $sql);
@@ -149,8 +160,18 @@ require_once "../includes/head.php";
                     <span class="text-muted small">Branch: <b><?php echo htmlspecialchars($display_bran); ?></b> | Date: <b class="text-dark"><?php echo $display_date; ?></b></span>
                 </div>
                 <div class="no-print">
-                    <form method="GET" class="d-inline-flex gap-2">
+                    <form method="GET" class="d-inline-flex gap-2 align-items-center">
+                        <!-- Date Filter -->
                         <input type="date" name="filter_date" class="form-control form-control-sm bg-light text-dark border-secondary" value="<?php echo $filter_date; ?>" onchange="this.form.submit()">
+                        
+                        <!-- Payment Method Dropdown Filter -->
+                        <select name="filter_method" class="form-select form-select-sm bg-light text-dark border-secondary" onchange="this.form.submit()">
+                            <option value="All" <?php echo ($filter_method === 'All') ? 'selected' : ''; ?>>Method: All</option>
+                            <option value="Cash" <?php echo ($filter_method === 'Cash') ? 'selected' : ''; ?>>Cash</option>
+                            <option value="Mobile" <?php echo ($filter_method === 'Mobile' || $filter_method === 'Mobile Money') ? 'selected' : ''; ?>>Mobile Money</option>
+                            <option value="Card" <?php echo ($filter_method === 'Card') ? 'selected' : ''; ?>>Card</option>
+                        </select>
+
                         <button type="button" class="btn btn-outline-dark btn-sm px-3" onclick="window.print()">
                             <i class="fas fa-print me-1"></i> Print
                         </button>
@@ -206,7 +227,7 @@ require_once "../includes/head.php";
                                 <?php endforeach; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="7" class="text-center py-5 text-muted">No transactions recorded for this date.</td>
+                                    <td colspan="7" class="text-center py-5 text-muted">No transactions recorded for this criteria.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
