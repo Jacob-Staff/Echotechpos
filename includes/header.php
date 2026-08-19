@@ -33,33 +33,32 @@ $today_date = date('d M Y');
 
 <header class="topbar">
     <nav class="navbar top-navbar navbar-expand-md navbar-dark p-0">
-        <div class="navbar-header d-flex justify-content-between align-items-center w-100 px-2 d-md-none">
+        
+        <!-- Mobile Header (Visible ONLY on Mobile) -->
+        <div class="navbar-header d-flex justify-content-between align-items-center w-100 px-3 d-md-none">
             <div class="d-flex align-items-center gap-2">
-                <!-- Mobile Hamburger Button -->
                 <button class="btn text-white p-0 me-2" id="sidebarToggle" type="button" style="font-size: 1.4rem;">
                     <i class="fas fa-bars"></i>
                 </button>
                 <a class="navbar-brand m-0" href="../dashboard/dashboard.php">
-                    <span class="logo-icon"><?php echo htmlspecialchars($pharmacy_name); ?></span>
+                    <span class="logo-icon fw-bold"><?php echo htmlspecialchars($pharmacy_name); ?></span>
                 </a>
             </div>
 
-            <!-- Compact Search Bar for Mobile view -->
             <div class="mobile-search-bar flex-grow-1 mx-2">
                 <input type="text" class="form-control form-control-sm bg-white text-dark border-0" placeholder="Search..." style="height: 32px; font-size: 0.8rem;">
             </div>
 
-            <!-- Mobile Offcanvas Settings Trigger -->
             <button class="btn btn-outline-light btn-sm px-2 py-1" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas">
                 <i class="fas fa-cog"></i>
             </button>
         </div>
 
-        <!-- Desktop Navigation Bar -->
+        <!-- Desktop Navigation Bar (Visible ONLY on Desktop) -->
         <div class="navbar-collapse collapse d-none d-md-flex justify-content-between align-items-center w-100 px-3">
             <div class="d-flex align-items-center me-3">
                 <a class="navbar-brand m-0" href="../dashboard/dashboard.php">
-                    <span class="logo-icon"><?php echo htmlspecialchars($pharmacy_name); ?></span>
+                    <span class="logo-icon fw-bold fs-5 text-white"><?php echo htmlspecialchars($pharmacy_name); ?></span>
                 </a>
             </div>
 
@@ -73,11 +72,11 @@ $today_date = date('d M Y');
                 <span class="text-white small me-2"><i class="far fa-calendar-alt me-1"></i> <?php echo $today_date; ?></span>
                 <a href="sell_now.php" class="btn btn-success btn-sm px-2 py-1"><i class="fas fa-plus"></i></a>
                 
-                <!-- Updated Settings Button Triggers Offcanvas -->
                 <button class="btn btn-outline-light btn-sm px-2 py-1" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas">
                     <i class="fas fa-cog"></i>
                 </button>
             </div>
         </div>
+
     </nav>
 </header>
