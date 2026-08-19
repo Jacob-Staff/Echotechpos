@@ -1,26 +1,35 @@
 <?php
-// Ensure pharmacy name is fetched dynamically
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 $pharmacy_id = $_SESSION['pharmacy_id'] ?? 10;
 $branch_id   = $_SESSION['branch_id'] ?? 13;
 
-$pharm_q = mysqli_query($conn, "SELECT name FROM pharmacies WHERE id = '$pharmacy_id'");
-$pharm_data = mysqli_fetch_assoc($pharm_q);
-$pharmacy_name = $pharm_data['name'] ?? 'EchoTech';
+// 1. Fetch Dynamic Pharmacy Name
+$pharmacy_name = 'EchoTech'; // Default Fallback
+if (isset($conn) && $conn) {
+    $pharm_q = mysqli_query($conn, "SELECT name FROM pharmacies WHERE id = '$pharmacy_id'");
+    if ($pharm_q && $pharm_data = mysqli_fetch_assoc($pharm_q)) {
+        if (!empty($pharm_data['name'])) {
+            $pharmacy_name = $pharm_data['name'];
+        }
+    }
+}
 
-$branch_q = mysqli_query($conn, "SELECT branch_name FROM branches WHERE id = '$branch_id'");
-$branch_data = mysqli_fetch_assoc($branch_q);
-$branch_name = $branch_data['branch_name'] ?? 'Main Branch';
+// 2. Fetch Dynamic Branch Name
+$branch_name = 'Main Branch'; // Default Fallback
+if (isset($conn) && $conn) {
+    $branch_q = mysqli_query($conn, "SELECT branch_name FROM branches WHERE id = '$branch_id'");
+    if ($branch_q && $branch_data = mysqli_fetch_assoc($branch_q)) {
+        if (!empty($branch_data['branch_name'])) {
+            $branch_name = $branch_data['branch_name'];
+        }
+    }
+}
+
+$today_date = date('d M Y');
 ?>
-
-<!-- Brand Name in Header -->
-<a href="dashboard.php" class="logo-icon text-decoration-none">
-    <?php echo htmlspecialchars($pharmacy_name); ?>
-</a>
-
-<!-- Branch Name Badge -->
-<span class="badge bg-secondary">
-    <i class="mdi mdi-city me-1"></i><?php echo htmlspecialchars($branch_name); ?>
-</span>
 
 <header class="topbar">
     <nav class="navbar top-navbar navbar-expand-md navbar-dark p-0">
@@ -31,7 +40,7 @@ $branch_name = $branch_data['branch_name'] ?? 'Main Branch';
                     <i class="fas fa-bars"></i>
                 </button>
                 <a class="navbar-brand m-0" href="../dashboard/dashboard.php">
-                    <span class="logo-icon">EchoPrimeTech</span>
+                    <span class="logo-icon"><?php echo htmlspecialchars($pharmacy_name); ?></span>
                 </a>
             </div>
 
