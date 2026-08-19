@@ -30,15 +30,13 @@ $info = mysqli_fetch_assoc($info_res);
 $display_pharm = $info['name'] ?? 'PHARMANOVA';
 $display_bran  = $info['branch_name'] ?? 'Pharmanova LSK';
 
-// 2. FETCH TRANSACTIONS WITH MATCHING BIND PARAMETERS
+// 2. Fetch Sales Transactions for Filter Date
 $sql = "SELECT s.*, 
                COALESCE(u.username, s.issued_by, 'System') as issuer,
                (SELECT GROUP_CONCAT(st.item_name SEPARATOR ', ') 
                 FROM sales_items si 
                 JOIN store_items st ON si.product_id = st.id 
-                WHERE si.sale_id = s.id) as items_sold,
-               (SELECT SUM(total_amount) FROM sales WHERE pharmacy_id = ? AND branch_id = ? AND DATE(created_at) = ?) as day_total,
-               (SELECT COUNT(*) FROM sales WHERE pharmacy_id = ? AND branch_id = ? AND DATE(created_at) = ?) as day_count
+                WHERE si.sale_id = s.id) as items_sold
         FROM sales s
         LEFT JOIN users u ON s.user_id = u.id
         WHERE s.pharmacy_id = ? 
@@ -48,15 +46,8 @@ $sql = "SELECT s.*,
 
 $stmt = mysqli_prepare($conn, $sql);
 
-// Exactly 12 parameter placeholders (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) match 12 type definition characters ("iisiisiisiii" -> wait, date is string 's': "iisiisiisiis")
-mysqli_stmt_bind_param(
-    $stmt, 
-    "iisiisiisiis", 
-    $p_id, $b_id, $filter_date, 
-    $p_id, $b_id, $filter_date, 
-    $p_id, $b_id, $filter_date
-);
-
+// Exactly 3 bound parameters: $p_id (int), $b_id (int), $filter_date (string)
+mysqli_stmt_bind_param($stmt, "iis", $p_id, $b_id, $filter_date);
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
 
@@ -67,8 +58,8 @@ $sales_data = [];
 if ($result) {
     while ($row = mysqli_fetch_assoc($result)) {
         $sales_data[] = $row;
-        $total_revenue = $row['day_total'] ?? 0;
-        $total_invoices = $row['day_count'] ?? 0;
+        $total_revenue += (float)($row['total_amount'] ?? $row['total'] ?? 0);
+        $total_invoices++;
     }
 }
 ?>
@@ -126,7 +117,7 @@ if ($result) {
         <div class="col-md-3">
             <div class="card stat-card bg-matrix-cyan">
                 <div class="card-body">
-                    <p>Revenue (<?php echo $display_date; ?>)</p>
+                    <p>REVENUE (<?php echo strtoupper(date('d M Y', strtotime($filter_date))); ?>)</p>
                     <h2>K<?php echo number_format($total_revenue, 2); ?></h2>
                 </div>
             </div>
@@ -134,7 +125,7 @@ if ($result) {
         <div class="col-md-3">
             <div class="card stat-card bg-matrix-orange">
                 <div class="card-body">
-                    <p>Total Invoices</p>
+                    <p>TOTAL INVOICES</p>
                     <h2><?php echo $total_invoices; ?></h2>
                 </div>
             </div>
@@ -162,7 +153,7 @@ if ($result) {
                                 <td class="item-list"><?php echo htmlspecialchars($row['items_sold'] ?: 'No items'); ?></td>
                                 <td><?php echo date('h:i A', strtotime($row['created_at'])); ?></td>
                                 <td><?php echo htmlspecialchars($row['issuer']); ?></td>
-                                <td class="text-end pe-3 fw-bold text-dark">K<?php echo number_format($row['total_amount'], 2); ?></td>
+                                <td class="text-end pe-3 fw-bold text-dark">K<?php echo number_format($row['total_amount'] ?? $row['total'], 2); ?></td>
                                 <td class="text-center no-print">
                                     <a href="view_invoice.php?id=<?php echo $row['id']; ?>" class="text-dark">
                                         <i class="mdi mdi-eye-outline text-primary fs-5"></i>
