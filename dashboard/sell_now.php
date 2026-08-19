@@ -377,5 +377,5 @@ function processSale(){
 
 <?php
 $content = ob_get_clean();
-require "../includes/myheader.php"; 
+require "../includes/header.php"; 
 ?>
