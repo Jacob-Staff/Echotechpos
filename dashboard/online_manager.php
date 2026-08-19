@@ -110,9 +110,14 @@ require_once "../includes/head.php";
 ?>
 
 <style>
+/* Layout fix for fixed header spacing */
+#main-wrapper {
+    padding-top: 75px !important; /* Pushes page content below top header bar */
+}
+
 .page-wrapper-full {
     background-color: #f8f9fa !important;
-    min-height: calc(100vh - 70px);
+    min-height: calc(100vh - 75px);
     padding: 1.5rem;
     margin-left: 0 !important; /* Header only - no sidebar */
 }
@@ -184,14 +189,14 @@ require_once "../includes/head.php";
 
             <div class="header-section shadow-sm">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
-                    <div>
+                    <div class="mt-2">
                         <h2 class="fw-bold text-dark mb-0">ONLINE INVENTORY MANAGER</h2>
                         <span class="badge bg-light text-dark border mt-1">
                             📍 <?php echo e($_SESSION['branch_name'] ?? 'Main Branch'); ?>
                         </span>
                     </div>
 
-                    <div class="d-flex gap-2 flex-wrap">
+                    <div class="d-flex gap-2 flex-wrap align-items-center pt-2">
                         <a href="view_prescriptions.php" class="btn btn-warning position-relative btn-sm px-3 fw-bold">
                             Prescriptions
                             <?php if($pending_rx): ?>
