@@ -223,5 +223,5 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
 
 <?php
 $content = ob_get_clean();
-require "../includes/myheader.php"; 
+require "../includes/header.php"; 
 ?>
