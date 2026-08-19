@@ -64,11 +64,11 @@ $pending_labs = getCount($conn, "lab_results", $pharmacy_id, $branch_id);
 $pending_help = getCount($conn, "help_inquiries", $pharmacy_id, $branch_id);
 
 // ==============================
-// 🔍 BUILD FILTER QUERY
+// 🔍 BUILD FILTER QUERY (FIXED STRICT MODE)
 // ==============================
 $where = "WHERE pharmacy_id = ? AND branch_id = ? 
           AND quantity > 0 
-          AND (expiry_date > ? OR expiry_date = '0000-00-00')";
+          AND (expiry_date > ? OR expiry_date IS NULL OR CAST(expiry_date AS CHAR) = '0000-00-00')";
 
 $params = [$pharmacy_id, $branch_id, $today];
 $types  = "iis";
