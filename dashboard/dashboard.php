@@ -10,6 +10,7 @@ if (session_status() === PHP_SESSION_NONE) {
 // Include core backend files
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
+require_once "../includes/auth.php";
 
 // START BRANCH FILTER SETUP
 $branch_id = isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : 1; 
