@@ -47,12 +47,12 @@ require_once "../includes/head.php";
 
     <div class="page-wrapper">
         
-        <!-- Action Bar Header -->
+        <!-- Breadcrumb Header -->
         <div class="page-breadcrumb">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
-                    <h4 class="fw-bold mb-0 text-dark">Dashboard</h4>
-                    <div class="text-primary small">Home</div>
+                    <h4 class="fw-bold mb-0 text-dark" style="font-size: 1.2rem;">Dashboard</h4>
+                    <div class="text-primary small" style="font-size: 0.8rem;">Home</div>
                 </div>
                 <div class="d-flex align-items-center flex-wrap gap-3">
                     <a href="sell_now.php" class="text-dark text-decoration-none small fw-semibold"><i class="mdi mdi-cash-multiple me-1"></i> Sell Now</a>
@@ -69,41 +69,41 @@ require_once "../includes/head.php";
 
         <div class="container-fluid p-0">
             <div class="row g-3">
-                <!-- Main Grid Options -->
+                <!-- 6 Main Dash Tiles -->
                 <div class="col-lg-9">
                     <div class="row g-3">
                         <div class="col-md-4">
-                            <a href="sell_now.php" class="card card-dash bg-tile-blue">
+                            <a href="sell_now.php" class="card card-dash bg-tile-sellnow">
                                 <span class="card-title">Sell Now</span>
                                 <span class="card-value">All Items</span>
                             </a>
                         </div>
                         <div class="col-md-4">
-                            <a href="today_transactions.php" class="card card-dash bg-tile-darkblue">
+                            <a href="today_transactions.php" class="card card-dash bg-tile-tx">
                                 <span class="card-title">Today's Transactions</span>
-                                <span class="card-value text-warning"><?php echo $today_tx_data['total'] ?? 0; ?></span>
+                                <span class="card-value" style="color: #eec136 !important;"><?php echo $today_tx_data['total'] ?? 0; ?></span>
                             </a>
                         </div>
                         <div class="col-md-4">
-                            <a href="out_of_stock.php" class="card card-dash bg-tile-orange">
+                            <a href="out_of_stock.php" class="card card-dash bg-tile-outstock">
                                 <span class="card-title">Out of Stock</span>
                                 <span class="card-value"><?php echo $out_of_stock_data['total'] ?? 2; ?></span>
                             </a>
                         </div>
                         <div class="col-md-4">
-                            <a href="expired_products.php" class="card card-dash bg-tile-red">
+                            <a href="expired_products.php" class="card card-dash bg-tile-expired">
                                 <span class="card-title">Expired Products</span>
                                 <span class="card-value"><?php echo $expired_data['expired'] ?? 2; ?></span>
                             </a>
                         </div>
                         <div class="col-md-4">
-                            <a href="customers.php" class="card card-dash bg-tile-navy">
+                            <a href="customers.php" class="card card-dash bg-tile-customer">
                                 <span class="card-title">Customer</span>
                                 <span class="card-value">Service</span>
                             </a>
                         </div>
                         <div class="col-md-4">
-                            <a href="online_manager.php" class="card card-dash bg-tile-orange">
+                            <a href="online_manager.php" class="card card-dash bg-tile-online">
                                 <span class="card-title">Prescription</span>
                                 <span class="card-value">Online</span>
                             </a>
@@ -111,27 +111,27 @@ require_once "../includes/head.php";
                     </div>
                 </div>
 
-                <!-- Urgent Alerts Sidebar Panel -->
+                <!-- Urgent Alerts Sidebar Widget -->
                 <div class="col-lg-3">
                     <div class="card border-0 shadow-sm rounded-2">
                         <div class="card-header bg-white py-2 border-bottom-0">
-                            <span class="fw-bold text-primary small"><i class="mdi mdi-bell-ring-outline me-1"></i> Urgent Alerts</span>
+                            <span class="fw-bold small" style="color: #6c5ce7;"><i class="mdi mdi-bell-ring-outline me-1"></i> Urgent Alerts</span>
                         </div>
                         <div class="list-group list-group-flush small">
                             <a href="waiting_patients.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0">
-                                <span>Patients Waiting</span>
+                                <span class="text-secondary fw-semibold">Patients Waiting</span>
                                 <span class="badge bg-danger rounded-pill"><?php echo $patients_data['total'] ?? 0; ?></span>
                             </a>
-                            <a href="out_of_stock.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0" style="background-color: #fff3cd;">
-                                <span class="text-dark">Out of Stock</span>
+                            <a href="out_of_stock.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0" style="background-color: #fef5e7;">
+                                <span class="text-dark fw-semibold">Out of Stock</span>
                                 <span class="badge bg-warning text-dark rounded-pill"><?php echo $out_of_stock_data['total'] ?? 2; ?></span>
                             </a>
-                            <a href="expired_products.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0" style="background-color: #f8d7da;">
-                                <span class="text-danger">Expired Products</span>
+                            <a href="expired_products.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0" style="background-color: #fde8ea;">
+                                <span class="text-danger fw-semibold">Expired Products</span>
                                 <span class="badge bg-danger rounded-pill"><?php echo $expired_data['expired'] ?? 2; ?></span>
                             </a>
                             <a href="pending_orders.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0">
-                                <span>Pending orders</span>
+                                <span class="text-secondary fw-semibold">Pending orders</span>
                                 <span class="badge bg-secondary rounded-pill">0</span>
                             </a>
                         </div>
