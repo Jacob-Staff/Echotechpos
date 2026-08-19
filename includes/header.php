@@ -1,19 +1,17 @@
-<?php
+<?php 
 // Start session if not started
 if (session_status() === PHP_SESSION_NONE) { 
     session_start(); 
 } 
 
-require_once "../includes/head.php";
-require_once "../includes/auth.php";
-require_once "../includes/conn.php";
+require_once "conn.php"; 
 
 // 🔹 1. Get IDs from Session
 $pharmacy_id = $_SESSION['pharmacy_id'] ?? 0;
 $user_id = intval($_SESSION['user_id'] ?? 0);
 $branch_id = intval($_SESSION['branch_id'] ?? 0);
 
-// 🔹 2. Fetch Pharmacy Name
+// 🔹 2. Fetch Pharmacy Name (Dynamic)
 $pharmacy_name = "SYSTEM POS"; 
 if ($pharmacy_id > 0) {
     $p_stmt = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
@@ -25,7 +23,7 @@ if ($pharmacy_id > 0) {
     }
 }
 
-// 🔹 3. Fetch current branch name
+// 🔹 3. Fetch current branch name (Dynamic)
 $branch_name = "Branch Not Set";
 if ($branch_id > 0) {
     $q = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? LIMIT 1");
@@ -91,7 +89,7 @@ if($result) {
     }
 }
 
-// 🔹 Fetch branches for THIS pharmacy
+// 🔹 Fetch ONLY branches belonging to THIS pharmacy
 $branches = [];
 if ($pharmacy_id > 0) {
     $b_stmt = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? ORDER BY branch_name ASC");
@@ -104,125 +102,37 @@ if ($pharmacy_id > 0) {
 }
 ?> 
 
-<!DOCTYPE html>
-<html dir="ltr" lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?php echo $pageTitle ?? 'PHARMACY POS'; ?></title>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="dist/css/style.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<style>
+/* SOLID ICON BUTTON STYLE */
+.icon-btn {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #007bff, #0056b3);
+    color: #fff !important;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    transition: all 0.2s ease-in-out;
+}
 
-    <style>
-        html, body {
-            height: 100%;
-            margin: 0;
-        }
+.icon-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.3);
+}
 
-        #main-wrapper {
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
-
-        /* Topbar layout */
-        .topbar {
-            position: fixed !important;
-            top: 0;
-            left: 0 !important;
-            width: 100% !important;
-            height: 64px;
-            z-index: 1050;
-            background: #3e4f5f !important;
-        }
-
-        .navbar-header {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 250px !important;
-            background: #2c3e50 !important;
-            height: 64px;
-            display: flex !important;
-            align-items: center;
-            justify-content: center;
-            z-index: 1100;
-        }
-
-        .navbar-collapse {
-            margin-left: 250px !important; 
-            display: flex !important;
-            align-items: center;
-            height: 100%;
-        }
-
-        .left-sidebar {
-            width: 250px !important;
-            position: fixed !important;
-            top: 64px !important;
-            height: calc(100vh - 64px) !important;
-            z-index: 1000;
-        }
-
-        .page-wrapper {
-            margin-left: 250px !important;
-            margin-top: 64px !important;
-            padding: 20px !important;
-            background: #f4f6f9;
-            flex: 1;
-        }
-
-        footer {
-            flex-shrink: 0;
-            padding: 10px 20px;
-            background: #fff;
-            border-top: 1px solid #dee2e6;
-            margin-left: 250px !important;
-        }
-
-        .icon-btn {
-            width: 42px;
-            height: 42px;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, #007bff, #0056b3);
-            color: #fff !important;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-            transition: all 0.2s ease-in-out;
-        }
-
-        .icon-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 14px rgba(0,0,0,0.3);
-        }
-
-        @media (max-width: 768px) {
-            .navbar-collapse {
-                margin-left: 0 !important;
-            }
-            .page-wrapper, footer {
-                margin-left: 0 !important;
-                padding: 10px !important;
-            }
-            .left-sidebar {
-                top: 64px !important;
-            }
-        }
-    </style>
-</head>
-
-<body>
-<div id="main-wrapper" data-layout="vertical" data-navbarbg="skin5" data-sidebartype="full" data-sidebar-position="absolute" data-header-position="absolute" data-boxed-layout="full">
+.navbar-nav.mx-2 {
+    align-items: center;
+}
+</style>
 
 <header class="topbar shadow-sm"> 
     <nav class="navbar top-navbar navbar-expand-md navbar-dark"> 
         <div class="navbar-header d-flex align-items-center"> 
-            <b class="logo-icon text-uppercase text-white">
+            <b class="logo-icon text-uppercase">
                 <?= htmlspecialchars($pharmacy_name); ?>
             </b> 
             <a class="nav-toggler waves-effect waves-light d-block d-md-none ml-auto" href="javascript:void(0)"> 
@@ -339,7 +249,6 @@ if ($pharmacy_id > 0) {
     </div>
 </div>
 
-<script src="assets/libs/jquery/dist/jquery.min.js"></script>
 <script>
 $(document).ready(function(){
     function showCustomAlert(message, type) {
