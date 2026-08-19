@@ -34,24 +34,23 @@ $info = mysqli_fetch_assoc($info_res);
 $display_pharm = $info['name'] ?? 'PHARMANOVA';
 $display_bran  = $info['branch_name'] ?? 'Main Branch';
 
-// 2. Build SQL query with optional Payment Method filter
+// 2. Build Dynamic SQL Filter
 $method_where = "";
 if ($filter_method !== 'All') {
     if ($filter_method === 'Mobile') {
-        $method_where = " AND (s.payment_method = 'Mobile' OR s.payment_method = 'Mobile Money') ";
+        $method_where = " AND (s.payment_method = 'Mobile' OR s.payment_method = 'Mobile Money' OR s.payment_method = 'momo') ";
     } else {
-        $method_where = " AND s.payment_method = '" . mysqli_real_escape_string($conn, $filter_method) . "' ";
+        $method_where = " AND LOWER(s.payment_method) = LOWER('" . mysqli_real_escape_string($conn, $filter_method) . "') ";
     }
 }
 
+// Fetch all sales matching pharmacy, branch, date, and selected method
 $sql = "SELECT s.*, 
         COALESCE(u.username, u.full_name, s.issued_by, 'System') as issuer,
         (SELECT GROUP_CONCAT(CONCAT(st.item_name, ' (x', si.quantity, ')') SEPARATOR ', ') 
          FROM sales_items si 
          JOIN store_items st ON si.product_id = st.id 
-         WHERE si.sale_id = s.id) as items_sold,
-        (SELECT SUM(total) FROM sales s_sub WHERE s_sub.pharmacy_id = ? AND s_sub.branch_id = ? AND DATE(s_sub.created_at) = ? {$method_where}) as day_total,
-        (SELECT COUNT(*) FROM sales s_sub WHERE s_sub.pharmacy_id = ? AND s_sub.branch_id = ? AND DATE(s_sub.created_at) = ? {$method_where}) as day_count
+         WHERE si.sale_id = s.id) as items_sold
         FROM sales s
         LEFT JOIN users u ON s.user_id = u.id
         WHERE s.pharmacy_id = ? 
@@ -61,19 +60,20 @@ $sql = "SELECT s.*,
         ORDER BY s.id DESC";
 
 $stmt = mysqli_prepare($conn, $sql);
-mysqli_stmt_bind_param($stmt, "iisiisiis", $p_id, $b_id, $filter_date, $p_id, $b_id, $filter_date, $p_id, $b_id, $filter_date);
+mysqli_stmt_bind_param($stmt, "iis", $p_id, $b_id, $filter_date);
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
 
-$total_revenue = 0; 
+$total_revenue = 0.00; 
 $total_invoices = 0; 
 $sales_data = [];
 
 if ($result) {
     while ($row = mysqli_fetch_assoc($result)) {
         $sales_data[] = $row;
-        $total_revenue = $row['day_total'] ?? 0;
-        $total_invoices = $row['day_count'] ?? 0;
+        // Calculate totals dynamically from returned filtered data
+        $total_revenue += (float)($row['total'] ?? $row['total_amount'] ?? 0);
+        $total_invoices++;
     }
 }
 
@@ -179,10 +179,11 @@ require_once "../includes/head.php";
                 </div>
             </div>
 
+            <!-- Stats Summary Section -->
             <div class="row g-3 mb-4">
                 <div class="col-md-3">
                     <div class="stat-card stat-card-cyan">
-                        <div class="small fw-bold text-uppercase text-muted">Revenue (<?php echo $display_date; ?>)</div>
+                        <div class="small fw-bold text-uppercase text-muted">Revenue (<?php echo htmlspecialchars($filter_method); ?>)</div>
                         <div class="h2 mb-0 fw-bold text-primary">K<?php echo number_format($total_revenue, 2); ?></div>
                     </div>
                 </div>
@@ -217,7 +218,7 @@ require_once "../includes/head.php";
                                         <td><span class="badge bg-secondary"><?php echo htmlspecialchars($row['payment_method'] ?: 'Cash'); ?></span></td>
                                         <td><?php echo date('h:i A', strtotime($row['created_at'])); ?></td>
                                         <td><?php echo htmlspecialchars($row['issuer']); ?></td>
-                                        <td class="text-end pe-3 fw-bold text-success">K<?php echo number_format($row['total'], 2); ?></td>
+                                        <td class="text-end pe-3 fw-bold text-success">K<?php echo number_format($row['total'] ?? $row['total_amount'], 2); ?></td>
                                         <td class="text-center no-print">
                                             <a href="view_invoice.php?id=<?php echo $row['id']; ?>" class="btn btn-sm btn-light border text-primary">
                                                 <i class="fas fa-eye"></i>
