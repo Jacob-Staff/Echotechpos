@@ -16,7 +16,7 @@ require_once "../includes/conn.php";
     <link href="dist/css/style.min.css" rel="stylesheet">
 
 <style>
-    /* 1. Reset Topbar to cover the full width of the screen */
+    /* Reset Topbar for full width display */
     .topbar {
         position: fixed !important;
         top: 0;
@@ -24,25 +24,23 @@ require_once "../includes/conn.php";
         width: 100% !important;
         height: 64px;
         z-index: 1050;
-        background: #3e4f5f !important; /* Blue-grey background for the search area */
+        background: #3e4f5f !important;
     }
 
-    /* 2. THE OVERRIDE: Pin the Title to the far left shaded area */
-    /* This forces PHARMANOVA to stay in the dark box regardless of sidebar movement */
+    /* Pin Title area to the dark box on wide screens */
     .navbar-header {
         position: absolute !important;
         left: 0 !important;
         top: 0 !important;
-        width: 250px !important; /* Matches your sidebar width */
-        background: #2c3e50 !important; /* The dark shade color for the brand area */
+        width: 250px !important;
+        background: #2c3e50 !important;
         height: 64px;
         display: flex !important;
         align-items: center;
         justify-content: center;
-        z-index: 1100; /* Higher than topbar to stay on top */
+        z-index: 1100;
     }
 
-    /* 3. Push Search/Date section to start AFTER the 250px dark box */
     .navbar-collapse {
         margin-left: 250px !important; 
         display: flex !important;
@@ -50,7 +48,6 @@ require_once "../includes/conn.php";
         height: 100%;
     }
 
-    /* 4. Align Sidebar under the header */
     .left-sidebar {
         width: 250px !important;
         position: fixed !important;
@@ -59,7 +56,6 @@ require_once "../includes/conn.php";
         z-index: 1000;
     }
 
-    /* 5. Fix Content Area so cards aren't hidden or pushed weirdly */
     .page-wrapper {
         margin-left: 250px !important;
         margin-top: 64px !important;
@@ -68,7 +64,6 @@ require_once "../includes/conn.php";
         flex: 1;
     }
 
-    /* Keep your bold text preference */
     .aside, .head, * {
         font-weight: 700 !important;
     }
@@ -91,9 +86,21 @@ require_once "../includes/conn.php";
         border-top: 1px solid #dee2e6;
         margin-left: 250px !important;
     }
-</style>
 
-    </style>
+    /* Mobile adjustments */
+    @media (max-width: 768px) {
+        .navbar-collapse {
+            margin-left: 0 !important;
+        }
+        .page-wrapper, footer {
+            margin-left: 0 !important;
+            padding: 10px !important;
+        }
+        .left-sidebar {
+            top: 64px !important;
+        }
+    }
+</style>
 </head>
 
 <body>
@@ -109,7 +116,6 @@ require_once "../includes/conn.php";
     <div class="page-wrapper">
         <div class="container-fluid">
             <?php
-            // Render page-specific content
             if (isset($content)) {
                 echo $content;
             }
