@@ -16,7 +16,7 @@ $branch_id = $_SESSION['branch_id'] ?? 0;
 $pharmacy_id = $_SESSION['pharmacy_id'] ?? 0;
 
 if ($branch_id == 0 || $pharmacy_id == 0) {
-    header("Location: ../login_inc.php?error=session_expired");
+    header("Location: ../index.php?error=session_expired");
     exit();
 }
 
