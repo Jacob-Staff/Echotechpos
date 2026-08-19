@@ -2,10 +2,13 @@
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-session_start();
-ob_start();
 
-// Include header and core files
+// Start session
+if (session_status() === PHP_SESSION_NONE) { 
+    session_start(); 
+}
+
+// 🔹 1. INCLUDE CORE SYSTEM HEADERS & NAVIGATION
 require_once "../includes/head.php";
 require_once "../includes/auth.php";
 require_once "../includes/header.php";
@@ -70,27 +73,8 @@ $waiting_patients_data = $waiting_patients_result ? mysqli_fetch_assoc($waiting_
 $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
 ?>
 
-<!DOCTYPE html>
-<html dir="ltr" lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Dashboard</title>
-    <style>
-        body { font-family: 'Poppins', sans-serif; background-color: #f0f2f5; }
-        .page-wrapper { flex-grow: 1; padding: 2rem; min-height: 100vh; display: flex; flex-direction: column; }
-        .card-stats { background-color: #fff; border-radius: 0.75rem; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); transition: transform 0.3s ease; color: #fff; }
-        .card-stats:hover { transform: translateY(-5px); }
-        .card-stats .card-body { background-color: rgba(0, 0, 0, 0.1); border-radius: 0.75rem; }
-        .stat-card-sales { background-image: linear-gradient(to right, #4a90e2, #50b0f0); }
-        .stat-card-stock { background-image: linear-gradient(to right, #6b7a8f, #4d5e7a); }
-        .stat-card-out-of-stock { background-image: linear-gradient(to right, #f5a623, #d0021b); }
-        .stat-card-expired { background-image: linear-gradient(to right, #d0021b, #9b1e22); }
-        .stat-card-items { background-image: linear-gradient(to right, #34495e, #2c3e50); }
-        .page-breadcrumb { background-color: #fff; padding: 1rem; border-radius: 0.75rem; margin-bottom: 2rem; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
-        
-    </style>
-</head>
-<body>
+<!-- 🔹 2. DASHBOARD BODY WRAPPER -->
+<div class="page-wrapper">
     <div class="page-breadcrumb">
         <div class="row align-items-center">
             <div class="col">
@@ -218,11 +202,7 @@ $waiting_patients_count = $waiting_patients_data['waiting_patients_count'] ?? 0;
     </div>
 </div>
 
-</body>
-</html>
-</script>
-
-<?php
-$content = ob_get_clean();
-require "../includes/header.php"; 
+<?php 
+// 🔹 3. INCLUDE SYSTEM FOOTER AND CLOSE HTML WRAPPERS
+require_once "../includes/footer.php"; 
 ?>
