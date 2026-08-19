@@ -138,15 +138,15 @@ require_once "../includes/head.php";
                     </div>
                 </div>
                 <?php 
-    // Add your footer component here
-    if (file_exists("../includes/footer.php")) {
-        require_once "../includes/footer.php"; 
-    }
-    ?>
 
             </div>
         </div>
     </div>
+                    // Add your footer component here
+    if (file_exists("../includes/footer.php")) {
+        require_once "../includes/footer.php"; 
+    }
+    ?>
 </div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
