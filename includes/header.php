@@ -34,48 +34,52 @@ $today_date = date('d M Y');
 <header class="topbar">
     <nav class="navbar top-navbar navbar-expand-md navbar-dark p-0">
         
-        <!-- Mobile Header (Visible ONLY on Mobile) -->
-        <div class="navbar-header d-flex justify-content-between align-items-center w-100 px-3 d-md-none">
-            <div class="d-flex align-items-center gap-2">
-                <button class="btn text-white p-0 me-2" id="sidebarToggle" type="button" style="font-size: 1.4rem;">
-                    <i class="fas fa-bars"></i>
-                </button>
-                <a class="navbar-brand m-0" href="../dashboard/dashboard.php">
-                    <span class="logo-icon fw-bold"><?php echo htmlspecialchars($pharmacy_name); ?></span>
-                </a>
-            </div>
-
-            <div class="mobile-search-bar flex-grow-1 mx-2">
-                <input type="text" class="form-control form-control-sm bg-white text-dark border-0" placeholder="Search..." style="height: 32px; font-size: 0.8rem;">
-            </div>
-
-            <button class="btn btn-outline-light btn-sm px-2 py-1" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas">
+        <!-- 1. LEFT BRAND / SIDEBAR HEADER ZONE -->
+        <div class="navbar-header">
+            <a class="nav-toggler waves-effect waves-light d-block d-md-none text-white me-2" id="sidebarToggle" href="javascript:void(0)">
+                <i class="fas fa-bars fs-5"></i>
+            </a>
+            <a class="navbar-brand ms-2" href="../dashboard/dashboard.php">
+                <span class="logo-text fw-bold text-white fs-5"><?php echo htmlspecialchars($pharmacy_name); ?></span>
+            </a>
+            <!-- Mobile Settings Button Trigger -->
+            <button class="btn btn-link text-white d-md-none ms-auto p-1" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas">
                 <i class="fas fa-cog"></i>
             </button>
         </div>
 
-        <!-- Desktop Navigation Bar (Visible ONLY on Desktop) -->
-        <div class="navbar-collapse collapse d-none d-md-flex justify-content-between align-items-center w-100 px-3">
-            <div class="d-flex align-items-center me-3">
-                <a class="navbar-brand m-0" href="../dashboard/dashboard.php">
-                    <span class="logo-icon fw-bold fs-5 text-white"><?php echo htmlspecialchars($pharmacy_name); ?></span>
-                </a>
-            </div>
+        <!-- 2. RIGHT CONTENT / SEARCH / QUICK ACTIONS ZONE -->
+        <div class="navbar-collapse collapse" id="navbarSupportedContent">
+            <!-- Search Bar -->
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <div class="search-box py-2 px-3" style="min-width: 300px;">
+                        <input type="text" class="form-control form-control-sm bg-white text-dark border-0" placeholder="Search products..." style="height: 34px; border-radius: 4px;">
+                    </div>
+                </li>
+            </ul>
 
-            <div class="search-box me-auto" style="width: 380px;">
-                <input type="text" class="form-control form-control-sm bg-white text-dark border-0" placeholder="Search products..." style="height: 36px; border-radius: 4px;">
-            </div>
-
-            <div class="d-flex align-items-center gap-2">
-                <a href="../dashboard/dashboard.php" class="btn btn-primary btn-sm px-2 py-1"><i class="fas fa-home"></i></a>
-                <span class="text-white small ms-2 me-2"><i class="fas fa-building me-1 text-info"></i> <?php echo htmlspecialchars($branch_name); ?></span>
-                <span class="text-white small me-2"><i class="far fa-calendar-alt me-1"></i> <?php echo $today_date; ?></span>
-                <a href="sell_now.php" class="btn btn-success btn-sm px-2 py-1"><i class="fas fa-plus"></i></a>
-                
-                <button class="btn btn-outline-light btn-sm px-2 py-1" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas">
-                    <i class="fas fa-cog"></i>
-                </button>
-            </div>
+            <!-- Right Actions & Navigation Icons -->
+            <ul class="navbar-nav my-lg-0 d-flex align-items-center gap-2 pe-3">
+                <li class="nav-item">
+                    <a href="../dashboard/dashboard.php" class="btn btn-primary btn-sm px-2 py-1" title="Home"><i class="fas fa-home"></i></a>
+                </li>
+                <li class="nav-item text-white small px-1">
+                    <i class="fas fa-building text-info me-1"></i> <?php echo htmlspecialchars($branch_name); ?>
+                </li>
+                <li class="nav-item text-white small px-1">
+                    <i class="far fa-calendar-alt me-1"></i> <?php echo $today_date; ?>
+                </li>
+                <li class="nav-item">
+                    <a href="sell_now.php" class="btn btn-success btn-sm px-2 py-1" title="Sell Now"><i class="fas fa-plus"></i></a>
+                </li>
+                <li class="nav-item">
+                    <!-- Correct Offcanvas Drawer Trigger -->
+                    <button class="btn btn-outline-light btn-sm px-2 py-1" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas" title="Settings">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </li>
+            </ul>
         </div>
 
     </nav>
