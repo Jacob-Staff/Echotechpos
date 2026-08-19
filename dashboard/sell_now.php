@@ -43,14 +43,13 @@ require_once "../includes/head.php";
     --row-hover: #252525; 
 }
 
-/* Page Wrapper Adjustments */
+/* Page Layout */
 .pos-wrapper {
     background-color: var(--dark-bg) !important;
     min-height: calc(100vh - 70px);
     padding: 1rem;
 }
 
-/* Container Layout */
 .pos-container { 
     display: flex;
     flex-direction: column;
@@ -65,68 +64,51 @@ require_once "../includes/head.php";
     }
 }
 
-/* Search Dropdown Setup */
+/* Search Box & Inputs - High Contrast */
 .search-section { position: relative; }
 #product_search { 
-    background: #1a1a1a; 
-    border: 1px solid #333; 
+    background: #1e1e1e !important; 
+    border: 1px solid #444 !important; 
     border-radius: 12px; 
     padding-left: 48px;
-    color: #fff;
+    color: #ffffff !important;
+    font-weight: 600;
+}
+#product_search::placeholder {
+    color: #888888 !important;
+    opacity: 1;
 }
 #product_search:focus { 
-    background: #222; 
-    border-color: var(--neon-green); 
-    box-shadow: 0 0 12px rgba(0, 255, 174, 0.2); 
+    background: #222222 !important; 
+    border-color: var(--neon-green) !important; 
+    box-shadow: 0 0 12px rgba(0, 255, 174, 0.3) !important; 
 }
-.search-icon-fixed { position: absolute; left: 16px; top: 16px; z-index: 10; color: var(--neon-green); font-size: 1.2rem; }
+.search-icon-fixed { 
+    position: absolute; 
+    left: 16px; 
+    top: 16px; 
+    z-index: 10; 
+    color: var(--neon-green); 
+    font-size: 1.2rem; 
+}
 
+/* Live Search Container */
 .product-search-results {
     position: absolute;
     top: 100%;
     left: 0;
     right: 0;
     z-index: 1050;
-    background: #1e1e1e;
-    border: 1px solid #333;
+    background: #181818;
+    border: 1px solid #444;
     border-radius: 10px;
-    max-height: 320px;
+    max-height: 350px;
     overflow-y: auto;
     display: none;
     padding: 0;
     margin-top: 5px;
     list-style: none;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.75);
-}
-
-/* High contrast search results text styling */
-.product-item {
-    padding: 12px 16px;
-    border-bottom: 1px solid #2d2d2d;
-    background-color: #1a1a1a;
-    color: #ffffff;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-.product-item:hover {
-    background-color: #262626;
-}
-.product-title {
-    color: #00ffae;
-    font-weight: 700;
-    font-size: 1rem;
-}
-.product-meta {
-    color: #cccccc !important; /* Bright high-contrast text */
-    font-size: 0.85rem;
-}
-.barcode-value {
-    color: #ffffff;
-    font-weight: 600;
-    background: #2a2a2a;
-    padding: 1px 6px;
-    border-radius: 4px;
-    border: 1px solid #444;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.9);
 }
 
 /* Cart Table Styling */
@@ -134,7 +116,7 @@ require_once "../includes/head.php";
     background-color: var(--panel-bg); 
     border-radius: 15px; 
     overflow-y: auto; 
-    border: 1px solid #282828;
+    border: 1px solid #333;
     min-height: 250px;
     max-height: 50vh;
     height: 100%;
@@ -150,29 +132,34 @@ require_once "../includes/head.php";
 .cart-table thead th { 
     position: sticky; top: 0; background: #222; 
     padding: 12px 14px; text-align: left; font-size: 11px; 
-    color: #aaa; text-transform: uppercase; z-index: 5;
+    color: #ffffff !important; text-transform: uppercase; z-index: 5;
+    border-bottom: 1px solid #444;
 }
 .cart-row { border-bottom: 1px solid #282828; transition: 0.2s; }
 .cart-row:hover { background: var(--row-hover); }
-.cart-row td { padding: 12px 14px; color: #eee; vertical-align: middle; }
+.cart-row td { padding: 12px 14px; color: #ffffff; vertical-align: middle; }
 
-/* Checkout Side Panel */
+/* Right Payment Panel Elements */
 .right-panel { 
     background: #151515; 
     border-radius: 15px; 
     padding: 1.25rem; 
-    border: 1px solid #282828; 
+    border: 1px solid #333; 
 }
 .total-section { 
     background: linear-gradient(145deg, #1e1e1e, #111); 
     border-radius: 12px; padding: 1.25rem; 
     border: 1px solid #333; margin-bottom: 1.25rem;
 }
+.label-contrast {
+    color: #cccccc !important;
+    font-weight: 500;
+}
 
 /* Payment Method Buttons */
 .meth-btn { 
-    height: 55px; background: #222; border: 1px solid #333; 
-    color: #aaa; font-weight: bold; border-radius: 10px; 
+    height: 55px; background: #222; border: 1px solid #444; 
+    color: #ffffff !important; font-weight: bold; border-radius: 10px; 
     transition: 0.2s;
 }
 .meth-btn:hover { border-color: var(--neon-green); color: #fff; }
@@ -181,12 +168,12 @@ require_once "../includes/head.php";
 .btn-payment-main { 
     height: 65px; border-radius: 12px; border: none; 
     font-weight: 800; font-size: 1.05rem; text-transform: uppercase;
-    background: #2a2a2a; color: #666; transition: 0.3s;
+    background: #2a2a2a; color: #888888; transition: 0.3s;
 }
 .btn-payment-main.active-ready { background: var(--neon-green); color: #000; cursor: pointer; }
 
-#empty-cart-msg { text-align: center; margin-top: 60px; color: #666; padding: 20px; }
-#empty-cart-msg i { font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.4; }
+#empty-cart-msg { text-align: center; margin-top: 60px; color: #aaaaaa; padding: 20px; }
+#empty-cart-msg i { font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.6; }
 </style>
 
 <div id="main-wrapper">
@@ -211,8 +198,8 @@ require_once "../includes/head.php";
                     <div class="cart-table-container">
                         <div id="empty-cart-msg">
                             <i class="fas fa-shopping-basket"></i>
-                            <h5>Cart is Empty</h5>
-                            <p class="small text-muted mb-0">Scan or search products to begin transaction</p>
+                            <h5 style="color: #ffffff;">Cart is Empty</h5>
+                            <p class="small mb-0" style="color: #aaaaaa;">Scan or search products to begin transaction</p>
                         </div>
                         <table class="cart-table" id="pos_table" style="display:none;">
                             <thead>
@@ -234,22 +221,22 @@ require_once "../includes/head.php";
                     <div>
                         <div class="total-section">
                             <div class="d-flex justify-content-between mb-2">
-                                <span class="text-muted">Items Count</span>
+                                <span class="label-contrast">Items Count</span>
                                 <span id="txt_count" class="text-white fw-bold">0</span>
                             </div>
                             <div class="d-flex justify-content-between mb-2">
-                                <span class="text-muted">VAT (16%)</span>
+                                <span class="label-contrast">VAT (16%)</span>
                                 <span id="txt_vat" class="text-white fw-bold">K0.00</span>
                             </div>
-                            <hr style="border-color: #333;">
+                            <hr style="border-color: #444;">
                             <div class="d-flex justify-content-between align-items-center">
-                                <span class="h6 mb-0 text-white">TOTAL DUE</span>
+                                <span class="h6 mb-0 text-white fw-bold">TOTAL DUE</span>
                                 <span class="h3 mb-0 text-success fw-bold">K<span id="txt_total">0.00</span></span>
                             </div>
                         </div>
 
                         <div class="mb-4">
-                            <label class="small text-muted mb-2 fw-bold">SELECT PAYMENT METHOD</label>
+                            <label class="small mb-2 fw-bold" style="color: #dddddd;">SELECT PAYMENT METHOD</label>
                             <div class="row g-2">
                                 <div class="col-4"><button type="button" class="btn w-100 meth-btn" onclick="setMethod('Cash', this)"><i class="fas fa-money-bill-wave d-block mb-1"></i>CASH</button></div>
                                 <div class="col-4"><button type="button" class="btn w-100 meth-btn" onclick="setMethod('Card', this)"><i class="fas fa-credit-card d-block mb-1"></i>CARD</button></div>
@@ -263,7 +250,7 @@ require_once "../includes/head.php";
                             <span id="method_label">SELECT PAYMENT</span>
                         </button>
                         <div class="text-center mt-2">
-                            <small class="text-muted">Shortcut: Press <b>F8</b> to complete</small>
+                            <small style="color: #aaaaaa;">Shortcut: Press <b style="color: #ffffff;">F8</b> to complete</small>
                         </div>
                     </div>
                 </div>
@@ -273,7 +260,7 @@ require_once "../includes/head.php";
     </div>
 </div>
 
-<!-- Receipt Print Modal -->
+<!-- Receipt Modal -->
 <div class="modal fade" id="receiptModal" data-bs-backdrop="static" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-sm modal-dialog-centered">
         <div class="modal-content shadow-lg border-0">
@@ -331,13 +318,11 @@ if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"
 let cart = [];
 let selectedMethod = null;
 
-// Hotkeys
 $(document).on('keydown', function(e) {
     if(e.key === 'F2') { e.preventDefault(); $('#product_search').focus(); }
     if(e.key === 'F8') { e.preventDefault(); processSale(); }
 });
 
-// POS Live Search
 $('#product_search').on('input', function() {
     let q = $(this).val();
     if(q.length < 1) {
@@ -349,14 +334,12 @@ $('#product_search').on('input', function() {
     });
 });
 
-// Hide search dropdown on click outside
 $(document).on('click', function(e) {
     if (!$(e.target).closest('.search-section').length) {
         $('#product_results').hide();
     }
 });
 
-// Add Item to Cart
 $(document).on('click', '.product-item', function() {
     const item = {
         id: $(this).data('id'),
@@ -401,7 +384,7 @@ function renderCart() {
         total += rowTotal;
         count += i.qty;
         html += `<tr class="cart-row">
-            <td><div class="fw-bold">${i.name}</div><small class="text-muted">Stock: ${i.stock}</small></td>
+            <td><div class="fw-bold">${i.name}</div><small style="color:#aaaaaa;">Stock: ${i.stock}</small></td>
             <td>K${i.price.toFixed(2)}</td>
             <td class="text-center">
                 <div class="d-flex align-items-center justify-content-center gap-1">
