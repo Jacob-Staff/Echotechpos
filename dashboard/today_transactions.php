@@ -2,17 +2,21 @@
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-session_start();
-ob_start();
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
+require_once "../includes/header.php";
+
 date_default_timezone_set('Africa/Lusaka');
 
 $p_id = (int)($_SESSION['pharmacy_id'] ?? 0);
 $b_id = (int)($_SESSION['branch_id'] ?? 0);
 
-// NEW: Capture Date from GET request, default to Today
+// Capture Date from GET request, default to Today
 $filter_date = isset($_GET['filter_date']) ? $_GET['filter_date'] : date('Y-m-d');
 $display_date = date('d M Y', strtotime($filter_date));
 
@@ -26,7 +30,7 @@ $info = mysqli_fetch_assoc($info_res);
 $display_pharm = $info['name'] ?? 'PHARMANOVA';
 $display_bran  = $info['branch_name'] ?? 'Pharmanova LSK';
 
-// 2. UPDATED QUERY: Filter by $filter_date instead of hardcoded today (Using prepared statement with exact 'iis' match)
+// 2. Query with prepared statements matching 'iisiisiis' (9 bound parameters)
 $sql = "SELECT s.*, u.username as issuer,
         (SELECT GROUP_CONCAT(st.item_name SEPARATOR ', ') 
          FROM sales_items si 
@@ -57,119 +61,79 @@ if($result){
 }
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Sales Report | <?php echo $display_pharm; ?></title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
-    <link href="dist/css/style.min.css" rel="stylesheet">
-
-    <style>
-        body { font-family: 'Poppins', sans-serif; background-color: #f4f6f9; }
-        .page-wrapper { padding-top: 15px; }
-        .stat-card { border: none; border-radius: 4px; color: white; margin-bottom: 20px; }
-        .bg-matrix-cyan { background: #22a7f0; box-shadow: 0 4px 10px rgba(34, 167, 240, 0.2); }
-        .bg-matrix-orange { background: #ffb848; box-shadow: 0 4px 10px rgba(255, 184, 72, 0.2); }
-        .stat-card .card-body { padding: 18px 22px; }
-        .stat-card h2 { font-size: 1.8rem; margin: 0; font-weight: 700; }
-        .stat-card p { margin: 0; opacity: 0.85; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
-
-        .table-box { background: #fff; border-radius: 4px; border: 1px solid #e9ecef; }
-        .table thead th { background-color: #1f262d; color: #fff; font-size: 12px; padding: 15px 12px; }
-        .table tbody td { font-size: 13.5px; padding: 12px; vertical-align: middle; border-bottom: 1px solid #f8f9fa; }
-        
-        .item-list { color: #444; max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-        /* Filter styling */
-        .filter-form { background: white; padding: 10px 15px; border-radius: 4px; border: 1px solid #ddd; }
-        
-        @media print {
-            .no-print { display: none !important; }
-            .page-wrapper { padding: 0; }
-        }
-    </style>
-            
-            <div class="row align-items-center mb-4">
-                <div class="col-md-6">
-                    <h4 class="fw-bold text-dark mb-0"><?php echo strtoupper($display_pharm); ?></h4>
-                    <span class="text-muted small">Report for: <b><?php echo $display_date; ?></b></span>
-                </div>
-                <div class="col-md-6 text-end no-print">
-                    <form method="GET" class="d-inline-flex align-items-center">
-                        <input type="date" name="filter_date" class="form-control form-control-sm me-2" value="<?php echo $filter_date; ?>" onchange="this.form.submit()">
-                        <button type="button" class="btn btn-dark btn-sm px-3" onclick="window.print()">
-                            <i class="mdi mdi-printer me-1"></i> Print
-                        </button>
-                    </form>
-                </div>
+<div class="page-wrapper" style="padding-top: 15px;">
+    <div class="container-fluid">
+        <div class="row align-items-center mb-4">
+            <div class="col-md-6">
+                <h4 class="fw-bold text-dark mb-0"><?php echo strtoupper($display_pharm); ?></h4>
+                <span class="text-muted small">Report for: <b><?php echo $display_date; ?></b></span>
             </div>
+            <div class="col-md-6 text-end no-print">
+                <form method="GET" class="d-inline-flex align-items-center justify-content-end">
+                    <input type="date" name="filter_date" class="form-control form-control-sm me-2" value="<?php echo $filter_date; ?>" onchange="this.form.submit()">
+                    <button type="button" class="btn btn-dark btn-sm px-3" onclick="window.print()">
+                        <i class="mdi mdi-printer me-1"></i> Print
+                    </button>
+                </form>
+            </div>
+        </div>
 
-            <div class="row g-3">
-                <div class="col-md-3">
-                    <div class="card stat-card bg-matrix-cyan">
-                        <div class="card-body">
-                            <p>Revenue (<?php echo $display_date; ?>)</p>
-                            <h2>K<?php echo number_format($total_revenue, 2); ?></h2>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card stat-card bg-matrix-orange">
-                        <div class="card-body">
-                            <p>Total Invoices</p>
-                            <h2><?php echo $total_invoices; ?></h2>
-                        </div>
+        <div class="row g-3">
+            <div class="col-md-3">
+                <div class="card stat-card bg-matrix-cyan">
+                    <div class="card-body">
+                        <p>Revenue (<?php echo $display_date; ?>)</p>
+                        <h2>K<?php echo number_format($total_revenue, 2); ?></h2>
                     </div>
                 </div>
             </div>
-
-            <div class="table-box shadow-sm">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead>
-                            <tr>
-                                <th class="ps-3">Invoice #</th>
-                                <th>Medicines Sold</th>
-                                <th>Time</th>
-                                <th>Handled By</th>
-                                <th class="text-end pe-3">Total (ZMW)</th>
-                                <th class="text-center no-print">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (!empty($sales_data)): ?>
-                                <?php foreach ($sales_data as $row): ?>
-                                    <tr>
-                                        <td class="ps-3 fw-bold text-info">#<?php echo $row['invoice']; ?></td>
-                                        <td class="item-list"><?php echo $row['items_sold'] ?: 'No items'; ?></td>
-                                        <td><?php echo date('h:i A', strtotime($row['created_at'])); ?></td>
-                                        <td><?php echo $row['issuer'] ?? 'System'; ?></td>
-                                        <td class="text-end pe-3 fw-bold text-dark">K<?php echo number_format($row['total_amount'], 2); ?></td>
-                                        <td class="text-center no-print">
-                                            <a href="view_invoice.php?id=<?php echo $row['id']; ?>" class="text-dark">
-                                                <i class="mdi mdi-eye-outline text-primary"></i>
-                                            </a>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <tr><td colspan="6" class="text-center py-5 text-muted">No transactions recorded for this date.</td></tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+            <div class="col-md-3">
+                <div class="card stat-card bg-matrix-orange">
+                    <div class="card-body">
+                        <p>Total Invoices</p>
+                        <h2><?php echo $total_invoices; ?></h2>
+                    </div>
                 </div>
+            </div>
+        </div>
+
+        <div class="table-box shadow-sm mt-3">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Invoice #</th>
+                            <th>Medicines Sold</th>
+                            <th>Time</th>
+                            <th>Handled By</th>
+                            <th class="text-end pe-3">Total (ZMW)</th>
+                            <th class="text-center no-print">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (!empty($sales_data)): ?>
+                            <?php foreach ($sales_data as $row): ?>
+                                <tr>
+                                    <td class="ps-3 fw-bold text-info">#<?php echo htmlspecialchars($row['invoice']); ?></td>
+                                    <td class="item-list"><?php echo htmlspecialchars($row['items_sold'] ?: 'No items'); ?></td>
+                                    <td><?php echo date('h:i A', strtotime($row['created_at'])); ?></td>
+                                    <td><?php echo htmlspecialchars($row['issuer'] ?? 'System'); ?></td>
+                                    <td class="text-end pe-3 fw-bold text-dark">K<?php echo number_format($row['total_amount'], 2); ?></td>
+                                    <td class="text-center no-print">
+                                        <a href="view_invoice.php?id=<?php echo $row['id']; ?>" class="text-dark">
+                                            <i class="mdi mdi-eye-outline text-primary"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr><td colspan="6" class="text-center py-5 text-muted">No transactions recorded for this date.</td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
 </div>
-<?php require "../includes/footer.php"; ?>
-</div>
 
-</script>
-<?php
-$content = ob_get_clean();
-require "../includes/myheader.php"; 
-?>
+<?php require_once "../includes/footer.php"; ?>
