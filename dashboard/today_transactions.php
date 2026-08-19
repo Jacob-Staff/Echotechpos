@@ -9,7 +9,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
-require_once "header.php"; 
+require_once "../includes/header.php";
 
 date_default_timezone_set('Africa/Lusaka');
 
@@ -138,9 +138,7 @@ if ($result) {
 </div>
 
 <?php 
-if (file_exists("footer.php")) {
-    require_once "footer.php"; 
-} elseif (file_exists("../includes/footer.php")) {
+if (file_exists("../includes/footer.php")) {
     require_once "../includes/footer.php"; 
 }
 ?>
