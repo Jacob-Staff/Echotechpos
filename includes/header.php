@@ -10,18 +10,28 @@ $today_date = date('d M Y');
 <header class="topbar">
     <nav class="navbar top-navbar navbar-expand-md navbar-dark p-0">
         <div class="navbar-header">
-            <a class="navbar-brand" href="../dashboard/dashboard.php">
-                <span class="logo-icon">PHARMANOVA</span>
-            </a>
+            <div class="d-flex align-items-center gap-2">
+                <!-- Mobile Hamburger Button -->
+                <button class="btn text-white p-0 d-md-none me-2" id="sidebarToggle" type="button" style="font-size: 1.4rem;">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <a class="navbar-brand m-0" href="../dashboard/dashboard.php">
+                    <span class="logo-icon">EchoPrimeTech</span>
+                </a>
+            </div>
+
+            <!-- Compact Search Bar for Mobile view -->
+            <div class="mobile-search-bar d-md-none">
+                <input type="text" class="form-control form-control-sm bg-white text-dark border-0" placeholder="Search..." style="height: 32px; font-size: 0.8rem;">
+            </div>
         </div>
-        <div class="navbar-collapse collapse d-flex justify-content-between align-items-center">
-            
-            <!-- Left Aligned Search Input (Matches Local Design) -->
+
+        <!-- Desktop Navigation Bar -->
+        <div class="navbar-collapse collapse d-none d-md-flex justify-content-between align-items-center">
             <div class="search-box me-auto" style="width: 380px;">
                 <input type="text" class="form-control form-control-sm bg-white text-dark border-0" placeholder="Search products..." style="height: 36px; border-radius: 4px;">
             </div>
 
-            <!-- Right Controls -->
             <div class="d-flex align-items-center gap-2">
                 <a href="../dashboard/dashboard.php" class="btn btn-primary btn-sm px-2 py-1"><i class="fas fa-home"></i></a>
                 <span class="text-white small ms-2 me-2"><i class="fas fa-building me-1 text-info"></i> <?php echo htmlspecialchars($branch_name); ?></span>
