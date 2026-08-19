@@ -41,28 +41,33 @@ try {
     // Generate unique invoice number
     $invoice_no = "PH-" . date('ymd') . "-" . strtoupper(substr(uniqid(), -4));
 
+    // Default status values
+    $payment_status = 'Paid';
+
     // Begin MySQLi Transaction
     $conn->begin_transaction();
     $in_transaction = true;
 
-    // 4. Insert Sale into 'sales' table
-    $stmt = $conn->prepare("INSERT INTO sales (pharmacy_id, branch_id, issued_by, invoice, total, total_amount, subtotal, vat_amount, payment_method, user_id, sale_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
+    // 4. Insert Sale into 'sales' table including 'payment' column
+    $stmt = $conn->prepare("INSERT INTO sales (pharmacy_id, branch_id, issued_by, invoice, total, total_amount, subtotal, vat_amount, payment, payment_method, payment_status, user_id, sale_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
     
     if (!$stmt) {
         throw new Exception("Database prepare error: " . $conn->error);
     }
     
-    // Bind types: i (int), i (int), s (string), s (string), d (double) x 4, s (string), i (int)
-    $stmt->bind_param("iissddddsi", 
+    // Types: i (pharmacy_id), i (branch_id), s (issued_by), s (invoice), d (total), d (total_amount), d (subtotal), d (vat_amount), d (payment), s (payment_method), s (payment_status), i (user_id)
+    $stmt->bind_param("iissdddddssi", 
         $pharmacy_id, 
         $branch_id, 
         $issued_by, 
         $invoice_no, 
-        $total_val,    // total
-        $total_val,    // total_amount
-        $subtotal_val, // subtotal
-        $vat_val,      // vat_amount
-        $payment_method, 
+        $total_val,      // total
+        $total_val,      // total_amount
+        $subtotal_val,   // subtotal
+        $vat_val,        // vat_amount
+        $total_val,      // payment
+        $payment_method, // payment_method
+        $payment_status, // payment_status
         $user_id
     );
     
