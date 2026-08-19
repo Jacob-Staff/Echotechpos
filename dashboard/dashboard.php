@@ -47,20 +47,20 @@ require_once "../includes/head.php";
 
     <div class="page-wrapper">
         
-        <!-- Breadcrumb Header -->
+        <!-- Breadcrumb & Scrollable Quick Actions Header -->
         <div class="page-breadcrumb">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
-                    <h4 class="fw-bold mb-0 text-dark" style="font-size: 1.2rem;">Dashboard</h4>
-                    <div class="text-primary small" style="font-size: 0.8rem;">Home</div>
+                    <h4 class="fw-bold mb-0 text-dark" style="font-size: 1.1rem;">Dashboard</h4>
+                    <div class="text-primary small" style="font-size: 0.78rem;">Home</div>
                 </div>
-                <div class="d-flex align-items-center flex-wrap gap-3">
-                    <a href="sell_now.php" class="text-dark text-decoration-none small fw-semibold"><i class="mdi mdi-cash-multiple me-1"></i> Sell Now</a>
-                    <a href="lay_by_sell.php" class="text-dark text-decoration-none small fw-semibold"><i class="mdi mdi-credit-card-plus me-1"></i> Lay-By Sell</a>
-                    <a href="expenses.php" class="text-dark text-decoration-none small fw-semibold"><i class="mdi mdi-chart-bar me-1"></i> Expenses</a>
-                    <a href="sales_report.php" class="text-dark text-decoration-none small fw-semibold"><i class="mdi mdi-chart-line me-1"></i> Sales Report</a>
-                    <a href="sales_trend.php" class="text-dark text-decoration-none small fw-semibold"><i class="mdi mdi-trending-up me-1"></i> Sales Trend</a>
-                    <a href="add_patients.php?invoice=<?php echo $invoice_number; ?>" class="btn btn-purple btn-sm px-3 rounded-2 shadow-sm">
+                <div class="quick-actions-nav">
+                    <a href="sell_now.php" class="text-dark text-decoration-none small fw-semibold me-2"><i class="mdi mdi-cash-multiple me-1"></i> Sell Now</a>
+                    <a href="lay_by_sell.php" class="text-dark text-decoration-none small fw-semibold me-2"><i class="mdi mdi-credit-card-plus me-1"></i> Lay-By Sell</a>
+                    <a href="expenses.php" class="text-dark text-decoration-none small fw-semibold me-2"><i class="mdi mdi-chart-bar me-1"></i> Expenses</a>
+                    <a href="sales_report.php" class="text-dark text-decoration-none small fw-semibold me-2"><i class="mdi mdi-chart-line me-1"></i> Sales Report</a>
+                    <a href="sales_trend.php" class="text-dark text-decoration-none small fw-semibold me-2"><i class="mdi mdi-trending-up me-1"></i> Sales Trend</a>
+                    <a href="add_patients.php?invoice=<?php echo $invoice_number; ?>" class="btn btn-purple btn-sm px-2 py-1 rounded-2 shadow-sm">
                         <i class="fas fa-plus me-1"></i> Add Patient
                     </a>
                 </div>
@@ -69,40 +69,40 @@ require_once "../includes/head.php";
 
         <div class="container-fluid p-0">
             <div class="row g-3">
-                <!-- 6 Main Dash Tiles -->
+                <!-- Main Tiles: Adapts to 2 Columns on Mobile -->
                 <div class="col-lg-9">
-                    <div class="row g-3">
-                        <div class="col-md-4">
+                    <div class="mobile-tile-grid">
+                        <div>
                             <a href="sell_now.php" class="card card-dash bg-tile-sellnow">
                                 <span class="card-title">Sell Now</span>
                                 <span class="card-value">All Items</span>
                             </a>
                         </div>
-                        <div class="col-md-4">
+                        <div>
                             <a href="today_transactions.php" class="card card-dash bg-tile-tx">
-                                <span class="card-title">Today's Transactions</span>
+                                <span class="card-title">Today's Tx</span>
                                 <span class="card-value" style="color: #eec136 !important;"><?php echo $today_tx_data['total'] ?? 0; ?></span>
                             </a>
                         </div>
-                        <div class="col-md-4">
+                        <div>
                             <a href="out_of_stock.php" class="card card-dash bg-tile-outstock">
                                 <span class="card-title">Out of Stock</span>
                                 <span class="card-value"><?php echo $out_of_stock_data['total'] ?? 2; ?></span>
                             </a>
                         </div>
-                        <div class="col-md-4">
+                        <div>
                             <a href="expired_products.php" class="card card-dash bg-tile-expired">
-                                <span class="card-title">Expired Products</span>
+                                <span class="card-title">Expired Items</span>
                                 <span class="card-value"><?php echo $expired_data['expired'] ?? 2; ?></span>
                             </a>
                         </div>
-                        <div class="col-md-4">
+                        <div>
                             <a href="customers.php" class="card card-dash bg-tile-customer">
                                 <span class="card-title">Customer</span>
                                 <span class="card-value">Service</span>
                             </a>
                         </div>
-                        <div class="col-md-4">
+                        <div>
                             <a href="online_manager.php" class="card card-dash bg-tile-online">
                                 <span class="card-title">Prescription</span>
                                 <span class="card-value">Online</span>
@@ -111,7 +111,7 @@ require_once "../includes/head.php";
                     </div>
                 </div>
 
-                <!-- Urgent Alerts Sidebar Widget -->
+                <!-- Urgent Alerts Widget -->
                 <div class="col-lg-3">
                     <div class="card border-0 shadow-sm rounded-2">
                         <div class="card-header bg-white py-2 border-bottom-0">
@@ -137,18 +137,42 @@ require_once "../includes/head.php";
                         </div>
                     </div>
                 </div>
-                            <?php 
-                    // Add your footer component here
+
+            </div>
+        </div>
+    </div>
+
+    <?php 
     if (file_exists("../includes/footer.php")) {
         require_once "../includes/footer.php"; 
     }
     ?>
-            </div>
-        </div>
-    </div>
+
 </div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Mobile Sidebar Drawer JS -->
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        if (sidebarToggle) {
+            sidebarToggle.addEventListener('click', function(e) {
+                e.preventDefault();
+                document.body.classList.toggle('mobile-nav-open');
+            });
+        }
+
+        // Close sidebar when clicking outside on mobile
+        document.addEventListener('click', function(e) {
+            if (document.body.classList.contains('mobile-nav-open') && 
+                !e.target.closest('.left-sidebar') && 
+                !e.target.closest('#sidebarToggle')) {
+                document.body.classList.remove('mobile-nav-open');
+            }
+        });
+    });
+</script>
 </body>
 </html>
