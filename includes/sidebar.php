@@ -27,8 +27,8 @@ $user_display_name = htmlspecialchars(current_user());
                 </li>
                 
                 <li class="sidebar-item">
-                    <a class="sidebar-link waves-effect waves-dark sidebar-link <?php echo is_active('dashboad.php'); ?>"
-                        href="dashboad.php" aria-expanded="false">
+                    <a class="sidebar-link waves-effect waves-dark sidebar-link <?php echo is_active('dashboard.php'); ?>"
+                        href="dashboard.php" aria-expanded="false">
                         <i class="mdi mdi-view-dashboard"></i>
                         <span class="hide-menu">Dashboard</span>
                     </a>
@@ -65,8 +65,9 @@ $user_display_name = htmlspecialchars(current_user());
                 <?php endif; ?>
                 
                 <li class="sidebar-item border-top mt-3">
-                    <a href="../logout.php" class="nav-link text-danger">Logout</a>
-                    <i class="fas fa-power-off"></i> Logout
+                    <a href="../logout.php" class="sidebar-link waves-effect waves-dark text-danger">
+                        <i class="fas fa-power-off text-danger"></i>
+                        <span class="hide-menu">Logout</span>
                     </a>
                 </li>
             </ul>
