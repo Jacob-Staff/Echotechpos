@@ -7,12 +7,11 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// 1. INCLUDES FIRST
-require_once "../includes/conn.php";[cite: 6]
-require_once "../includes/auth.php";[cite: 6]
-require_once "../includes/header.php";
+// 1. INCLUDES
+require_once "../includes/conn.php";
+require_once "../includes/auth.php";
 
-date_default_timezone_set('Africa/Lusaka');[cite: 6]
+date_default_timezone_set('Africa/Lusaka');
 
 $pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
 $branch_id   = (int)($_SESSION['branch_id'] ?? 0);
@@ -300,5 +299,7 @@ function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
         });
     });
 </script>
-
-<?php require_once "../includes/footer.php"; ?>
+<?php
+$content = ob_get_clean();
+require "../includes/myheader.php"; 
+?>
