@@ -36,20 +36,11 @@ require_once "../includes/head.php";
 ?>
 
 <style>
-:root {
-    --primary-gradient: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
-    --accent-gradient: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    --card-bg-dark: #1e293b;
-    --card-header-dark: #0f172a;
-    --border-color-dark: #334155;
-    --text-neon: #38ef7d;
-}
-
 .layby-wrapper {
-    background-color: #f1f5f9 !important;
+    background-color: #f4f6f9 !important;
     min-height: calc(100vh - 70px);
     padding: 1rem;
-    color: #334155;
+    color: #212529;
 }
 
 @media (min-width: 768px) {
@@ -62,59 +53,58 @@ require_once "../includes/head.php";
     background: #ffffff;
     padding: 1.25rem;
     border-radius: 12px;
-    border-left: 6px solid #0d6efd;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    border-left: 5px solid #0d6efd;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     margin-bottom: 1.25rem;
 }
 
-/* Custom Modern Card Design */
+/* Light Theme Cards */
 .layby-card {
-    background-color: var(--card-bg-dark);
-    border: 1px solid var(--border-color-dark);
-    border-radius: 14px;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-    overflow: hidden;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03);
 }
 
 .layby-card-header {
-    background-color: var(--card-header-dark);
+    background-color: #f8fafc;
     padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--border-color-dark);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    border-bottom: 1px solid #e2e8f0;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
 }
 
 .layby-card-title {
-    color: var(--text-neon);
+    color: #0f172a;
     font-weight: 700;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     margin: 0;
 }
 
 /* Forms & Inputs */
 .layby-card .form-control {
-    background-color: #0f172a !important;
-    color: #f8fafc !important;
-    border: 1px solid var(--border-color-dark) !important;
-    padding: 0.65rem 0.85rem;
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+    padding: 0.6rem 0.85rem;
     font-size: 0.95rem;
+    border-radius: 8px;
 }
 
 .layby-card .form-control:focus {
-    border-color: #38ef7d !important;
-    box-shadow: 0 0 0 0.25rem rgba(56, 239, 125, 0.15) !important;
+    border-color: #0d6efd !important;
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15) !important;
 }
 
 .layby-card .form-control::placeholder {
-    color: #64748b !important;
+    color: #94a3b8 !important;
 }
 
-/* Live Search Dropdown */
+/* Search Dropdown */
 .product-search-results { 
     position: absolute; 
-    background-color: #0f172a; 
-    border: 1px solid #38ef7d; 
+    background-color: #ffffff; 
+    border: 1px solid #0d6efd; 
     max-height: 280px; 
     overflow-y: auto; 
     width: 100%; 
@@ -124,43 +114,43 @@ require_once "../includes/head.php";
     padding: 0; 
     margin-top: 4px;
     border-radius: 8px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
 }
 
 .product-item { 
-    padding: 12px 15px; 
+    padding: 10px 14px; 
     cursor: pointer; 
-    color: #f8fafc; 
-    border-bottom: 1px solid var(--border-color-dark); 
+    color: #1e293b; 
+    border-bottom: 1px solid #f1f5f9; 
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
 
 .product-item:hover { 
-    background: var(--accent-gradient); 
-    color: #000; 
+    background-color: #e0f2fe; 
+    color: #0369a1; 
     font-weight: 600;
 }
 
-/* Responsive Table Stylings */
-.table-dark-custom {
-    color: #f8fafc;
+/* Light Table Styling */
+.table-light-custom {
+    color: #334155;
     margin-bottom: 0;
 }
 
-.table-dark-custom thead th {
-    background-color: #0f172a;
-    color: var(--text-neon);
-    border-bottom: 2px solid var(--border-color-dark);
+.table-light-custom thead th {
+    background-color: #f1f5f9;
+    color: #0f172a;
+    border-bottom: 2px solid #e2e8f0;
     font-size: 0.8rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     padding: 12px;
 }
 
-.table-dark-custom tbody td {
-    border-bottom: 1px solid var(--border-color-dark);
+.table-light-custom tbody td {
+    border-bottom: 1px solid #f1f5f9;
     vertical-align: middle;
     padding: 12px;
     font-size: 0.9rem;
@@ -175,9 +165,38 @@ require_once "../includes/head.php";
 }
 
 .balance-box {
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    background: #f8fafc;
     border: 1px solid #0d6efd;
     border-radius: 10px;
+}
+
+/* Mobile Responsive Adjustments for Tables/Lists */
+@media (max-width: 767.98px) {
+    .desktop-table-view {
+        display: none !important;
+    }
+    .mobile-card-view {
+        display: block !important;
+    }
+}
+
+@media (min-width: 768px) {
+    .desktop-table-view {
+        display: table !important;
+    }
+    .mobile-card-view {
+        display: none !important;
+    }
+}
+
+/* Mobile Card Styling for Layby Agreements */
+.layby-mobile-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 15px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
 }
 </style>
 
@@ -206,21 +225,21 @@ require_once "../includes/head.php";
                 <!-- Left: Shopping Cart Area -->
                 <div class="col-12 col-lg-7 col-xl-8">
                     <div class="card layby-card shadow-sm h-100">
-                        <div class="layby-card-header">
-                            <h4 class="layby-card-title"><i class="fas fa-cart-plus me-2"></i>New Lay-by Sale</h4>
-                            <span class="badge bg-primary rounded-pill small fw-normal px-3 py-2">POS Mode</span>
+                        <div class="layby-card-header d-flex align-items-center justify-content-between">
+                            <h4 class="layby-card-title"><i class="fas fa-cart-plus me-2 text-primary"></i>New Lay-by Sale</h4>
+                            <span class="badge bg-primary rounded-pill small fw-normal px-3 py-1">POS Mode</span>
                         </div>
                         <div class="card-body p-3 p-md-4">
                             <!-- Product Search Bar -->
                             <div class="position-relative mb-3">
-                                <label class="text-white small mb-1"><i class="fas fa-search me-1"></i> Search Inventory Item</label>
+                                <label class="form-label fw-bold text-dark small mb-1"><i class="fas fa-search me-1 text-primary"></i> Search Inventory Item</label>
                                 <input type="text" id="product_search" class="form-control" placeholder="Type product name or scan barcode..." autocomplete="off">
                                 <ul id="product_results" class="product-search-results"></ul>
                             </div>
 
                             <!-- Cart Table -->
                             <div class="table-responsive">
-                                <table class="table table-dark-custom align-middle">
+                                <table class="table table-light-custom align-middle">
                                     <thead>
                                         <tr>
                                             <th>Item</th>
@@ -242,13 +261,13 @@ require_once "../includes/head.php";
                             </div>
 
                             <!-- Cart Summary Footer -->
-                            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mt-3 pt-3 border-top border-secondary gap-3">
+                            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mt-3 pt-3 border-top gap-3">
                                 <button id="clear_cart" class="btn btn-outline-danger btn-sm px-3 align-self-start align-self-sm-center">
                                     <i class="fas fa-trash me-1"></i> Clear Cart
                                 </button>
                                 <div class="text-sm-end">
-                                    <small class="text-muted text-uppercase d-block fw-bold" style="letter-spacing: 1px;">Cart Grand Total</small>
-                                    <h3 class="text-white fw-bold mb-0">K<span id="layby_total" class="text-success">0.00</span></h3>
+                                    <small class="text-muted text-uppercase d-block fw-bold" style="letter-spacing: 0.5px;">Cart Grand Total</small>
+                                    <h3 class="text-dark fw-bold mb-0">K<span id="layby_total" class="text-success">0.00</span></h3>
                                 </div>
                             </div>
                         </div>
@@ -259,37 +278,37 @@ require_once "../includes/head.php";
                 <div class="col-12 col-lg-5 col-xl-4">
                     <div class="card layby-card shadow-sm h-100">
                         <div class="layby-card-header">
-                            <h4 class="layby-card-title"><i class="fas fa-user-check me-2"></i>Customer & Payment</h4>
+                            <h4 class="layby-card-title"><i class="fas fa-user-check me-2 text-primary"></i>Customer & Payment</h4>
                         </div>
                         <div class="card-body p-3 p-md-4">
                             <form id="layby_form">
                                 <div class="mb-2">
-                                    <label class="text-white small mb-1">Customer Full Name <span class="text-danger">*</span></label>
+                                    <label class="form-label fw-bold text-dark small mb-1">Customer Full Name <span class="text-danger">*</span></label>
                                     <input type="text" id="customer_name" class="form-control" placeholder="e.g. John Banda" required>
                                 </div>
                                 
                                 <div class="mb-2">
-                                    <label class="text-white small mb-1">Phone Number <span class="text-danger">*</span></label>
+                                    <label class="form-label fw-bold text-dark small mb-1">Phone Number <span class="text-danger">*</span></label>
                                     <input type="tel" id="customer_phone" class="form-control" placeholder="e.g. 097xxxxxxx" required>
                                 </div>
                                 
                                 <div class="mb-2">
-                                    <label class="text-white small mb-1">Initial Deposit (K)</label>
+                                    <label class="form-label fw-bold text-dark small mb-1">Initial Deposit (K)</label>
                                     <div class="input-group">
-                                        <span class="input-group-text bg-dark text-white border-secondary">K</span>
+                                        <span class="input-group-text bg-light text-dark border-secondary">K</span>
                                         <input type="number" id="deposit" class="form-control" value="0.00" step="0.01" min="0">
                                     </div>
                                 </div>
                                 
                                 <div class="mb-3">
-                                    <label class="text-white small mb-1">Final Settlement Due Date <span class="text-danger">*</span></label>
+                                    <label class="form-label fw-bold text-dark small mb-1">Final Settlement Due Date <span class="text-danger">*</span></label>
                                     <input type="date" id="due_date" class="form-control" required>
                                 </div>
                                 
                                 <!-- Balance Preview Widget -->
                                 <div class="balance-box p-3 mb-3 text-center">
-                                    <small class="text-info text-uppercase fw-bold d-block mb-1" style="letter-spacing: 0.5px;">Remaining Balance Due</small>
-                                    <h3 class="text-white fw-bold mb-0">K<span id="balance_due" class="text-warning">0.00</span></h3>
+                                    <small class="text-primary text-uppercase fw-bold d-block mb-1" style="letter-spacing: 0.5px;">Remaining Balance Due</small>
+                                    <h3 class="text-dark fw-bold mb-0">K<span id="balance_due" class="text-danger">0.00</span></h3>
                                 </div>
                                 
                                 <button type="submit" class="btn btn-success fw-bold w-100 py-2 shadow-sm">
@@ -301,18 +320,19 @@ require_once "../includes/head.php";
                 </div>
             </div>
 
-            <!-- Bottom: Existing Agreements Table -->
+            <!-- Bottom: Existing Agreements Table & Mobile List -->
             <div class="card layby-card mt-4 shadow-sm">
-                <div class="layby-card-header flex-column flex-sm-row gap-2">
-                    <h4 class="layby-card-title" id="list_title"><i class="fas fa-list-alt me-2"></i>Active Lay-by Agreements</h4>
-                    <div class="d-flex gap-2">
-                        <button id="toggle_paid" class="btn btn-info btn-sm fw-bold">View Fully Paid</button>
+                <div class="layby-card-header d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
+                    <h4 class="layby-card-title" id="list_title"><i class="fas fa-list-alt me-2 text-primary"></i>Active Lay-by Agreements</h4>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button id="toggle_paid" class="btn btn-info btn-sm text-white fw-bold">View Fully Paid</button>
                         <button id="clear_fully_paid" class="btn btn-danger btn-sm fw-bold" style="display:none;">Clear Fully Paid Lay-bys</button>
                     </div>
                 </div>
-                <div class="card-body p-0">
+                <div class="card-body p-2 p-md-3">
+                    <!-- Desktop Table View -->
                     <div class="table-responsive">
-                        <table class="table table-dark-custom text-center align-middle">
+                        <table class="table table-light-custom text-center align-middle desktop-table-view w-100">
                             <thead>
                                 <tr>
                                     <th class="text-start ps-3">Customer</th>
@@ -323,10 +343,15 @@ require_once "../includes/head.php";
                                     <th class="pe-3">Action</th>
                                 </tr>
                             </thead>
-                            <tbody id="layby_list">
+                            <tbody id="layby_list_desktop">
                                 <tr><td colspan="6" class="py-4 text-muted">Loading agreements...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+
+                    <!-- Mobile Cards Container View -->
+                    <div id="layby_list_mobile" class="mobile-card-view">
+                        <div class="text-center py-4 text-muted">Loading agreements...</div>
                     </div>
                 </div>
             </div>
@@ -346,18 +371,68 @@ require_once "../includes/head.php";
 let cart = [];
 let showingPaid = false;
 
-/* LOAD RECORDS */
+/* LOAD RECORDS FOR BOTH DESKTOP TABLE & MOBILE CARDS */
 function loadRecords(){
     let status = showingPaid ? 'Completed' : 'Active';
 
-    $('#layby_list').html('<tr><td colspan="6" class="py-4"><i class="fas fa-spinner fa-spin me-2"></i>Loading agreements...</td></tr>');
+    $('#layby_list_desktop').html('<tr><td colspan="6" class="py-4"><i class="fas fa-spinner fa-spin me-2"></i>Loading agreements...</td></tr>');
+    $('#layby_list_mobile').html('<div class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Loading agreements...</div>');
 
     $.get('actions/fetch_laybys.php', { status: status })
     .done(function(data){
-        $('#layby_list').html(data);
+        // Render desktop
+        $('#layby_list_desktop').html(data);
+
+        // Convert data rows for responsive mobile view
+        let mobileHtml = '';
+        let rows = $('#layby_list_desktop tr');
+
+        if(rows.length && !$(rows[0]).find('td[colspan]').length) {
+            rows.each(function(){
+                let cols = $(this).find('td');
+                if(cols.length >= 6) {
+                    let customer = $(cols[0]).html();
+                    let total    = $(cols[1]).text();
+                    let paid     = $(cols[2]).text();
+                    let balance  = $(cols[3]).text();
+                    let dueDate  = $(cols[4]).text();
+                    let action   = $(cols[5]).html();
+
+                    mobileHtml += `
+                        <div class="layby-mobile-card">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div><strong class="text-dark fs-6">${customer}</strong></div>
+                                <span class="badge bg-light text-dark border">${dueDate}</span>
+                            </div>
+                            <div class="row g-2 mb-2 text-center small">
+                                <div class="col-4">
+                                    <div class="text-muted">Total</div>
+                                    <div class="fw-bold">${total}</div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="text-muted">Paid</div>
+                                    <div class="fw-bold text-success">${paid}</div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="text-muted">Balance</div>
+                                    <div class="fw-bold text-danger">${balance}</div>
+                                </div>
+                            </div>
+                            <div class="pt-2 border-top d-flex justify-content-end gap-2">
+                                ${action}
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            $('#layby_list_mobile').html(mobileHtml);
+        } else {
+            $('#layby_list_mobile').html('<div class="text-center py-4 text-muted">No agreements found.</div>');
+        }
     })
     .fail(function(){
-        $('#layby_list').html('<tr><td colspan="6" class="text-danger py-4">Failed to load lay-by records.</td></tr>');
+        $('#layby_list_desktop').html('<tr><td colspan="6" class="text-danger py-4">Failed to load lay-by records.</td></tr>');
+        $('#layby_list_mobile').html('<div class="text-center text-danger py-4">Failed to load lay-by records.</div>');
     });
 }
 
@@ -386,7 +461,7 @@ $(document).ready(function(){
                    .removeClass('btn-warning')
                    .addClass('btn-info');
 
-            $('#list_title').html('<i class="fas fa-list-alt me-2"></i>Active Lay-by Agreements');
+            $('#list_title').html('<i class="fas fa-list-alt me-2 text-primary"></i>Active Lay-by Agreements');
             $('#clear_fully_paid').hide();
         }
 
@@ -481,9 +556,9 @@ function renderCart() {
             <td>K${i.price.toFixed(2)}</td>
             <td class="text-center">
                 <div class="d-inline-flex align-items-center gap-1">
-                    <button type="button" class="btn btn-sm btn-outline-light cart-qty-btn" onclick="adjustQty(${index}, -1)">-</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary cart-qty-btn" onclick="adjustQty(${index}, -1)">-</button>
                     <span class="fw-bold px-1">${i.qty}</span>
-                    <button type="button" class="btn btn-sm btn-outline-light cart-qty-btn" onclick="adjustQty(${index}, 1)">+</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary cart-qty-btn" onclick="adjustQty(${index}, 1)">+</button>
                 </div>
             </td>
             <td class="text-success fw-bold">K${sub.toFixed(2)}</td>
@@ -513,9 +588,9 @@ function updateBalance() {
     balanceSpan.text((balance < 0 ? 0 : balance).toFixed(2));
 
     if (balance <= 0 && total > 0) {
-        balanceSpan.removeClass('text-warning').addClass('text-success');
+        balanceSpan.removeClass('text-danger').addClass('text-success');
     } else {
-        balanceSpan.removeClass('text-success').addClass('text-warning');
+        balanceSpan.removeClass('text-success').addClass('text-danger');
     }
 }
 
