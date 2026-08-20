@@ -293,7 +293,7 @@ body {
                                         <label class="form-label">First Name <span class="text-danger">*</span></label>
                                         <div class="input-group">
                                             <span class="input-group-text"><i class="fas fa-user"></i></span>
-                                            <input type="text" name="first_name" class="form-control" placeholder="John" required>
+                                            <input type="text" name="first_name" class="form-control" placeholder="Enter here" required>
                                         </div>
                                     </div>
 
@@ -302,7 +302,7 @@ body {
                                         <label class="form-label">Last Name <span class="text-danger">*</span></label>
                                         <div class="input-group">
                                             <span class="input-group-text"><i class="fas fa-user"></i></span>
-                                            <input type="text" name="last_name" class="form-control" placeholder="Doe" required>
+                                            <input type="text" name="last_name" class="form-control" placeholder="Enter here" required>
                                         </div>
                                     </div>
 
@@ -397,13 +397,10 @@ $(document).ready(function(){
     $('#addPatientForm').submit(function(e){
         e.preventDefault();
         let btn = $('#submitBtn');
-        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i> Saving Record...');
-
-        // Use standard relative request with fallback resolution
-        let actionUrl = 'actions/register_patient.php';
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i> SAVING PATIENT...');
 
         $.ajax({
-            url: actionUrl,
+            url: 'actions/register_patient.php',
             type: 'POST',
             data: $(this).serialize(),
             dataType: 'json',
@@ -423,25 +420,30 @@ $(document).ready(function(){
                             <div>${res.message}</div>
                         </div>
                     `);
-                    btn.prop('disabled', false).html('<i class="fas fa-save me-2"></i> Register Patient');
+                    btn.prop('disabled', false).html('<i class="fas fa-save me-2"></i> REGISTER PATIENT');
                 }
             },
             error: function(xhr, status, error){
-                console.error("HTTP Status:", xhr.status);
-                console.error("Response Text:", xhr.responseText);
-                
-                let errDetail = "Server communication error (" + xhr.status + ").";
-                if(xhr.responseText) {
-                    errDetail += " Response: " + xhr.responseText.substring(0, 100);
+                console.error("XHR Status:", xhr.status);
+                console.error("Response Body:", xhr.responseText);
+
+                let errorMsg = "Server error (500). ";
+                if (xhr.responseText) {
+                    try {
+                        let parsed = JSON.parse(xhr.responseText);
+                        if (parsed.message) errorMsg = parsed.message;
+                    } catch(e) {
+                        errorMsg += xhr.responseText.replace(/<[^>]*>?/gm, '').substring(0, 150);
+                    }
                 }
 
                 $('#form-message').html(`
                     <div class="alert alert-danger border-0 shadow-sm d-flex align-items-center" role="alert">
                         <i class="fas fa-exclamation-triangle fa-lg me-3"></i>
-                        <div>${errDetail}</div>
+                        <div>${errorMsg}</div>
                     </div>
                 `);
-                btn.prop('disabled', false).html('<i class="fas fa-save me-2"></i> Register Patient');
+                btn.prop('disabled', false).html('<i class="fas fa-save me-2"></i> REGISTER PATIENT');
             }
         });
     });
