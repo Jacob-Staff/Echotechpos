@@ -451,7 +451,7 @@ $('#layby_form').on('submit', function(e) {
     const payload = $(this).serialize() + '&cart=' + JSON.stringify(cart) + '&total_amount=' + total;
 
     $.ajax({
-        url: 'actions/create_layby.php',
+        url: 'create_layby.php', // FIXED: Removed 'actions/' prefix to match your file structure
         type: 'POST',
         data: payload,
         dataType: 'json',
@@ -476,11 +476,19 @@ $('#layby_form').on('submit', function(e) {
                 btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Create Agreement');
             }
         },
-        error: function(xhr) {
+        error: function(xhr, status, error) {
+            let msg = 'Could not process request.';
+            try {
+                const res = JSON.parse(xhr.responseText);
+                if (res.message) msg = res.message;
+            } catch(e) {
+                msg = 'Server Error (' + xhr.status + ')';
+            }
+
             Swal.fire({
                 icon: 'error',
-                title: 'Server Error',
-                text: 'Response: ' + xhr.responseText,
+                title: 'Error',
+                text: msg,
                 confirmButtonColor: '#dc3545'
             });
             btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Create Agreement');
