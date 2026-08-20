@@ -1,6 +1,5 @@
-<?php 
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+<?php
+ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -20,7 +19,15 @@ $pharmacy_id = (int)$_SESSION['pharmacy_id'];
 $branch_id   = (int)$_SESSION['branch_id'];
 $user_id     = (int)$_SESSION['user_id'];
 
-// Branding Info
+// Fetch items for product search/selection
+$items_sql = "SELECT id, item_name, price, quantity FROM store_items WHERE pharmacy_id = $pharmacy_id AND branch_id = $branch_id AND is_active = 1 ORDER BY item_name ASC";
+$items_res = mysqli_query($conn, $items_sql);
+
+// Fetch Active Lay-bys
+$laybys_sql = "SELECT * FROM laybys WHERE pharmacy_id = $pharmacy_id AND branch_id = $branch_id AND balance_due > 0 ORDER BY id DESC";
+$laybys_res = mysqli_query($conn, $laybys_sql);
+
+// Fetch Branding Info
 $info_stmt = mysqli_prepare($conn, "SELECT p.name, b.branch_name FROM pharmacies p JOIN branches b ON b.pharmacy_id = p.id WHERE p.id = ? AND b.id = ? LIMIT 1");
 mysqli_stmt_bind_param($info_stmt, "ii", $pharmacy_id, $branch_id);
 mysqli_stmt_execute($info_stmt);
@@ -28,108 +35,46 @@ $info_res = mysqli_stmt_get_result($info_stmt);
 $info = mysqli_fetch_assoc($info_res);
 
 $display_pharm = $info['name'] ?? 'PHARMANOVA';
-$display_bran  = $info['branch_name'] ?? 'Main Branch';
+$display_bran  = $info['branch_name'] ?? 'Nova Lsk';
 
 function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
 
 require_once "../includes/head.php";
 ?>
 
+<!-- SweetAlert2 CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+
 <style>
-.layby-wrapper {
+.layby-page-wrapper {
     background-color: #f4f6f9 !important;
     min-height: calc(100vh - 70px);
-    padding: 1rem;
+    padding: 1.25rem;
     color: #212529;
 }
 
-@media (min-width: 768px) {
-    .layby-wrapper { padding: 1.5rem; }
-}
-
-.header-banner {
-    background: #ffffff;
-    padding: 1.25rem;
-    border-radius: 12px;
-    border-left: 5px solid #0d6efd;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-    margin-bottom: 1.25rem;
-}
-
-.layby-card {
+.card-custom {
     background-color: #ffffff;
     border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03);
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    margin-bottom: 1.5rem;
 }
 
-.layby-card-header {
+.card-custom-header {
     background-color: #f8fafc;
     padding: 1rem 1.25rem;
     border-bottom: 1px solid #e2e8f0;
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
 }
 
-.layby-card-title {
-    color: #0f172a;
-    font-weight: 700;
-    font-size: 1.05rem;
-    margin: 0;
-}
-
-.layby-card .form-control {
-    background-color: #ffffff !important;
-    color: #0f172a !important;
-    border: 1px solid #cbd5e1 !important;
-    padding: 0.6rem 0.85rem;
-    font-size: 0.95rem;
-    border-radius: 8px;
-}
-
-.layby-card .form-control:focus {
-    border-color: #0d6efd !important;
-    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15) !important;
-}
-
-.product-search-results { 
-    position: absolute; 
-    background-color: #ffffff; 
-    border: 1px solid #0d6efd; 
-    max-height: 280px; 
-    overflow-y: auto; 
-    width: 100%; 
-    display: none; 
-    z-index: 9999; 
-    list-style: none; 
-    padding: 0; 
-    margin-top: 4px;
-    border-radius: 8px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-}
-
-.product-item { 
-    padding: 10px 14px; 
-    cursor: pointer; 
-    color: #1e293b; 
-    border-bottom: 1px solid #f1f5f9; 
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.product-item:hover { 
-    background-color: #e0f2fe; 
-    color: #0369a1; 
-    font-weight: 600;
-}
-
-.table-light-custom {
+.table-custom {
     color: #334155;
     margin-bottom: 0;
 }
 
-.table-light-custom thead th {
+.table-custom thead th {
     background-color: #f1f5f9;
     color: #0f172a;
     border-bottom: 2px solid #e2e8f0;
@@ -139,44 +84,44 @@ require_once "../includes/head.php";
     padding: 12px;
 }
 
-.table-light-custom tbody td {
+.table-custom tbody td {
     border-bottom: 1px solid #f1f5f9;
     vertical-align: middle;
     padding: 12px;
     font-size: 0.9rem;
 }
 
-.cart-qty-btn {
-    width: 26px;
-    height: 26px;
+.product-search-list {
+    max-height: 200px;
+    overflow-y: auto;
+    position: absolute;
+    width: 100%;
+    z-index: 1050;
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    display: none;
+}
+
+.product-search-item {
+    padding: 10px 15px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.product-search-item:hover {
+    background-color: #f8fafc;
+}
+
+.qty-btn {
+    width: 28px;
+    height: 28px;
     padding: 0;
-    line-height: 1;
     border-radius: 50%;
-}
-
-.balance-box {
-    background: #f8fafc;
-    border: 1px solid #0d6efd;
-    border-radius: 10px;
-}
-
-@media (max-width: 767.98px) {
-    .desktop-table-view { display: none !important; }
-    .mobile-card-view { display: block !important; }
-}
-
-@media (min-width: 768px) {
-    .desktop-table-view { display: table !important; }
-    .mobile-card-view { display: none !important; }
-}
-
-.layby-mobile-card {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 12px 15px;
-    margin-bottom: 12px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 </style>
 
@@ -186,110 +131,94 @@ require_once "../includes/head.php";
     if (file_exists("../includes/aside.php")) require_once "../includes/aside.php"; 
     ?>
 
-    <div class="page-wrapper layby-wrapper">
+    <div class="page-wrapper layby-page-wrapper">
         <div class="container-fluid p-0">
 
-            <!-- Banner Header -->
-            <div class="header-banner d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
                 <div>
-                    <h3 class="fw-bold text-dark mb-0"><i class="fas fa-hand-holding-usd text-primary me-2"></i>Lay-by Management</h3>
+                    <h3 class="fw-bold text-dark mb-0">Lay-by Sales & Agreements</h3>
                     <span class="text-secondary small">
                         <i class="fas fa-store me-1"></i> Branch: <b class="text-dark"><?php echo e($display_bran); ?></b> | <b class="text-dark"><?php echo e($display_pharm); ?></b>
                     </span>
                 </div>
             </div>
 
-            <!-- Main Workstation Layout -->
-            <div class="row g-3 g-lg-4">
-                <!-- Left: Cart Area -->
-                <div class="col-12 col-lg-7 col-xl-8">
-                    <div class="card layby-card shadow-sm h-100">
-                        <div class="layby-card-header d-flex align-items-center justify-content-between">
-                            <h4 class="layby-card-title"><i class="fas fa-cart-plus me-2 text-primary"></i>New Lay-by Sale</h4>
-                            <span class="badge bg-primary rounded-pill small fw-normal px-3 py-1">POS Mode</span>
+            <div class="row g-4">
+                <!-- Cart & Search Section -->
+                <div class="col-12 col-lg-8">
+                    <div class="card card-custom">
+                        <div class="card-custom-header">
+                            <h5 class="fw-bold text-dark mb-0"><i class="fas fa-search me-2 text-primary"></i>Search Products</h5>
                         </div>
-                        <div class="card-body p-3 p-md-4">
-                            <!-- Product Search Bar -->
-                            <div class="position-relative mb-3">
-                                <label class="form-label fw-bold text-dark small mb-1"><i class="fas fa-search me-1 text-primary"></i> Search Inventory Item</label>
-                                <input type="text" id="product_search" class="form-control" placeholder="Type product name or scan barcode..." autocomplete="off">
-                                <ul id="product_results" class="product-search-results"></ul>
-                            </div>
+                        <div class="card-body p-3 position-relative">
+                            <input type="text" id="search_product" class="form-control form-control-lg" placeholder="Type product name or barcode..." autocomplete="off">
+                            <div id="product_results" class="product-search-list"></div>
+                        </div>
+                    </div>
 
-                            <!-- Cart Table -->
+                    <div class="card card-custom">
+                        <div class="card-custom-header d-flex justify-content-between align-items-center">
+                            <h5 class="fw-bold text-dark mb-0"><i class="fas fa-shopping-cart me-2 text-primary"></i>Lay-by Cart</h5>
+                            <button class="btn btn-outline-danger btn-sm fw-bold" onclick="clearCart()"><i class="fas fa-trash me-1"></i> Clear Cart</button>
+                        </div>
+                        <div class="card-body p-0">
                             <div class="table-responsive">
-                                <table class="table table-light-custom align-middle">
+                                <table class="table table-custom align-middle">
                                     <thead>
                                         <tr>
                                             <th>Item</th>
-                                            <th>Price</th>
-                                            <th width="120" class="text-center">Qty</th>
-                                            <th>Total</th>
-                                            <th width="40"></th>
+                                            <th class="text-center">Price</th>
+                                            <th class="text-center" style="width: 140px;">Qty</th>
+                                            <th class="text-end">Subtotal</th>
+                                            <th class="text-center" style="width: 50px;">Action</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="layby_items">
+                                    <tbody id="cart_body">
                                         <tr>
-                                            <td colspan="5" class="text-center text-muted py-4">
-                                                <i class="fas fa-shopping-basket display-6 d-block mb-2 opacity-25"></i>
-                                                Cart is currently empty. Use the search box to add products.
-                                            </td>
+                                            <td colspan="5" class="text-center py-4 text-muted">No products added yet. Use the search box above.</td>
                                         </tr>
                                     </tbody>
                                 </table>
                             </div>
-
-                            <!-- Cart Summary -->
-                            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mt-3 pt-3 border-top gap-3">
-                                <button id="clear_cart" class="btn btn-outline-danger btn-sm px-3 align-self-start align-self-sm-center">
-                                    <i class="fas fa-trash me-1"></i> Clear Cart
-                                </button>
-                                <div class="text-sm-end">
-                                    <small class="text-muted text-uppercase d-block fw-bold" style="letter-spacing: 0.5px;">Cart Grand Total</small>
-                                    <h3 class="text-dark fw-bold mb-0">K<span id="layby_total" class="text-success">0.00</span></h3>
-                                </div>
-                            </div>
+                        </div>
+                        <div class="card-footer bg-white text-end py-3 pe-4">
+                            <span class="fs-6 fw-bold text-muted me-2">CART GRAND TOTAL:</span>
+                            <span class="fs-4 fw-bold text-success" id="cart_total">K0.00</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Right: Customer Setup -->
-                <div class="col-12 col-lg-5 col-xl-4">
-                    <div class="card layby-card shadow-sm h-100">
-                        <div class="layby-card-header">
-                            <h4 class="layby-card-title"><i class="fas fa-user-check me-2 text-primary"></i>Customer & Payment</h4>
+                <!-- Agreement Details Form -->
+                <div class="col-12 col-lg-4">
+                    <div class="card card-custom">
+                        <div class="card-custom-header">
+                            <h5 class="fw-bold text-dark mb-0"><i class="fas fa-file-contract me-2 text-primary"></i>Agreement Details</h5>
                         </div>
-                        <div class="card-body p-3 p-md-4">
+                        <div class="card-body p-3">
                             <form id="layby_form">
-                                <div class="mb-2">
-                                    <label class="form-label fw-bold text-dark small mb-1">Customer Full Name <span class="text-danger">*</span></label>
-                                    <input type="text" id="customer_name" class="form-control" placeholder="e.g. John Banda" required>
-                                </div>
-                                
-                                <div class="mb-2">
-                                    <label class="form-label fw-bold text-dark small mb-1">Phone Number <span class="text-danger">*</span></label>
-                                    <input type="tel" id="customer_phone" class="form-control" placeholder="e.g. 097xxxxxxx" required>
-                                </div>
-                                
-                                <div class="mb-2">
-                                    <label class="form-label fw-bold text-dark small mb-1">Initial Deposit (K)</label>
-                                    <div class="input-group">
-                                        <span class="input-group-text bg-light text-dark border-secondary">K</span>
-                                        <input type="number" id="deposit" class="form-control" value="0.00" step="0.01" min="0">
-                                    </div>
-                                </div>
-                                
                                 <div class="mb-3">
-                                    <label class="form-label fw-bold text-dark small mb-1">Final Settlement Due Date <span class="text-danger">*</span></label>
-                                    <input type="date" id="due_date" class="form-control" required>
+                                    <label class="form-label small fw-bold text-muted mb-1">Customer Name *</label>
+                                    <input type="text" name="customer_name" class="form-control" required placeholder="Enter full name">
                                 </div>
-                                
-                                <div class="balance-box p-3 mb-3 text-center">
-                                    <small class="text-primary text-uppercase fw-bold d-block mb-1" style="letter-spacing: 0.5px;">Remaining Balance Due</small>
-                                    <h3 class="text-dark fw-bold mb-0">K<span id="balance_due" class="text-danger">0.00</span></h3>
+                                <div class="mb-3">
+                                    <label class="form-label small fw-bold text-muted mb-1">Phone Number *</label>
+                                    <input type="text" name="customer_phone" class="form-control" required placeholder="097...">
                                 </div>
-                                
-                                <button type="submit" class="btn btn-success fw-bold w-100 py-2 shadow-sm">
+                                <div class="mb-3">
+                                    <label class="form-label small fw-bold text-muted mb-1">Initial Deposit (K) *</label>
+                                    <input type="number" id="deposit_input" name="deposit" class="form-control" step="0.01" min="0" required placeholder="0.00">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label small fw-bold text-muted mb-1">Final Settlement Due Date *</label>
+                                    <input type="date" name="due_date" class="form-control" required value="<?php echo date('Y-m-d', strtotime('+30 days')); ?>">
+                                </div>
+
+                                <div class="p-3 bg-light rounded text-center mb-3 border">
+                                    <span class="text-muted small fw-bold d-block text-uppercase">Remaining Balance Due</span>
+                                    <span class="fs-3 fw-bold text-danger" id="balance_due_display">K0.00</span>
+                                </div>
+
+                                <button type="submit" id="submit_layby_btn" class="btn btn-success fw-bold w-100 py-2 fs-6">
                                     <i class="fas fa-check-circle me-1"></i> Create Agreement
                                 </button>
                             </form>
@@ -298,17 +227,14 @@ require_once "../includes/head.php";
                 </div>
             </div>
 
-            <!-- Bottom: Existing Agreements Section -->
-            <div class="card layby-card mt-4 shadow-sm">
-                <div class="layby-card-header d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
-                    <h4 class="layby-card-title" id="list_title"><i class="fas fa-list-alt me-2 text-primary"></i>Active Lay-by Agreements</h4>
-                    <div class="d-flex flex-wrap gap-2">
-                        <button id="toggle_paid" class="btn btn-info btn-sm text-white fw-bold">View Fully Paid</button>
-                    </div>
+            <!-- Existing Active Lay-bys Table -->
+            <div class="card card-custom mt-4">
+                <div class="card-custom-header d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold text-dark mb-0"><i class="fas fa-list me-2 text-primary"></i>Active Lay-by Agreements</h5>
                 </div>
-                <div class="card-body p-2 p-md-3">
+                <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-light-custom text-center align-middle desktop-table-view w-100">
+                        <table class="table table-custom align-middle text-center">
                             <thead>
                                 <tr>
                                     <th class="text-start ps-3">Customer</th>
@@ -316,17 +242,33 @@ require_once "../includes/head.php";
                                     <th>Paid</th>
                                     <th>Balance</th>
                                     <th>Due Date</th>
-                                    <th class="pe-3">Action</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
-                            <tbody id="layby_list_desktop">
-                                <tr><td colspan="6" class="py-4 text-muted">Loading agreements...</td></tr>
+                            <tbody>
+                                <?php if (mysqli_num_rows($laybys_res) > 0): ?>
+                                    <?php while ($lb = mysqli_fetch_assoc($laybys_res)): ?>
+                                        <tr>
+                                            <td class="text-start ps-3 fw-bold text-dark">
+                                                <?php echo e($lb['customer_name']); ?><br>
+                                                <small class="text-muted"><?php echo e($lb['customer_phone']); ?></small>
+                                            </td>
+                                            <td>K<?php echo number_format($lb['total_amount'], 2); ?></td>
+                                            <td class="text-success fw-bold">K<?php echo number_format($lb['deposit'], 2); ?></td>
+                                            <td class="text-danger fw-bold">K<?php echo number_format($lb['balance_due'], 2); ?></td>
+                                            <td><?php echo date('d M Y', strtotime($lb['due_date'])); ?></td>
+                                            <td>
+                                                <a href="view_layby.php?id=<?php echo $lb['id']; ?>" class="btn btn-outline-primary btn-sm px-3 fw-bold">
+                                                    <i class="fas fa-eye me-1"></i> View / Pay
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    <?php endwhile; ?>
+                                <?php else: ?>
+                                    <tr><td colspan="6" class="text-center py-4 text-muted">No active lay-by agreements found.</td></tr>
+                                <?php endif; ?>
                             </tbody>
                         </table>
-                    </div>
-
-                    <div id="layby_list_mobile" class="mobile-card-view">
-                        <div class="text-center py-4 text-muted">Loading agreements...</div>
                     </div>
                 </div>
             </div>
@@ -341,218 +283,208 @@ require_once "../includes/head.php";
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- SweetAlert2 JS -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <script>
 let cart = [];
-let showingPaid = false;
+const products = [
+    <?php 
+    mysqli_data_seek($items_res, 0);
+    while($row = mysqli_fetch_assoc($items_res)) {
+        echo "{ id: {$row['id']}, name: " . json_encode($row['item_name']) . ", price: {$row['price']}, qty: {$row['quantity']} },";
+    }
+    ?>
+];
 
-function loadRecords(){
-    let status = showingPaid ? 'Completed' : 'Active';
+$('#search_product').on('input', function() {
+    const val = $(this).val().toLowerCase().trim();
+    const resultsContainer = $('#product_results');
+    resultsContainer.empty().hide();
 
-    $('#layby_list_desktop').html('<tr><td colspan="6" class="py-4"><i class="fas fa-spinner fa-spin me-2"></i>Loading agreements...</td></tr>');
-    $('#layby_list_mobile').html('<div class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>Loading agreements...</div>');
+    if (val.length === 0) return;
 
-    $.get('actions/fetch_laybys.php', { status: status })
-    .done(function(data){
-        $('#layby_list_desktop').html(data);
-
-        let mobileHtml = '';
-        let rows = $('#layby_list_desktop tr');
-
-        if(rows.length && !$(rows[0]).find('td[colspan]').length) {
-            rows.each(function(){
-                let cols = $(this).find('td');
-                if(cols.length >= 6) {
-                    let customer = $(cols[0]).html();
-                    let total    = $(cols[1]).text();
-                    let paid     = $(cols[2]).text();
-                    let balance  = $(cols[3]).text();
-                    let dueDate  = $(cols[4]).text();
-                    let action   = $(cols[5]).html();
-
-                    mobileHtml += `
-                        <div class="layby-mobile-card">
-                            <div class="d-flex justify-content-between align-items-start mb-2">
-                                <div><strong class="text-dark fs-6">${customer}</strong></div>
-                                <span class="badge bg-light text-dark border">${dueDate}</span>
-                            </div>
-                            <div class="row g-2 mb-2 text-center small">
-                                <div class="col-4">
-                                    <div class="text-muted">Total</div>
-                                    <div class="fw-bold">${total}</div>
-                                </div>
-                                <div class="col-4">
-                                    <div class="text-muted">Paid</div>
-                                    <div class="fw-bold text-success">${paid}</div>
-                                </div>
-                                <div class="col-4">
-                                    <div class="text-muted">Balance</div>
-                                    <div class="fw-bold text-danger">${balance}</div>
-                                </div>
-                            </div>
-                            <div class="pt-2 border-top d-flex justify-content-end gap-2">
-                                ${action}
-                            </div>
-                        </div>
-                    `;
-                }
-            });
-            $('#layby_list_mobile').html(mobileHtml);
-        } else {
-            $('#layby_list_mobile').html('<div class="text-center py-4 text-muted">No agreements found.</div>');
-        }
-    })
-    .fail(function(){
-        $('#layby_list_desktop').html('<tr><td colspan="6" class="text-danger py-4">Failed to load lay-by records.</td></tr>');
-        $('#layby_list_mobile').html('<div class="text-center text-danger py-4">Failed to load lay-by records.</div>');
-    });
-}
-
-$(document).ready(function(){
-    loadRecords();
-
-    let today = new Date();
-    today.setDate(today.getDate() + 30);
-    document.getElementById('due_date').valueAsDate = today;
-
-    $('#toggle_paid').on('click', function(){
-        showingPaid = !showingPaid;
-
-        if(showingPaid){
-            $(this).text('View Active').removeClass('btn-info').addClass('btn-warning');
-            $('#list_title').html('<i class="fas fa-check-circle text-success me-2"></i>Fully Paid Lay-bys');
-        } else {
-            $(this).text('View Fully Paid').removeClass('btn-warning').addClass('btn-info');
-            $('#list_title').html('<i class="fas fa-list-alt me-2 text-primary"></i>Active Lay-by Agreements');
-        }
-
-        loadRecords();
-    });
+    const matched = products.filter(p => p.name.toLowerCase().includes(val));
+    if (matched.length > 0) {
+        matched.forEach(p => {
+            resultsContainer.append(`
+                <div class="product-search-item" onclick="addToCart(${p.id}, '${p.name.replace(/'/g, "\\'")}', ${p.price})">
+                    <strong>${p.name}</strong> - <span class="text-success fw-bold">K${parseFloat(p.price).toFixed(2)}</span>
+                </div>
+            `);
+        });
+        resultsContainer.show();
+    }
 });
 
-$('#product_search').on('input', function(){
-    let q = $(this).val().trim();
-    if(q.length > 1){
-        $.post('actions/fetch_products.php', { query: q }, data => $('#product_results').html(data).show());
-    } else {
+$(document).on('click', function(e) {
+    if (!$(e.target).closest('#search_product, #product_results').length) {
         $('#product_results').hide();
     }
 });
 
-$(document).on('click', '.product-item', function(){
-    let item = {
-        id: $(this).data('id'),
-        name: $(this).data('name'),
-        price: parseFloat($(this).data('price'))
-    };
-    let exist = cart.find(i => i.id == item.id);
-    if(exist) exist.qty++;
-    else cart.push({...item, qty: 1});
-
-    renderCart();
+function addToCart(id, name, price) {
+    $('#search_product').val('');
     $('#product_results').hide();
-    $('#product_search').val('');
-});
 
-function adjustQty(index, delta) {
-    if (cart[index]) {
-        cart[index].qty += delta;
-        if (cart[index].qty <= 0) cart.splice(index, 1);
-        renderCart();
+    const existing = cart.find(item => item.id === id);
+    if (existing) {
+        existing.qty += 1;
+    } else {
+        cart.push({ id, name, price: parseFloat(price), qty: 1 });
     }
+    renderCart();
+}
+
+function updateQty(id, delta) {
+    const item = cart.find(i => i.id === id);
+    if (item) {
+        item.qty += delta;
+        if (item.qty <= 0) {
+            cart = cart.filter(i => i.id !== id);
+        }
+    }
+    renderCart();
+}
+
+function removeFromCart(id) {
+    cart = cart.filter(i => i.id !== id);
+    renderCart();
+}
+
+function clearCart() {
+    if (cart.length === 0) return;
+    
+    Swal.fire({
+        title: 'Clear Cart?',
+        text: 'Are you sure you want to remove all items from the cart?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Yes, clear it!'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            cart = [];
+            renderCart();
+        }
+    });
 }
 
 function renderCart() {
+    const tbody = $('#cart_body');
+    tbody.empty();
+
     if (cart.length === 0) {
-        $('#layby_items').html(`
-            <tr>
-                <td colspan="5" class="text-center text-muted py-4">
-                    <i class="fas fa-shopping-basket display-6 d-block mb-2 opacity-25"></i>
-                    Cart is currently empty. Use the search box to add products.
-                </td>
-            </tr>
-        `);
-        $('#layby_total').text('0.00');
-        updateBalance();
+        tbody.append('<tr><td colspan="5" class="text-center py-4 text-muted">No products added yet. Use the search box above.</td></tr>');
+        $('#cart_total').text('K0.00');
+        calculateBalance();
         return;
     }
 
-    let html = '';
-    let total = 0;
-    cart.forEach((i, index) => {
-        let sub = i.price * i.qty;
-        total += sub;
-        html += `<tr>
-            <td class="text-start font-weight-bold">${i.name}</td>
-            <td>K${i.price.toFixed(2)}</td>
-            <td class="text-center">
-                <div class="d-inline-flex align-items-center gap-1">
-                    <button type="button" class="btn btn-sm btn-outline-secondary cart-qty-btn" onclick="adjustQty(${index}, -1)">-</button>
-                    <span class="fw-bold px-1">${i.qty}</span>
-                    <button type="button" class="btn btn-sm btn-outline-secondary cart-qty-btn" onclick="adjustQty(${index}, 1)">+</button>
-                </div>
-            </td>
-            <td class="text-success fw-bold">K${sub.toFixed(2)}</td>
-            <td>
-                <button type="button" class="btn btn-sm btn-outline-danger border-0" onclick="removeItem(${index})" title="Remove item">
-                    <i class="fas fa-times"></i>
-                </button>
-            </td>
-        </tr>`;
+    let grandTotal = 0;
+
+    cart.forEach(item => {
+        const subtotal = item.price * item.qty;
+        grandTotal += subtotal;
+
+        tbody.append(`
+            <tr>
+                <td class="fw-bold text-dark">${item.name}</td>
+                <td class="text-center">K${item.price.toFixed(2)}</td>
+                <td class="text-center">
+                    <button type="button" class="btn btn-outline-secondary btn-sm qty-btn me-1" onclick="updateQty(${item.id}, -1)">-</button>
+                    <span class="fw-bold mx-1">${item.qty}</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm qty-btn ms-1" onclick="updateQty(${item.id}, 1)">+</button>
+                </td>
+                <td class="text-end fw-bold text-success">K${subtotal.toFixed(2)}</td>
+                <td class="text-center">
+                    <button type="button" class="btn btn-link text-danger p-0" onclick="removeFromCart(${item.id})"><i class="fas fa-times"></i></button>
+                </td>
+            </tr>
+        `);
     });
-    $('#layby_items').html(html);
-    $('#layby_total').text(total.toFixed(2));
-    updateBalance();
+
+    $('#cart_total').text('K' + grandTotal.toFixed(2));
+    calculateBalance();
 }
 
-function removeItem(index) { 
-    cart.splice(index, 1); 
-    renderCart(); 
-}
-
-function updateBalance() {
-    let total = parseFloat($('#layby_total').text()) || 0;
-    let deposit = parseFloat($('#deposit').val()) || 0;
-    let balance = total - deposit;
+function calculateBalance() {
+    const total = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
+    const deposit = parseFloat($('#deposit_input').val()) || 0;
+    const balance = total - deposit;
     
-    let balanceSpan = $('#balance_due');
-    balanceSpan.text((balance < 0 ? 0 : balance).toFixed(2));
-
-    if (balance <= 0 && total > 0) {
-        balanceSpan.removeClass('text-danger').addClass('text-success');
-    } else {
-        balanceSpan.removeClass('text-success').addClass('text-danger');
-    }
+    $('#balance_due_display').text('K' + (balance > 0 ? balance.toFixed(2) : '0.00'));
 }
 
-$('#deposit').on('input', updateBalance);
-$('#clear_cart').on('click', function(){ cart = []; renderCart(); });
+$('#deposit_input').on('input', calculateBalance);
 
 $('#layby_form').on('submit', function(e) {
     e.preventDefault();
-    if(cart.length === 0) return alert("Please add at least one item to the cart.");
 
-    const btn = $(this).find('button[type="submit"]');
+    if (cart.length === 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Cart is Empty',
+            text: 'Please add at least one product to the cart before submitting.',
+            confirmButtonColor: '#0d6efd'
+        });
+        return;
+    }
+
+    const total = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
+    const deposit = parseFloat($('#deposit_input').val()) || 0;
+
+    if (deposit > total) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Invalid Deposit',
+            text: 'Initial deposit cannot be greater than the grand total.',
+            confirmButtonColor: '#dc3545'
+        });
+        return;
+    }
+
+    const btn = $('#submit_layby_btn');
     btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Creating...');
 
-    $.post('actions/process_layby.php', {
-        customer_name: $('#customer_name').val(),
-        customer_phone: $('#customer_phone').val(),
-        deposit: $('#deposit').val(),
-        total: $('#layby_total').text(),
-        due_date: $('#due_date').val(),
-        cart: JSON.stringify(cart)
-    }, function(res){
-        if(res.status === 'success'){
-            alert("Agreement Created Successfully!");
-            location.reload();
-        } else {
-            alert("Error: " + (res.message || "Failed to save agreement."));
+    const payload = $(this).serialize() + '&cart=' + JSON.stringify(cart) + '&total_amount=' + total;
+
+    $.ajax({
+        url: 'actions/create_layby.php',
+        type: 'POST',
+        data: payload,
+        dataType: 'json',
+        success: function(res) {
+            if (res.status === 'success') {
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Success!',
+                    text: res.message || 'Agreement Created Successfully!',
+                    confirmButtonColor: '#198754',
+                    confirmButtonText: 'OK'
+                }).then(() => {
+                    location.reload();
+                });
+            } else {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Creation Failed',
+                    text: res.message || 'Could not save agreement.',
+                    confirmButtonColor: '#dc3545'
+                });
+                btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Create Agreement');
+            }
+        },
+        error: function(xhr) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Server Error',
+                text: 'Response: ' + xhr.responseText,
+                confirmButtonColor: '#dc3545'
+            });
             btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Create Agreement');
         }
-    }, 'json').fail(function(){
-        alert("Server error occurred while creating agreement.");
-        btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Create Agreement');
     });
 });
 </script>
