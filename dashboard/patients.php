@@ -2,186 +2,223 @@
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-session_start();
-ob_start();
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
 
+date_default_timezone_set('Africa/Lusaka');
+
 // Multi-tenant Security
-$pharmacy_id = $_SESSION['pharmacy_id'] ?? null;
-$branch_id   = $_SESSION['branch_id'] ?? null;
+$pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
+$branch_id   = (int)($_SESSION['branch_id'] ?? 0);
 
 if (!$pharmacy_id || !$branch_id) {
-    header("Location: ../login.php");
-    exit;
+    header("Location: ../login.php?error=session_expired");
+    exit();
 }
 
-// Filter patients by query param
+// Fetch Dynamic Pharmacy & Branch Details
+$display_pharmacy_name = "Pharmacy";
+$display_branch_name   = "Main Branch";
+
+$pharm_query = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
+$pharm_query->bind_param("i", $pharmacy_id);
+$pharm_query->execute();
+$pharm_res = $pharm_query->get_result();
+if ($row = $pharm_res->fetch_assoc()) {
+    $display_pharmacy_name = $row['name'];
+}
+$pharm_query->close();
+
+$branch_query = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ? LIMIT 1");
+$branch_query->bind_param("ii", $branch_id, $pharmacy_id);
+$branch_query->execute();
+$branch_res = $branch_query->get_result();
+if ($row = $branch_res->fetch_assoc()) {
+    $display_branch_name = $row['branch_name'];
+}
+$branch_query->close();
+
+// Filter logic
 $filter = $_GET['filter'] ?? 'all';
 $whereClause = "pharmacy_id = ? AND branch_id = ?";
+$types = "ii";
 $params = [$pharmacy_id, $branch_id];
 
-if($filter === 'emergency') {
+if ($filter === 'emergency') {
     $whereClause .= " AND patient_condation = 'Yes'";
+} elseif ($filter === 'routine') {
+    $whereClause .= " AND (patient_condation = 'No' OR patient_condation IS NULL)";
 }
 
-// Fetch patients
-$stmt = $conn->prepare("SELECT patient_id, invoice_number, first_name, last_name, contact_number, registration_date, patient_condation 
-                        FROM patients WHERE $whereClause ORDER BY registration_date DESC");
-$stmt->bind_param("ii", ...$params);
+// Fetch Patients
+$stmt = $conn->prepare("SELECT patient_id, invoice_number, first_name, last_name, contact_number, registration_date, status, patient_condation 
+                        FROM patients 
+                        WHERE $whereClause 
+                        ORDER BY registration_date DESC");
+$stmt->bind_param($types, ...$params);
 $stmt->execute();
 $result = $stmt->get_result();
+
+require_once "../includes/head.php";
 ?>
+
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css">
 
 <style>
-    #patients-page {
-        background-color: #f4f6f9;
-        min-height: 100vh;
-        padding: 20px;
-        font-family: 'Segoe UI', sans-serif;
-    }
+.patients-wrapper {
+    background-color: #f8f9fa !important;
+    min-height: calc(100vh - 70px);
+    padding: 1.5rem;
+    color: #333;
+}
 
-    .patients-card {
-        background: #fff;
-        border-radius: 10px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-        padding: 25px;
-        margin-bottom: 20px;
-    }
+.card-custom {
+    background-color: #ffffff;
+    border: 1px solid #e0e6ed;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+}
 
-    .patients-card h4 {
-        font-weight: 700;
-        margin-bottom: 15px;
-    }
+.table-patients tbody tr {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
 
-    table {
-        width: 100%;
-        border-collapse: collapse;
-    }
+.table-patients tbody tr:hover {
+    background-color: #f1f5f9 !important;
+}
 
-    th, td {
-        padding: 12px 15px;
-        border-bottom: 1px solid #dee2e6;
-        text-align: left;
-        font-size: 0.95rem;
-    }
+.badge-emergency {
+    background-color: #dc3545;
+    color: #ffffff;
+    padding: 0.35em 0.65em;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 6px;
+}
 
-    th {
-        background-color: #007bff;
-        color: white;
-        text-transform: uppercase;
-        font-weight: 600;
-    }
-
-    tr:hover {
-        background-color: #f1f3f5;
-        cursor: pointer;
-    }
-
-    .badge-emergency {
-        background-color: #dc3545;
-        color: #fff;
-        padding: 3px 8px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-    }
-
-    .badge-routine {
-        background-color: #28a745;
-        color: #fff;
-        padding: 3px 8px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-    }
-
-    .filter-buttons {
-        margin-bottom: 20px;
-    }
-
-    .filter-buttons .btn {
-        margin-right: 10px;
-    }
-
-    @media (max-width: 768px) {
-        th, td {
-            font-size: 0.85rem;
-        }
-    }
+.badge-routine {
+    background-color: #198754;
+    color: #ffffff;
+    padding: 0.35em 0.65em;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 6px;
+}
 </style>
 
-<div id="patients-page">
-    <div class="container-fluid">
-        <div class="row mb-3">
-            <div class="col-md-6">
-                <h4 class="fw-bold text-dark mb-0">Patients List</h4>
-                <small class="text-muted">Branch: <?= $_SESSION['branch_name'] ?? 'Main'; ?></small>
+<div id="main-wrapper">
+    <?php 
+    if (file_exists("../includes/header.php")) require_once "../includes/header.php"; 
+    if (file_exists("../includes/aside.php")) require_once "../includes/aside.php"; 
+    ?>
+
+    <div class="page-wrapper patients-wrapper">
+        <div class="container-fluid p-0">
+
+            <!-- Header Title -->
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
+                <div>
+                    <h3 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-users text-primary me-2"></i>Patient Directory
+                    </h3>
+                    <small class="text-secondary fw-semibold">
+                        <?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?> | <?= htmlspecialchars($display_branch_name) ?>
+                    </small>
+                </div>
+                <div>
+                    <a href="add_patients.php" class="btn btn-primary fw-bold shadow-sm">
+                        <i class="fas fa-user-plus me-1"></i> Register New Patient
+                    </a>
+                </div>
             </div>
-        </div>
 
-        <!-- Filter Buttons -->
-        <div class="filter-buttons">
-            <a href="patients.php?filter=all" class="btn btn-primary <?= $filter === 'all' ? 'active' : '' ?>">All Patients</a>
-            <a href="patients.php?filter=emergency" class="btn btn-danger <?= $filter === 'emergency' ? 'active' : '' ?>">Emergency Cases</a>
-        </div>
+            <!-- Filter Buttons -->
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <a href="patients.php?filter=all" class="btn btn-sm <?= $filter === 'all' ? 'btn-primary' : 'btn-outline-secondary' ?> fw-semibold px-3">
+                    <i class="fas fa-list me-1"></i> All Patients
+                </a>
+                <a href="patients.php?filter=emergency" class="btn btn-sm <?= $filter === 'emergency' ? 'btn-danger' : 'btn-outline-danger' ?> fw-semibold px-3">
+                    <i class="fas fa-ambulance me-1"></i> Emergency Cases
+                </a>
+                <a href="patients.php?filter=routine" class="btn btn-sm <?= $filter === 'routine' ? 'btn-success' : 'btn-outline-success' ?> fw-semibold px-3">
+                    <i class="fas fa-notes-medical me-1"></i> Routine Cases
+                </a>
+            </div>
 
-        <div class="patients-card">
-            <h4><?= $filter === 'emergency' ? 'Emergency Patients' : 'All Patients' ?></h4>
-
-            <table id="patientsTable">
-                <thead>
-                    <tr>
-                        <th>Invoice</th>
-                        <th>Full Name</th>
-                        <th>Contact</th>
-                        <th>Registration Date</th>
-                        <th>Condition</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if($result->num_rows > 0): ?>
-                        <?php while($row = $result->fetch_assoc()): ?>
-                            <tr onclick="window.location='patient_details.php?id=<?= $row['patient_id'] ?>'">
-                                <td><?= $row['invoice_number'] ?></td>
-                                <td><?= $row['first_name'].' '.$row['last_name'] ?></td>
-                                <td><?= $row['contact_number'] ?></td>
-                                <td><?= date('d-M-Y H:i', strtotime($row['registration_date'])) ?></td>
-                                <td>
-                                    <?php if($row['patient_condation'] === 'Yes'): ?>
-                                        <span class="badge-emergency">Emergency</span>
-                                    <?php else: ?>
-                                        <span class="badge-routine">Routine</span>
-                                    <?php endif; ?>
-                                </td>
+            <!-- Table Card -->
+            <div class="card card-custom p-4">
+                <div class="table-responsive">
+                    <table id="patientsTable" class="table table-hover align-middle table-patients w-100">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Invoice Ref</th>
+                                <th>Full Name</th>
+                                <th>Contact Number</th>
+                                <th>Registration Date</th>
+                                <th>Condition</th>
+                                <th class="text-end">Action</th>
                             </tr>
-                        <?php endwhile; ?>
-                    <?php else: ?>
-                        <tr>
-                            <td colspan="5" class="text-center text-muted">No patients found.</td>
-                        </tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
+                        </thead>
+                        <tbody>
+                            <?php if ($result && $result->num_rows > 0): ?>
+                                <?php while ($row = $result->fetch_assoc()): ?>
+                                    <tr onclick="window.location='patient_details.php?id=<?= $row['patient_id'] ?>'">
+                                        <td class="fw-bold text-primary"><?= htmlspecialchars($row['invoice_number']) ?></td>
+                                        <td class="fw-bold text-dark"><?= htmlspecialchars($row['first_name'] . ' ' . $row['last_name']) ?></td>
+                                        <td><?= htmlspecialchars($row['contact_number']) ?></td>
+                                        <td><?= date('d M Y, H:i', strtotime($row['registration_date'])) ?></td>
+                                        <td>
+                                            <?php if ($row['patient_condation'] === 'Yes'): ?>
+                                                <span class="badge badge-emergency"><i class="fas fa-bolt me-1"></i>Emergency</span>
+                                            <?php else: ?>
+                                                <span class="badge badge-routine"><i class="fas fa-check me-1"></i>Routine</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="text-end" onclick="event.stopPropagation();">
+                                            <a href="patient_details.php?id=<?= $row['patient_id'] ?>" class="btn btn-sm btn-outline-primary fw-semibold">
+                                                <i class="fas fa-folder-open me-1"></i> View
+                                            </a>
+                                        </td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
         </div>
     </div>
+
+    <?php 
+    if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"; 
+    ?>
 </div>
 
-<!-- JS for table search and sort -->
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+
 <script>
-$(document).ready(function(){
-    // Simple search/filter
-    $('<input type="text" id="searchInput" placeholder="Search Patients..." class="form-control mb-3" />')
-        .prependTo('#patientsTable').on('keyup', function(){
-            var val = $(this).val().toLowerCase();
-            $('#patientsTable tbody tr').filter(function(){
-                $(this).toggle($(this).text().toLowerCase().indexOf(val) > -1)
-            });
-        });
+$(document).ready(function() {
+    $('#patientsTable').DataTable({
+        "pageLength": 15,
+        "ordering": true,
+        "order": [[ 3, "desc" ]],
+        "language": {
+            "search": "Filter Patients:",
+            "zeroRecords": "No matching patient records found",
+            "emptyTable": "No patients registered under this filter"
+        }
+    });
 });
 </script>
-
-<?php
-$content = ob_get_clean();
-require "../includes/myheader.php"; 
-?>
+</body>
+</html>
