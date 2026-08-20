@@ -1,30 +1,37 @@
 <?php
-session_start();
+ini_set('display_errors', 0);
+error_reporting(E_ALL);
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 require_once "../../includes/conn.php";
 
-$pharmacy_id = $_SESSION['pharmacy_id'] ?? 0;
-$branch_id   = $_SESSION['branch_id'] ?? 0;
+if (!isset($_SESSION['pharmacy_id']) || !isset($_SESSION['branch_id'])) {
+    echo '<tr><td colspan="5" class="text-center text-danger py-3">Session expired. Please log in again.</td></tr>';
+    exit;
+}
 
-$query = "SELECT * FROM expenses WHERE pharmacy_id = ? AND branch_id = ? ORDER BY expense_date DESC, id DESC";
-$stmt = $conn->prepare($query);
-$stmt->bind_param("ii", $pharmacy_id, $branch_id);
-$stmt->execute();
-$result = $stmt->get_result();
+$pharmacy_id = (int)$_SESSION['pharmacy_id'];
+$branch_id   = (int)$_SESSION['branch_id'];
 
-if ($result->num_rows > 0) {
-    while ($row = $result->fetch_assoc()) {
-        echo "<tr>";
-        echo "<td>" . htmlspecialchars($row['name']) . "</td>";
-        echo "<td><span class='badge bg-light text-dark'>" . htmlspecialchars($row['category']) . "</span></td>";
-        echo "<td>" . date('d M Y', strtotime($row['expense_date'])) . "</td>";
-        echo "<td class='text-end fw-bold amt-val' data-amt='{$row['amount']}'>K" . number_format($row['amount'], 2) . "</td>";
-        echo "<td class='text-center'>
-                <button class='btn btn-sm btn-outline-danger delete-expense' data-id='{$row['id']}'>
-                    <i class='fas fa-trash'></i>
-                </button>
-              </td>";
-        echo "</tr>";
+$sql = "SELECT * FROM expenses WHERE pharmacy_id = $pharmacy_id AND branch_id = $branch_id ORDER BY expense_date DESC, id DESC";
+$result = mysqli_query($conn, $sql);
+
+if ($result && mysqli_num_rows($result) > 0) {
+    while ($row = mysqli_fetch_assoc($result)) {
+        $amount = (float)$row['amount'];
+        echo '<tr>';
+        echo '<td class="fw-bold text-dark">' . htmlspecialchars($row['name']) . '</td>';
+        echo '<td><span class="badge bg-light text-dark border">' . htmlspecialchars($row['category']) . '</span></td>';
+        echo '<td>' . date('d M Y', strtotime($row['expense_date'])) . '</td>';
+        echo '<td class="text-end fw-bold text-danger amt" data-amt="' . $amount . '">K' . number_format($amount, 2) . '</td>';
+        echo '<td class="text-center">';
+        echo '<button type="button" class="btn btn-outline-danger btn-sm px-2 delete-expense" data-id="' . $row['id'] . '"><i class="fas fa-trash-alt"></i></button>';
+        echo '</td>';
+        echo '</tr>';
     }
 } else {
-    echo "<tr><td colspan='5' class='text-center text-muted'>No expenses recorded for this branch.</td></tr>";
+    echo '<tr><td colspan="5" class="text-center py-4 text-muted">No expenses recorded yet.</td></tr>';
 }
