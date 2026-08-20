@@ -18,8 +18,27 @@ if (!$pharmacy_id || !$branch_id) {
     exit();
 }
 
+// Handle Sorting Filter
+$sort_option = $_GET['sort'] ?? 'name_asc';
+
+switch ($sort_option) {
+    case 'name_desc':
+        $order_clause = "ORDER BY name DESC";
+        break;
+    case 'newest':
+        $order_clause = "ORDER BY id DESC";
+        break;
+    case 'oldest':
+        $order_clause = "ORDER BY id ASC";
+        break;
+    case 'name_asc':
+    default:
+        $order_clause = "ORDER BY name ASC";
+        break;
+}
+
 // Fetch Suppliers securely
-$vnd_stmt = $conn->prepare("SELECT * FROM suppliers WHERE pharmacy_id = ? AND branch_id = ? ORDER BY name ASC");
+$vnd_stmt = $conn->prepare("SELECT * FROM suppliers WHERE pharmacy_id = ? AND branch_id = ? {$order_clause}");
 $vnd_stmt->bind_param("ii", $pharmacy_id, $branch_id);
 $vnd_stmt->execute();
 $VND_DATA = $vnd_stmt->get_result();
@@ -107,9 +126,24 @@ require_once "../includes/head.php";
                             <h4 class="card-title mb-1">Vendor Directory</h4>
                             <h6 class="card-subtitle text-muted">Showing <span class="badge bg-light-info text-info fw-bold"><?php echo $total_vendors; ?></span> registered suppliers</h6>
                         </div>
-                        <div class="position-relative mt-3 mt-md-0">
-                            <i class="mdi mdi-magnify search-icon"></i>
-                            <input type="text" id="vendorSearch" class="form-control search-box" placeholder="Search by name or phone...">
+
+                        <!-- Search & Sort Controls -->
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-3 mt-md-0">
+                            <!-- Sort Filter Dropdown -->
+                            <form method="GET" action="suppliers.php" class="d-flex align-items-center">
+                                <select name="sort" class="form-select form-select-sm fw-bold border-secondary-subtle" onchange="this.form.submit()">
+                                    <option value="name_asc" <?= $sort_option === 'name_asc' ? 'selected' : '' ?>>Sort: Name (A to Z)</option>
+                                    <option value="name_desc" <?= $sort_option === 'name_desc' ? 'selected' : '' ?>>Sort: Name (Z to A)</option>
+                                    <option value="newest" <?= $sort_option === 'newest' ? 'selected' : '' ?>>Sort: Newest First</option>
+                                    <option value="oldest" <?= $sort_option === 'oldest' ? 'selected' : '' ?>>Sort: Oldest First</option>
+                                </select>
+                            </form>
+
+                            <!-- Live Search Input -->
+                            <div class="position-relative">
+                                <i class="mdi mdi-magnify search-icon"></i>
+                                <input type="text" id="vendorSearch" class="form-control search-box" placeholder="Search by name or phone...">
+                            </div>
                         </div>
                     </div>
 
