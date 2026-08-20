@@ -1,5 +1,6 @@
 <?php  
-ini_set('display_errors', 0);
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -20,9 +21,9 @@ if (!$pharmacy_id || !$branch_id) {
     exit();
 }
 
-// Dynamic Pharmacy & Branch Details
-$display_pharmacy_name = "Echo Prime Ltd";[cite: 9]
-$display_branch_name   = "Main Branch";[cite: 9]
+// Fetch Dynamic Pharmacy & Branch Information
+$display_pharmacy_name = "Pharmacy";
+$display_branch_name   = "Main Branch";
 
 $pharm_query = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
 $pharm_query->bind_param("i", $pharmacy_id);
@@ -43,22 +44,22 @@ if ($row = $branch_res->fetch_assoc()) {
 $branch_query->close();
 
 // Auto-generate Patient Reference Number
-$patient_no = 'PAT-' . mt_rand(100000, 999999);[cite: 10]
+$patient_no = 'PAT-' . mt_rand(100000, 999999);
 
 // Fetch Dashboard Metrics
-$totalPatients = 0;[cite: 10]
-$emergencyPatients = 0;[cite: 10]
+$totalPatients = 0;
+$emergencyPatients = 0;
 
-$stmt1 = $conn->prepare("SELECT COUNT(*) AS total FROM patients WHERE pharmacy_id = ? AND branch_id = ?");[cite: 10]
-$stmt1->bind_param("ii", $pharmacy_id, $branch_id);[cite: 10]
+$stmt1 = $conn->prepare("SELECT COUNT(*) AS total FROM patients WHERE pharmacy_id = ? AND branch_id = ?");
+$stmt1->bind_param("ii", $pharmacy_id, $branch_id);
 $stmt1->execute();
-$totalPatients = $stmt1->get_result()->fetch_assoc()['total'] ?? 0;[cite: 10]
+$totalPatients = $stmt1->get_result()->fetch_assoc()['total'] ?? 0;
 $stmt1->close();
 
-$stmt2 = $conn->prepare("SELECT COUNT(*) AS total FROM patients WHERE patient_condation = 'Yes' AND pharmacy_id = ? AND branch_id = ?");[cite: 10]
-$stmt2->bind_param("ii", $pharmacy_id, $branch_id);[cite: 10]
+$stmt2 = $conn->prepare("SELECT COUNT(*) AS total FROM patients WHERE patient_condation = 'Yes' AND pharmacy_id = ? AND branch_id = ?");
+$stmt2->bind_param("ii", $pharmacy_id, $branch_id);
 $stmt2->execute();
-$emergencyPatients = $stmt2->get_result()->fetch_assoc()['total'] ?? 0;[cite: 10]
+$emergencyPatients = $stmt2->get_result()->fetch_assoc()['total'] ?? 0;
 $stmt2->close();
 
 require_once "../includes/head.php";
@@ -66,10 +67,10 @@ require_once "../includes/head.php";
 
 <style>
 .patient-wrapper {
-    background-color: #f4f6f9 !important;
+    background-color: #f8f9fa !important;
     min-height: calc(100vh - 70px);
-    padding: 1.25rem;
-    color: #212529;
+    padding: 1.5rem;
+    color: #333;
 }
 
 .stat-box {
@@ -96,15 +97,15 @@ require_once "../includes/head.php";
 
 .card-custom {
     background-color: #ffffff;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #e0e6ed;
     border-radius: 10px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.04);
 }
 
 .form-label {
     font-weight: 600;
-    font-size: 0.85rem;
-    color: #475569;
+    font-size: 0.88rem;
+    color: #495057;
 }
 
 .emergency-check-label {
@@ -128,9 +129,9 @@ require_once "../includes/head.php";
                     <h3 class="fw-bold text-dark mb-0">
                         <i class="fas fa-user-plus me-2 text-primary"></i>Patient Registration
                     </h3>
-                    <span class="text-secondary small">
-                        <b><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></b> | <?= htmlspecialchars($display_branch_name) ?>[cite: 9]
-                    </span>
+                    <small class="text-secondary fw-semibold">
+                        <?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?> | <?= htmlspecialchars($display_branch_name) ?>
+                    </small>
                 </div>
                 <div>
                     <a href="patients.php" class="btn btn-outline-primary fw-bold">
@@ -175,76 +176,59 @@ require_once "../includes/head.php";
                     <div class="card card-custom p-4">
                         <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4">
                             <h5 class="fw-bold text-dark mb-0">
-                                <i class="fas fa-id-card text-primary me-2"></i>New Patient Entry Form
+                                Entry Form
                             </h5>
                             <span class="badge bg-light text-dark border fw-semibold">
-                                Ref: <?= $patient_no ?>[cite: 10]
+                                Ref: <?= $patient_no ?>
                             </span>
                         </div>
 
                         <form id="addPatientForm">
-                            <input type="hidden" name="invoice_number" value="<?= $patient_no ?>">[cite: 10]
+                            <input type="hidden" name="invoice_number" value="<?= $patient_no ?>">
+                            <input type="hidden" name="pharmacy_id" value="<?= $pharmacy_id ?>">
+                            <input type="hidden" name="branch_id" value="<?= $branch_id ?>">
 
                             <div class="row g-3">
-                                <!-- Personal Info -->
                                 <div class="col-12 col-md-6">
                                     <label class="form-label">First Name <span class="text-danger">*</span></label>
-                                    <input type="text" name="first_name" class="form-control" placeholder="Enter first name" required>[cite: 10]
+                                    <input type="text" name="first_name" class="form-control" placeholder="Enter first name" required>
                                 </div>
                                 <div class="col-12 col-md-6">
                                     <label class="form-label">Last Name <span class="text-danger">*</span></label>
-                                    <input type="text" name="last_name" class="form-control" placeholder="Enter last name" required>[cite: 10]
+                                    <input type="text" name="last_name" class="form-control" placeholder="Enter last name" required>
                                 </div>
 
-                                <div class="col-12 col-md-4">
+                                <div class="col-12 col-md-6">
                                     <label class="form-label">Contact Number <span class="text-danger">*</span></label>
-                                    <input type="text" name="contact_number" class="form-control" placeholder="e.g. 0971234567" required>
-                                </div>
-                                <div class="col-12 col-md-4">
-                                    <label class="form-label">Gender</label>
-                                    <select name="gender" class="form-select">
-                                        <option value="Male">Male</option>
-                                        <option value="Female">Female</option>
-                                        <option value="Other">Other</option>
-                                    </select>
-                                </div>
-                                <div class="col-12 col-md-4">
-                                    <label class="form-label">Age / Date of Birth</label>
-                                    <input type="text" name="age" class="form-control" placeholder="e.g. 32 Yrs or DD/MM/YYYY">
+                                    <input type="text" name="contact_number" class="form-control" placeholder="097..." required>
                                 </div>
 
-                                <div class="col-12">
-                                    <label class="form-label">Residential Address</label>
-                                    <input type="text" name="address" class="form-control" placeholder="Enter residential area or physical address">
+                                <div class="col-12 col-md-6">
+                                    <label class="form-label">Patient Condition / Notes</label>
+                                    <input type="text" name="patient_condation_notes" class="form-control" placeholder="Short description of health status">
                                 </div>
 
-                                <!-- Condition & Notes -->
-                                <div class="col-12">
-                                    <label class="form-label">Patient Condition / Symptoms Summary</label>
-                                    <textarea name="patient_condation_notes" class="form-control" rows="2" placeholder="Brief notes on medical presentation or request..."></textarea>
-                                </div>
-
-                                <div class="col-12">
-                                    <label class="form-label d-block">Emergency Priority Tag?</label>[cite: 10]
+                                <div class="col-12 mt-4">
+                                    <label class="form-label d-block">Is this an Emergency?</label>
                                     <div class="form-check form-check-inline">
-                                        <input class="form-check-input" type="radio" name="patient_condation" value="Yes" id="yesEm">[cite: 10]
-                                        <label class="form-check-label emergency-check-label" for="yesEm">YES - Emergency / Urgent</label>[cite: 10]
+                                        <input class="form-check-input" type="radio" name="patient_condation" value="Yes" id="yesEm">
+                                        <label class="form-check-label emergency-check-label" for="yesEm">YES - Emergency</label>
                                     </div>
                                     <div class="form-check form-check-inline">
-                                        <input class="form-check-input" type="radio" name="patient_condation" value="No" id="noEm" checked>[cite: 10]
-                                        <label class="form-check-label text-secondary" for="noEm">NO - Routine / Walk-in</label>
+                                        <input class="form-check-input" type="radio" name="patient_condation" value="No" id="noEm" checked>
+                                        <label class="form-check-label text-secondary" for="noEm">NO - Routine</label>
                                     </div>
                                 </div>
 
                                 <div class="col-12 mt-4">
                                     <button type="submit" id="submitBtn" class="btn btn-dark w-100 py-3 fw-bold">
-                                        <i class="fas fa-check-circle me-2"></i> COMPLETE REGISTRATION[cite: 10]
+                                        <i class="fas fa-check-circle me-2"></i> COMPLETE REGISTRATION
                                     </button>
                                 </div>
                             </div>
                         </form>
 
-                        <div id="form-message" class="mt-3"></div>[cite: 10]
+                        <div id="form-message" class="mt-3"></div>
                     </div>
                 </div>
             </div>
@@ -274,17 +258,17 @@ $(document).ready(function(){
             dataType: 'json',
             success: function(res){
                 if(res.status === 'success'){
-                    $('#form-message').html('<div class="alert alert-success alert-dismissible fade show role="alert"><i class="fas fa-check-circle me-2"></i>' + res.message + '</div>');
-                    setTimeout(() => { location.reload(); }, 1500);[cite: 10]
+                    $('#form-message').html('<div class="alert alert-success alert-dismissible fade show" role="alert"><i class="fas fa-check-circle me-2"></i>' + res.message + '</div>');
+                    setTimeout(() => { location.reload(); }, 1500);
                 } else {
                     $('#form-message').html('<div class="alert alert-danger alert-dismissible fade show" role="alert"><i class="fas fa-exclamation-circle me-2"></i>' + res.message + '</div>');
-                    btn.prop('disabled', false).html('<i class="fas fa-check-circle me-2"></i> COMPLETE REGISTRATION');[cite: 10]
+                    btn.prop('disabled', false).html('<i class="fas fa-check-circle me-2"></i> COMPLETE REGISTRATION');
                 }
             },
             error: function(xhr){
                 console.error(xhr.responseText);
-                $('#form-message').html('<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i> Server connection failed.</div>');
-                btn.prop('disabled', false).html('<i class="fas fa-check-circle me-2"></i> COMPLETE REGISTRATION');[cite: 10]
+                $('#form-message').html('<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i> Error saving data or network issue.</div>');
+                btn.prop('disabled', false).html('<i class="fas fa-check-circle me-2"></i> COMPLETE REGISTRATION');
             }
         });
     });
