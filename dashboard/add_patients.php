@@ -21,7 +21,7 @@ if (!$pharmacy_id || !$branch_id) {
     exit();
 }
 
-// Fetch Dynamic Pharmacy & Branch Details
+// Fetch Dynamic Pharmacy & Branch Information
 $display_pharmacy_name = "Pharmacy";
 $display_branch_name   = "Main Branch";
 
@@ -71,8 +71,6 @@ require_once "../includes/head.php";
     --primary-hover: #0369a1;
     --bg-page: #f8fafc;
     --card-bg: #ffffff;
-    --text-dark: #0f172a;
-    --text-muted: #64748b;
     --border-color: #e2e8f0;
 }
 
@@ -86,7 +84,6 @@ body {
     min-height: calc(100vh - 70px);
 }
 
-/* Header & Stat Cards */
 .stat-card {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
@@ -110,7 +107,6 @@ body {
     font-size: 1.25rem;
 }
 
-/* Form Styles */
 .form-card {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
@@ -161,15 +157,11 @@ body {
 .priority-option {
     border: 2px solid var(--border-color);
     border-radius: 12px;
-    padding: 1rem;
+    padding: 0;
     cursor: pointer;
     transition: all 0.2s ease;
     background: #ffffff;
-    height: 100%;
-}
-
-.priority-option:hover {
-    border-color: #cbd5e1;
+    display: block;
 }
 
 .priority-option input[type="radio"] {
@@ -177,13 +169,13 @@ body {
 }
 
 .priority-option input[type="radio"]:checked + .priority-card-routine {
-    border-color: #10b981;
-    background-color: #f0fdf4;
+    border-color: #10b981 !important;
+    background-color: #f0fdf4 !important;
 }
 
 .priority-option input[type="radio"]:checked + .priority-card-emergency {
-    border-color: #ef4444;
-    background-color: #fef2f2;
+    border-color: #ef4444 !important;
+    background-color: #fef2f2 !important;
 }
 
 .priority-option input[type="radio"]:checked + div .check-icon {
@@ -301,7 +293,7 @@ body {
                                         <label class="form-label">First Name <span class="text-danger">*</span></label>
                                         <div class="input-group">
                                             <span class="input-group-text"><i class="fas fa-user"></i></span>
-                                            <input type="text" name="first_name" class="form-control" placeholder="enter here" required>
+                                            <input type="text" name="first_name" class="form-control" placeholder="John" required>
                                         </div>
                                     </div>
 
@@ -310,7 +302,7 @@ body {
                                         <label class="form-label">Last Name <span class="text-danger">*</span></label>
                                         <div class="input-group">
                                             <span class="input-group-text"><i class="fas fa-user"></i></span>
-                                            <input type="text" name="last_name" class="form-control" placeholder="enter here" required>
+                                            <input type="text" name="last_name" class="form-control" placeholder="Doe" required>
                                         </div>
                                     </div>
 
@@ -330,7 +322,7 @@ body {
                                         <div class="row g-3">
                                             <!-- Routine Option -->
                                             <div class="col-12 col-md-6">
-                                                <label class="priority-option w-100 p-0">
+                                                <label class="priority-option w-100">
                                                     <input type="radio" name="patient_condation" value="No" checked>
                                                     <div class="priority-card-routine p-3 rounded-3 border h-100 d-flex align-items-center justify-content-between">
                                                         <div class="d-flex align-items-center gap-3">
@@ -351,7 +343,7 @@ body {
 
                                             <!-- Emergency Option -->
                                             <div class="col-12 col-md-6">
-                                                <label class="priority-option w-100 p-0">
+                                                <label class="priority-option w-100">
                                                     <input type="radio" name="patient_condation" value="Yes">
                                                     <div class="priority-card-emergency p-3 rounded-3 border h-100 d-flex align-items-center justify-content-between">
                                                         <div class="d-flex align-items-center gap-3">
@@ -407,8 +399,11 @@ $(document).ready(function(){
         let btn = $('#submitBtn');
         btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i> Saving Record...');
 
+        // Use standard relative request with fallback resolution
+        let actionUrl = 'actions/register_patient.php';
+
         $.ajax({
-            url: 'actions/register_patient.php',
+            url: actionUrl,
             type: 'POST',
             data: $(this).serialize(),
             dataType: 'json',
@@ -431,12 +426,19 @@ $(document).ready(function(){
                     btn.prop('disabled', false).html('<i class="fas fa-save me-2"></i> Register Patient');
                 }
             },
-            error: function(xhr){
-                console.error(xhr.responseText);
+            error: function(xhr, status, error){
+                console.error("HTTP Status:", xhr.status);
+                console.error("Response Text:", xhr.responseText);
+                
+                let errDetail = "Server communication error (" + xhr.status + ").";
+                if(xhr.responseText) {
+                    errDetail += " Response: " + xhr.responseText.substring(0, 100);
+                }
+
                 $('#form-message').html(`
                     <div class="alert alert-danger border-0 shadow-sm d-flex align-items-center" role="alert">
-                        <i class="fas fa-plug fa-lg me-3"></i>
-                        <div>Server error or connection fault. Please review your backend configuration.</div>
+                        <i class="fas fa-exclamation-triangle fa-lg me-3"></i>
+                        <div>${errDetail}</div>
                     </div>
                 `);
                 btn.prop('disabled', false).html('<i class="fas fa-save me-2"></i> Register Patient');
