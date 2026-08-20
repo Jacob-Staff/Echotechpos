@@ -1,64 +1,56 @@
 <?php
 session_start();
-require_once '../../includes/conn.php';
+header('Content-Type: application/json');
+require_once "../../includes/conn.php";
 
-// Check security
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['branch_id'])) {
-    die("Unauthorized access");
+$pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
+$branch_id   = (int)($_SESSION['branch_id'] ?? 0);
+$user_id     = (int)($_SESSION['user_id'] ?? 0);
+
+$layby_id = intval($_POST['layby_id'] ?? 0);
+$amount   = floatval($_POST['amount'] ?? 0);
+$method   = trim($_POST['method'] ?? 'Cash');
+
+if ($layby_id <= 0 || $amount <= 0) {
+    echo json_encode(['status' => 'error', 'message' => 'Invalid payment parameters.']);
+    exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $layby_id   = intval($_POST['layby_id']);
-    $amount     = floatval($_POST['amount']);
-    $user_id    = $_SESSION['user_id'];
-    $branch_id  = $_SESSION['branch_id'];
-    $method     = "Cash"; // You can expand this to a dropdown in the modal later
+$conn->begin_transaction();
 
-    if ($amount <= 0) {
-        die("Invalid payment amount.");
+try {
+    // 1. Fetch current Lay-by
+    $stmt = $conn->prepare("SELECT balance_due FROM laybys WHERE id = ? AND branch_id = ? AND pharmacy_id = ?");
+    $stmt->bind_param("iii", $layby_id, $branch_id, $pharmacy_id);
+    $stmt->execute();
+    $layby = $stmt->get_result()->fetch_assoc();
+
+    if (!$layby) {
+        throw new Exception("Lay-by agreement not found.");
     }
 
-    // 1. Fetch current balance to prevent overpayment
-    $check_sql = "SELECT balance_due, total_amount FROM laybys WHERE id = ? AND branch_id = ?";
-    $c_stmt = $conn->prepare($check_sql);
-    $c_stmt->bind_param("ii", $layby_id, $branch_id);
-    $c_stmt->execute();
-    $current = $c_stmt->get_result()->fetch_assoc();
-
-    if (!$current) {
-        die("Lay-by record not found.");
+    $current_balance = floatval($layby['balance_due']);
+    if ($amount > $current_balance) {
+        throw new Exception("Payment amount exceeds remaining balance.");
     }
 
-    if ($amount > $current['balance_due']) {
-        die("Payment exceeds the remaining balance of K" . number_format($current['balance_due'], 2));
-    }
+    $new_balance = $current_balance - $amount;
+    $new_status  = ($new_balance <= 0) ? 'Completed' : 'Active';
 
-    // 2. Start Transaction to ensure data integrity
-    $conn->begin_transaction();
+    // 2. Insert payment
+    $pay_stmt = $conn->prepare("INSERT INTO layby_payments (pharmacy_id, branch_id, layby_id, user_id, payment_amount, payment_date, method) VALUES (?, ?, ?, ?, ?, NOW(), ?)");
+    $pay_stmt->bind_param("iiiids", $pharmacy_id, $branch_id, $layby_id, $user_id, $amount, $method);
+    $pay_stmt->execute();
 
-    try {
-        // A. Insert into payments history
-        $ins_payment = "INSERT INTO layby_payments (layby_id, branch_id, user_id, payment_amount, method, payment_date) 
-                        VALUES (?, ?, ?, ?, ?, NOW())";
-        $p_stmt = $conn->prepare($ins_payment);
-        $p_stmt->bind_param("iiids", $layby_id, $branch_id, $user_id, $amount, $method);
-        $p_stmt->execute();
+    // 3. Update Lay-by record balance
+    $up_stmt = $conn->prepare("UPDATE laybys SET deposit = deposit + ?, balance_due = ?, status = ? WHERE id = ?");
+    $up_stmt->bind_param("ddsi", $amount, $new_balance, $new_status, $layby_id);
+    $up_stmt->execute();
 
-        // B. Update main layby table (Reduce balance)
-        $new_balance = $current['balance_due'] - $amount;
-        $status = ($new_balance <= 0) ? 'Completed' : 'Pending';
+    $conn->commit();
+    echo json_encode(['status' => 'success']);
 
-        $up_layby = "UPDATE laybys SET balance_due = ?, status = ? WHERE id = ?";
-        $u_stmt = $conn->prepare($up_layby);
-        $u_stmt->bind_param("dsi", $new_balance, $status, $layby_id);
-        $u_stmt->execute();
-
-        // C. Commit Transaction
-        $conn->commit();
-        echo "success";
-
-    } catch (Exception $e) {
-        $conn->rollback();
-        echo "Error: " . $e->getMessage();
-    }
+} catch (Exception $e) {
+    $conn->rollback();
+    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
 }
