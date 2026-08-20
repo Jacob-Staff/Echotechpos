@@ -17,109 +17,118 @@ $pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
 $branch_id   = (int)($_SESSION['branch_id'] ?? 0);
 
 if (!$pharmacy_id || !$branch_id) {
-    header("Location: ../login.php?error=session_expired");
+    header("Location: ../index.php?error=session_expired");
     exit();
 }
 
-// Fetch Pharmacy & Branch Name for Header
+// Fetch Pharmacy & Branch Name
 $display_pharmacy_name = "Pharmacy";
 $display_branch_name   = "Main Branch";
 
-$pharm_query = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
-$pharm_query->bind_param("i", $pharmacy_id);
-$pharm_query->execute();
-$pharm_res = $pharm_query->get_result();
+$pharm_stmt = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
+$pharm_stmt->bind_param("i", $pharmacy_id);
+$pharm_stmt->execute();
+$pharm_res = $pharm_stmt->get_result();
 if ($row = $pharm_res->fetch_assoc()) {
     $display_pharmacy_name = $row['name'];
 }
-$pharm_query->close();
+$pharm_stmt->close();
 
-$branch_query = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ? LIMIT 1");
-$branch_query->bind_param("ii", $branch_id, $pharmacy_id);
-$branch_query->execute();
-$branch_res = $branch_query->get_result();
+$branch_stmt = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ? LIMIT 1");
+$branch_stmt->bind_param("ii", $branch_id, $pharmacy_id);
+$branch_stmt->execute();
+$branch_res = $branch_stmt->get_result();
 if ($row = $branch_res->fetch_assoc()) {
     $display_branch_name = $row['branch_name'];
 }
-$branch_query->close();
+$branch_stmt->close();
 
 $success_msg = '';
 $error_msg   = '';
 
-// Handle Purchase Order Submission
+// Handle Form Submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $supplier_id = (int)($_POST['supplier_id'] ?? 0);
-    $items       = $_POST['items'] ?? [];
+    $supplier_id   = (int)($_POST['supplier_id'] ?? 0);
+    $expected_date = !empty($_POST['expected_date']) ? $_POST['expected_date'] : null;
+    $status        = $_POST['status'] ?? 'ordered';
+    $items         = $_POST['items'] ?? [];
 
     if ($supplier_id && !empty($items)) {
         $conn->begin_transaction();
         try {
-            $po_date = date('Y-m-d H:i:s');
-            $user_id = (int)($_SESSION['user_id'] ?? 0);
+            $po_date   = date('Y-m-d H:i:s');
+            $user_id   = (int)($_SESSION['user_id'] ?? 0);
+            $po_number = 'PO-' . date('Ymd') . '-' . rand(1000, 9999);
 
-            // Insert Purchase Order
-            $po_stmt = $conn->prepare("INSERT INTO purchase_orders (pharmacy_id, branch_id, supplier_id, po_date, created_by) VALUES (?, ?, ?, ?, ?)");
-            $po_stmt->bind_param("iiisi", $pharmacy_id, $branch_id, $supplier_id, $po_date, $user_id);
+            // Calculate total cost
+            $total_cost = 0.00;
+            foreach ($items as $item) {
+                $qty        = (int)($item['quantity'] ?? 0);
+                $unit_price = (float)($item['unit_price'] ?? 0);
+                if ($qty > 0) {
+                    $total_cost += ($qty * $unit_price);
+                }
+            }
+
+            // Insert Purchase Order Record (Does NOT alter store inventory)
+            $po_stmt = $conn->prepare("INSERT INTO purchase_orders (po_number, pharmacy_id, branch_id, supplier_id, po_date, expected_date, status, total_cost, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $po_stmt->bind_param("siiisssdi", $po_number, $pharmacy_id, $branch_id, $supplier_id, $po_date, $expected_date, $status, $total_cost, $user_id);
             $po_stmt->execute();
             $po_id = $po_stmt->insert_id;
             $po_stmt->close();
 
-            // Insert Purchase Items & Update Inventory Stock
-            $stmt_item  = $conn->prepare("INSERT INTO purchase_items (purchase_id, product_id, quantity, pharmacy_id, branch_id) VALUES (?, ?, ?, ?, ?)");
-            $stmt_stock = $conn->prepare("UPDATE store_items SET quantity = quantity + ? WHERE id = ? AND branch_id = ? AND pharmacy_id = ?");
+            // Insert Items
+            $item_stmt = $conn->prepare("INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price, pharmacy_id, branch_id) VALUES (?, ?, ?, ?, ?, ?)");
 
             foreach ($items as $item) {
                 $product_id = (int)($item['product_id'] ?? 0);
                 $qty        = (int)($item['quantity'] ?? 0);
+                $unit_price = (float)($item['unit_price'] ?? 0);
 
                 if ($product_id > 0 && $qty > 0) {
-                    // Record purchase item
-                    $stmt_item->bind_param("iiiii", $po_id, $product_id, $qty, $pharmacy_id, $branch_id);
-                    $stmt_item->execute();
-
-                    // Increment inventory stock
-                    $stmt_stock->bind_param("iiii", $qty, $product_id, $branch_id, $pharmacy_id);
-                    $stmt_stock->execute();
+                    $item_stmt->bind_param("iiidii", $po_id, $product_id, $qty, $unit_price, $pharmacy_id, $branch_id);
+                    $item_stmt->execute();
                 }
             }
-
-            $stmt_item->close();
-            $stmt_stock->close();
+            $item_stmt->close();
 
             $conn->commit();
-            $success_msg = "Purchase order registered and inventory stock updated successfully!";
+            
+            // Redirect to PO List with success message
+            header("Location: purchase_orders_list.php?msg=" . urlencode("Purchase Order {$po_number} created successfully as '{$status}'."));
+            exit();
+
         } catch (Exception $e) {
             $conn->rollback();
-            $error_msg = "Failed to process purchase order: " . $e->getMessage();
+            $error_msg = "Failed to create Purchase Order: " . $e->getMessage();
         }
     } else {
-        $error_msg = "Please select a valid supplier and add at least one item with quantity.";
+        $error_msg = "Please select a supplier and add at least one valid product line.";
     }
 }
 
-// Fetch Suppliers (Filtered by Pharmacy)
+// Fetch Suppliers
 $suppliers = [];
-$supplier_stmt = $conn->prepare("SELECT id, name FROM suppliers WHERE pharmacy_id = ? ORDER BY name ASC");
-$supplier_stmt->bind_param("i", $pharmacy_id);
-$supplier_stmt->execute();
-$supp_res = $supplier_stmt->get_result();
+$supp_stmt = $conn->prepare("SELECT id, name FROM suppliers WHERE pharmacy_id = ? ORDER BY name ASC");
+$supp_stmt->bind_param("i", $pharmacy_id);
+$supp_stmt->execute();
+$supp_res = $supp_stmt->get_result();
 while ($row = $supp_res->fetch_assoc()) {
     $suppliers[] = $row;
 }
-$supplier_stmt->close();
+$supp_stmt->close();
 
-// Fetch Products (Filtered by Pharmacy & Branch)
+// Fetch Store Products
 $products = [];
-$product_stmt = $conn->prepare("SELECT id, item_name, strength, quantity FROM store_items WHERE pharmacy_id = ? AND branch_id = ? ORDER BY item_name ASC");
-$product_stmt->bind_param("ii", $pharmacy_id, $branch_id);
-$product_stmt->execute();
-$prod_res = $product_stmt->get_result();
+$prod_stmt = $conn->prepare("SELECT id, item_name, strength, quantity, cost FROM store_items WHERE pharmacy_id = ? AND branch_id = ? ORDER BY item_name ASC");
+$prod_stmt->bind_param("ii", $pharmacy_id, $branch_id);
+$prod_stmt->execute();
+$prod_res = $prod_stmt->get_result();
 while ($row = $prod_res->fetch_assoc()) {
     $products[] = $row;
 }
-$product_stmt->close();
+$prod_stmt->close();
 
-// Load Head Includes
 require_once "../includes/head.php";
 ?>
 
@@ -147,13 +156,13 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 16px;
     box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02), 0 10px 15px -3px rgba(0,0,0,0.03);
-    overflow: hidden;
 }
 
 .form-header {
     background: #f8fafc;
     border-bottom: 1px solid var(--border-color);
     padding: 1.25rem 2rem;
+    border-radius: 16px 16px 0 0;
 }
 
 .form-body {
@@ -165,16 +174,13 @@ body {
     border: none;
     color: white;
     font-weight: 600;
-    padding: 0.85rem 1.75rem;
+    padding: 0.75rem 1.5rem;
     border-radius: 8px;
-    transition: all 0.2s;
 }
 
 .btn-primary-custom:hover {
     background: var(--primary-hover);
     color: white;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);
 }
 </style>
 
@@ -187,33 +193,28 @@ body {
     <div class="page-wrapper po-wrapper">
         <div class="container-fluid max-width-lg p-0">
 
-            <!-- Top Action / Title Bar -->
             <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
                 <div>
-                    <h3 class="fw-bold text-dark mb-1">Purchase Orders</h3>
+                    <h3 class="fw-bold text-dark mb-1">New Purchase Order</h3>
                     <p class="text-muted mb-0 small">
                         <i class="fas fa-building text-primary me-1"></i>
                         <strong><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></strong> &bull; <?= htmlspecialchars($display_branch_name) ?>
                     </p>
                 </div>
+                <div>
+                    <a href="purchase_orders_list.php" class="btn btn-outline-secondary btn-sm fw-bold">
+                        <i class="fas fa-arrow-left me-1"></i> Back to Orders List
+                    </a>
+                </div>
             </div>
 
-            <!-- Alerts -->
-            <?php if (!empty($success_msg)): ?>
-                <div class="alert alert-success border-0 shadow-sm d-flex align-items-center mb-4" role="alert">
-                    <i class="fas fa-check-circle fa-lg me-3"></i>
-                    <div><?= htmlspecialchars($success_msg) ?></div>
-                </div>
-            <?php endif; ?>
-
             <?php if (!empty($error_msg)): ?>
-                <div class="alert alert-danger border-0 shadow-sm d-flex align-items-center mb-4" role="alert">
+                <div class="alert alert-danger border-0 shadow-sm d-flex align-items-center mb-4">
                     <i class="fas fa-exclamation-triangle fa-lg me-3"></i>
                     <div><?= htmlspecialchars($error_msg) ?></div>
                 </div>
             <?php endif; ?>
 
-            <!-- Main Form Card -->
             <div class="row justify-content-center">
                 <div class="col-12 col-xl-10">
                     <div class="form-card">
@@ -223,7 +224,7 @@ body {
                                 <div class="bg-primary text-white rounded-circle p-2 d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
                                     <i class="fas fa-file-invoice fa-sm"></i>
                                 </div>
-                                <h5 class="fw-bold text-dark mb-0">Create New Purchase Order</h5>
+                                <h5 class="fw-bold text-dark mb-0">Create Supplier Order</h5>
                             </div>
                             <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold px-3 py-2 rounded-pill border">
                                 Date: <?= date('d M Y') ?>
@@ -232,26 +233,41 @@ body {
 
                         <div class="form-body">
                             <form method="POST" action="purchase_orders.php" autocomplete="off">
-                                <div class="mb-4">
-                                    <label for="supplier_id" class="form-label fw-bold text-dark">Select Supplier <span class="text-danger">*</span></label>
-                                    <select name="supplier_id" id="supplier_id" class="form-select" required>
-                                        <option value="">-- Choose Supplier --</option>
-                                        <?php foreach ($suppliers as $s): ?>
-                                            <option value="<?= $s['id'] ?>"><?= htmlspecialchars($s['name']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
+                                
+                                <div class="row g-3 mb-4">
+                                    <div class="col-md-5">
+                                        <label for="supplier_id" class="form-label fw-bold text-dark">Supplier <span class="text-danger">*</span></label>
+                                        <select name="supplier_id" id="supplier_id" class="form-select" required>
+                                            <option value="">-- Select Supplier --</option>
+                                            <?php foreach ($suppliers as $s): ?>
+                                                <option value="<?= $s['id'] ?>"><?= htmlspecialchars($s['name']) ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="expected_date" class="form-label fw-bold text-dark">Expected Delivery Date</label>
+                                        <input type="date" name="expected_date" id="expected_date" class="form-control">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="status" class="form-label fw-bold text-dark">Initial Status</label>
+                                        <select name="status" id="status" class="form-select">
+                                            <option value="ordered" selected>Ordered / Sent</option>
+                                            <option value="draft">Draft</option>
+                                        </select>
+                                    </div>
                                 </div>
 
                                 <div class="table-responsive mb-4">
                                     <table class="table table-hover align-middle border">
                                         <thead class="table-light">
                                             <tr>
-                                                <th style="width: 45%;">Product</th>
-                                                <th style="width: 20%;">Current Stock</th>
-                                                <th style="width: 25%;">Quantity to Order</th>
+                                                <th style="width: 35%;">Product</th>
+                                                <th style="width: 15%;">Stock</th>
+                                                <th style="width: 20%;">Est. Unit Price (ZMW)</th>
+                                                <th style="width: 20%;">Qty to Order</th>
                                                 <th style="width: 10%;" class="text-center">
                                                     <button type="button" class="btn btn-sm btn-success" id="add-row">
-                                                        <i class="fas fa-plus me-1"></i> Add
+                                                        <i class="fas fa-plus"></i>
                                                     </button>
                                                 </th>
                                             </tr>
@@ -262,13 +278,16 @@ body {
                                                     <select name="items[0][product_id]" class="form-select product-select" required>
                                                         <option value="">-- Select Product --</option>
                                                         <?php foreach ($products as $p): ?>
-                                                            <option value="<?= $p['id'] ?>" data-stock="<?= $p['quantity'] ?>">
+                                                            <option value="<?= $p['id'] ?>" data-stock="<?= $p['quantity'] ?>" data-cost="<?= $p['cost'] ?>">
                                                                 <?= htmlspecialchars($p['item_name'] . ' (' . $p['strength'] . ')') ?>
                                                             </option>
                                                         <?php endforeach; ?>
                                                     </select>
                                                 </td>
-                                                <td class="current-stock fw-bold text-muted">0</td>
+                                                <td class="current-stock text-muted fw-bold">0</td>
+                                                <td>
+                                                    <input type="number" step="0.01" name="items[0][unit_price]" class="form-control unit-price" placeholder="0.00">
+                                                </td>
                                                 <td>
                                                     <input type="number" name="items[0][quantity]" class="form-control" min="1" placeholder="Qty" required>
                                                 </td>
@@ -283,8 +302,8 @@ body {
                                 </div>
 
                                 <div class="text-end">
-                                    <button type="submit" class="btn btn-primary-custom px-4">
-                                        <i class="fas fa-save me-2"></i> Save Purchase Order
+                                    <button type="submit" class="btn btn-primary-custom">
+                                        <i class="fas fa-paper-plane me-2"></i> Submit Purchase Order
                                     </button>
                                 </div>
                             </form>
@@ -307,18 +326,21 @@ body {
 
 <script>
 $(document).ready(function(){
-    // Display stock quantity upon selection
     $(document).on('change', '.product-select', function() {
-        let stock = $(this).find(':selected').data('stock');
-        $(this).closest('tr').find('.current-stock').text(stock !== undefined ? stock : 0);
+        let selected = $(this).find(':selected');
+        let stock = selected.data('stock') || 0;
+        let cost = selected.data('cost') || 0.00;
+        
+        let row = $(this).closest('tr');
+        row.find('.current-stock').text(stock);
+        row.find('.unit-price').val(cost);
     });
 
-    // Add row dynamically
     let rowIndex = 1;
     $('#add-row').click(function() {
         let optionsHtml = `<option value="">-- Select Product --</option>`;
         <?php foreach ($products as $p): ?>
-            optionsHtml += `<option value="<?= $p['id'] ?>" data-stock="<?= $p['quantity'] ?>"><?= htmlspecialchars(addslashes($p['item_name'] . ' (' . $p['strength'] . ')')) ?></option>`;
+            optionsHtml += `<option value="<?= $p['id'] ?>" data-stock="<?= $p['quantity'] ?>" data-cost="<?= $p['cost'] ?>"><?= htmlspecialchars(addslashes($p['item_name'] . ' (' . $p['strength'] . ')')) ?></option>`;
         <?php endforeach; ?>
 
         let newRow = `<tr>
@@ -327,7 +349,10 @@ $(document).ready(function(){
                     ${optionsHtml}
                 </select>
             </td>
-            <td class="current-stock fw-bold text-muted">0</td>
+            <td class="current-stock text-muted fw-bold">0</td>
+            <td>
+                <input type="number" step="0.01" name="items[${rowIndex}][unit_price]" class="form-control unit-price" placeholder="0.00">
+            </td>
             <td>
                 <input type="number" name="items[${rowIndex}][quantity]" class="form-control" min="1" placeholder="Qty" required>
             </td>
@@ -340,12 +365,9 @@ $(document).ready(function(){
         rowIndex++;
     });
 
-    // Remove row dynamically
     $(document).on('click', '.remove-row', function() {
         if ($('#products-body tr').length > 1) {
             $(this).closest('tr').remove();
-        } else {
-            alert('At least one product item is required.');
         }
     });
 });
