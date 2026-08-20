@@ -301,7 +301,7 @@ body {
                                         <label class="form-label">First Name <span class="text-danger">*</span></label>
                                         <div class="input-group">
                                             <span class="input-group-text"><i class="fas fa-user"></i></span>
-                                            <input type="text" name="first_name" class="form-control" placeholder="John" required>
+                                            <input type="text" name="first_name" class="form-control" placeholder="enter here" required>
                                         </div>
                                     </div>
 
@@ -310,7 +310,7 @@ body {
                                         <label class="form-label">Last Name <span class="text-danger">*</span></label>
                                         <div class="input-group">
                                             <span class="input-group-text"><i class="fas fa-user"></i></span>
-                                            <input type="text" name="last_name" class="form-control" placeholder="Doe" required>
+                                            <input type="text" name="last_name" class="form-control" placeholder="enter here" required>
                                         </div>
                                     </div>
 
