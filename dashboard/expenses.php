@@ -18,13 +18,52 @@ if (!$pharmacy_id || !$branch_id) {
     exit();
 }
 
-// Handle AJAX POST requests (Add / Delete / Clear) directly in this file
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+// -------------------------------------------------------------------
+// 1. AJAX HANDLERS (Fetch, Add, Delete, Clear)
+// -------------------------------------------------------------------
+if (isset($_REQUEST['ajax_action'])) {
     header('Content-Type: application/json');
-    
-    $action = $_POST['action'];
+    $action = $_REQUEST['ajax_action'];
 
-    // 1. ADD EXPENSE
+    // FETCH EXPENSES
+    if ($action === 'fetch') {
+        $sql = "SELECT id, name, amount, category, expense_date 
+                FROM expenses 
+                WHERE pharmacy_id = $pharmacy_id AND branch_id = $branch_id 
+                ORDER BY expense_date DESC, id DESC";
+        $result = mysqli_query($conn, $sql);
+        
+        $html = '';
+        $total = 0;
+
+        if ($result && mysqli_num_rows($result) > 0) {
+            while ($row = mysqli_fetch_assoc($result)) {
+                $amount = (float)$row['amount'];
+                $total += $amount;
+
+                $html .= '<tr>';
+                $html .= '<td class="fw-bold text-dark">' . htmlspecialchars($row['name']) . '</td>';
+                $html .= '<td><span class="badge bg-light text-dark border">' . htmlspecialchars($row['category']) . '</span></td>';
+                $html .= '<td>' . date('d M Y', strtotime($row['expense_date'])) . '</td>';
+                $html .= '<td class="text-end fw-bold text-danger">K' . number_format($amount, 2) . '</td>';
+                $html .= '<td class="text-center">';
+                $html .= '<button type="button" class="btn btn-outline-danger btn-sm px-2 delete-expense" data-id="' . $row['id'] . '"><i class="fas fa-trash-alt"></i></button>';
+                $html .= '</td>';
+                $html .= '</tr>';
+            }
+        } else {
+            $html = '<tr><td colspan="5" class="text-center py-4 text-muted">No expenses recorded yet.</td></tr>';
+        }
+
+        echo json_encode([
+            'status' => 'success',
+            'html' => $html,
+            'total' => number_format($total, 2, '.', '')
+        ]);
+        exit;
+    }
+
+    // ADD EXPENSE
     if ($action === 'add') {
         $name     = trim($_POST['name'] ?? '');
         $amount   = (float)($_POST['amount'] ?? 0);
@@ -36,18 +75,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->bind_param("iisdssi", $pharmacy_id, $branch_id, $name, $amount, $ex_date, $category, $user_id);
 
             if ($stmt->execute()) {
-                echo json_encode(['status' => 'success', 'message' => 'Expense saved successfully.']);
+                echo json_encode(['status' => 'success', 'message' => 'Expense recorded successfully.']);
             } else {
-                echo json_encode(['status' => 'error', 'message' => 'Database error: ' . $stmt->error]);
+                echo json_encode(['status' => 'error', 'message' => 'Database failure: ' . $stmt->error]);
             }
             $stmt->close();
         } else {
-            echo json_encode(['status' => 'error', 'message' => 'Invalid data provided.']);
+            echo json_encode(['status' => 'error', 'message' => 'Please provide valid description, date, and amount.']);
         }
         exit;
     }
 
-    // 2. DELETE EXPENSE
+    // DELETE EXPENSE
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
         if ($id > 0) {
@@ -63,7 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
-    // 3. CLEAR EXPENSES (Month / Year)
+    // CLEAR EXPENSES
     if ($action === 'clear') {
         $type = $_POST['type'] ?? '';
         if ($type === 'month') {
@@ -88,7 +127,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 $categories = ['General', 'Utilities', 'Staff Welfare', 'Logistics', 'Stock/Supplies', 'Other'];
 
-// Include header layout elements
 require_once "../includes/head.php";
 ?>
 
@@ -117,7 +155,7 @@ require_once "../includes/head.php";
                         </div>
                         <div class="card-body p-3">
                             <form id="expenseForm">
-                                <input type="hidden" name="action" value="add">
+                                <input type="hidden" name="ajax_action" value="add">
                                 
                                 <div class="mb-3">
                                     <label class="form-label small fw-bold text-muted mb-1">Description *</label>
@@ -199,27 +237,19 @@ require_once "../includes/head.php";
 <script>
 $(document).ready(function() {
 
-    // Correct Total Calculation
-    function calculateTotal() {
-        let total = 0;
-        $('.amt').each(function() {
-            let val = parseFloat($(this).attr('data-amt'));
-            if (!isNaN(val)) total += val;
-        });
-        $('#total_display').text(total.toFixed(2));
-    }
-
-    // Load table rows via AJAX & recalculate sum AFTER content renders
     function loadExpenses() {
-        $.get('actions/fetch_expenses.php', function(data) {
-            $('#expenses_list').html(data);
-            calculateTotal();
+        $.getJSON('expenses.php', { ajax_action: 'fetch' }, function(res) {
+            if (res.status === 'success') {
+                $('#expenses_list').html(res.html);
+                $('#total_display').text(res.total);
+            }
         });
     }
 
+    // Initial Load on page reload
     loadExpenses();
 
-    // Submit Form (Add Expense)
+    // Add Expense
     $('#expenseForm').on('submit', function(e) {
         e.preventDefault();
         const btn = $('#submitBtn');
@@ -228,6 +258,7 @@ $(document).ready(function() {
         $.post('expenses.php', $(this).serialize(), function(res) {
             if (res.status === 'success') {
                 $('#expenseForm')[0].reset();
+                $('input[name="date"]').val(new Date().toISOString().split('T')[0]);
                 loadExpenses();
             } else {
                 alert('Error: ' + res.message);
@@ -237,11 +268,11 @@ $(document).ready(function() {
         });
     });
 
-    // Delete Single Record
+    // Delete Record
     $(document).on('click', '.delete-expense', function() {
         const id = $(this).data('id');
-        if (confirm('Delete this record?')) {
-            $.post('expenses.php', { action: 'delete', id: id }, function(res) {
+        if (confirm('Delete this expense record?')) {
+            $.post('expenses.php', { ajax_action: 'delete', id: id }, function(res) {
                 if (res.status === 'success') {
                     loadExpenses();
                 } else {
@@ -251,12 +282,12 @@ $(document).ready(function() {
         }
     });
 
-    // Clear Monthly / Yearly Records
+    // Clear Month / Year
     $(document).on('click', '.clear-btn', function(e) {
         e.preventDefault();
         const type = $(this).data('type');
-        if (confirm('Are you sure you want to clear ' + type + ' records?')) {
-            $.post('expenses.php', { action: 'clear', type: type }, function(res) {
+        if (confirm('Clear ' + type + ' expense records?')) {
+            $.post('expenses.php', { ajax_action: 'clear', type: type }, function(res) {
                 if (res.status === 'success') {
                     loadExpenses();
                 } else {
@@ -265,6 +296,7 @@ $(document).ready(function() {
             }, 'json');
         }
     });
+
 });
 </script>
 </body>
