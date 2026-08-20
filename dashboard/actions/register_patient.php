@@ -1,4 +1,5 @@
 <?php
+// Suppress unexpected HTML errors from breaking JSON output
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
@@ -8,14 +9,18 @@ if (session_status() === PHP_SESSION_NONE) {
 
 header('Content-Type: application/json');
 
-require_once "../../includes/conn.php";
-require_once "../../includes/auth.php";
+// Use __DIR__ for fail-safe file inclusion
+require_once __DIR__ . "/../../includes/conn.php";
+require_once __DIR__ . "/../../includes/auth.php";
 
 $pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
 $branch_id   = (int)($_SESSION['branch_id'] ?? 0);
 
 if (!$pharmacy_id || !$branch_id) {
-    echo json_encode(['status' => 'error', 'message' => 'Unauthorized access or session expired.']);
+    echo json_encode([
+        'status'  => 'error', 
+        'message' => 'Session expired. Please log in again.'
+    ]);
     exit();
 }
 
@@ -27,8 +32,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $patient_condation = trim($_POST['patient_condation'] ?? 'No');
 
     if (empty($first_name) || empty($last_name) || empty($contact_number)) {
-        echo json_encode(['status' => 'error', 'message' => 'Please fill in all required fields.']);
+        echo json_encode([
+            'status'  => 'error', 
+            'message' => 'Please fill in all required fields (First Name, Last Name, Contact).'
+        ]);
         exit();
+    }
+
+    if (empty($invoice_number)) {
+        $invoice_number = 'PAT-' . mt_rand(100000, 999999);
     }
 
     $stmt = $conn->prepare("INSERT INTO patients 
@@ -36,7 +48,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         VALUES (?, ?, ?, ?, ?, ?, NOW(), 'Active', ?)");
 
     if (!$stmt) {
-        echo json_encode(['status' => 'error', 'message' => 'SQL prepare error: ' . $conn->error]);
+        echo json_encode([
+            'status'  => 'error', 
+            'message' => 'Database Query Error: ' . $conn->error
+        ]);
         exit();
     }
 
@@ -51,11 +66,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     );
 
     if ($stmt->execute()) {
-        echo json_encode(['status' => 'success', 'message' => 'Patient registered successfully! Ref: ' . $invoice_number]);
+        echo json_encode([
+            'status'  => 'success', 
+            'message' => 'Patient successfully registered! Ref: ' . $invoice_number
+        ]);
     } else {
-        echo json_encode(['status' => 'error', 'message' => 'Database insert error: ' . $stmt->error]);
+        echo json_encode([
+            'status'  => 'error', 
+            'message' => 'Failed to save record: ' . $stmt->error
+        ]);
     }
 
     $stmt->close();
+    exit();
+} else {
+    echo json_encode([
+        'status'  => 'error', 
+        'message' => 'Invalid request method.'
+    ]);
     exit();
 }
