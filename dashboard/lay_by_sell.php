@@ -451,7 +451,7 @@ $('#layby_form').on('submit', function(e) {
     const payload = $(this).serialize() + '&cart=' + JSON.stringify(cart) + '&total_amount=' + total;
 
     $.ajax({
-        url: 'create_layby.php', // FIXED: Removed 'actions/' prefix to match your file structure
+        url: 'actions/create_layby.php', // Target the action handler file
         type: 'POST',
         data: payload,
         dataType: 'json',
