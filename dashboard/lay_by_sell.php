@@ -58,7 +58,6 @@ require_once "../includes/head.php";
     margin-bottom: 1.25rem;
 }
 
-/* Light Theme Cards */
 .layby-card {
     background-color: #ffffff;
     border: 1px solid #e2e8f0;
@@ -81,7 +80,6 @@ require_once "../includes/head.php";
     margin: 0;
 }
 
-/* Forms & Inputs */
 .layby-card .form-control {
     background-color: #ffffff !important;
     color: #0f172a !important;
@@ -96,11 +94,6 @@ require_once "../includes/head.php";
     box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15) !important;
 }
 
-.layby-card .form-control::placeholder {
-    color: #94a3b8 !important;
-}
-
-/* Search Dropdown */
 .product-search-results { 
     position: absolute; 
     background-color: #ffffff; 
@@ -133,7 +126,6 @@ require_once "../includes/head.php";
     font-weight: 600;
 }
 
-/* Light Table Styling */
 .table-light-custom {
     color: #334155;
     margin-bottom: 0;
@@ -170,7 +162,6 @@ require_once "../includes/head.php";
     border-radius: 10px;
 }
 
-/* Mobile Responsive Adjustments for Tables/Lists */
 @media (max-width: 767.98px) {
     .desktop-table-view {
         display: none !important;
@@ -189,7 +180,6 @@ require_once "../includes/head.php";
     }
 }
 
-/* Mobile Card Styling for Layby Agreements */
 .layby-mobile-card {
     background: #ffffff;
     border: 1px solid #e2e8f0;
@@ -222,7 +212,7 @@ require_once "../includes/head.php";
 
             <!-- Main Workstation Layout -->
             <div class="row g-3 g-lg-4">
-                <!-- Left: Shopping Cart Area -->
+                <!-- Left: Cart Area -->
                 <div class="col-12 col-lg-7 col-xl-8">
                     <div class="card layby-card shadow-sm h-100">
                         <div class="layby-card-header d-flex align-items-center justify-content-between">
@@ -260,7 +250,7 @@ require_once "../includes/head.php";
                                 </table>
                             </div>
 
-                            <!-- Cart Summary Footer -->
+                            <!-- Cart Summary -->
                             <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mt-3 pt-3 border-top gap-3">
                                 <button id="clear_cart" class="btn btn-outline-danger btn-sm px-3 align-self-start align-self-sm-center">
                                     <i class="fas fa-trash me-1"></i> Clear Cart
@@ -274,7 +264,7 @@ require_once "../includes/head.php";
                     </div>
                 </div>
 
-                <!-- Right: Customer Setup & Terms -->
+                <!-- Right: Customer Setup -->
                 <div class="col-12 col-lg-5 col-xl-4">
                     <div class="card layby-card shadow-sm h-100">
                         <div class="layby-card-header">
@@ -305,7 +295,6 @@ require_once "../includes/head.php";
                                     <input type="date" id="due_date" class="form-control" required>
                                 </div>
                                 
-                                <!-- Balance Preview Widget -->
                                 <div class="balance-box p-3 mb-3 text-center">
                                     <small class="text-primary text-uppercase fw-bold d-block mb-1" style="letter-spacing: 0.5px;">Remaining Balance Due</small>
                                     <h3 class="text-dark fw-bold mb-0">K<span id="balance_due" class="text-danger">0.00</span></h3>
@@ -320,17 +309,16 @@ require_once "../includes/head.php";
                 </div>
             </div>
 
-            <!-- Bottom: Existing Agreements Table & Mobile List -->
+            <!-- Bottom: Existing Agreements Section -->
             <div class="card layby-card mt-4 shadow-sm">
                 <div class="layby-card-header d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
                     <h4 class="layby-card-title" id="list_title"><i class="fas fa-list-alt me-2 text-primary"></i>Active Lay-by Agreements</h4>
                     <div class="d-flex flex-wrap gap-2">
                         <button id="toggle_paid" class="btn btn-info btn-sm text-white fw-bold">View Fully Paid</button>
-                        <button id="clear_fully_paid" class="btn btn-danger btn-sm fw-bold" style="display:none;">Clear Fully Paid Lay-bys</button>
                     </div>
                 </div>
                 <div class="card-body p-2 p-md-3">
-                    <!-- Desktop Table View -->
+                    <!-- Desktop View -->
                     <div class="table-responsive">
                         <table class="table table-light-custom text-center align-middle desktop-table-view w-100">
                             <thead>
@@ -349,7 +337,7 @@ require_once "../includes/head.php";
                         </table>
                     </div>
 
-                    <!-- Mobile Cards Container View -->
+                    <!-- Mobile Card View -->
                     <div id="layby_list_mobile" class="mobile-card-view">
                         <div class="text-center py-4 text-muted">Loading agreements...</div>
                     </div>
@@ -371,7 +359,6 @@ require_once "../includes/head.php";
 let cart = [];
 let showingPaid = false;
 
-/* LOAD RECORDS FOR BOTH DESKTOP TABLE & MOBILE CARDS */
 function loadRecords(){
     let status = showingPaid ? 'Completed' : 'Active';
 
@@ -380,10 +367,8 @@ function loadRecords(){
 
     $.get('actions/fetch_laybys.php', { status: status })
     .done(function(data){
-        // Render desktop
         $('#layby_list_desktop').html(data);
 
-        // Convert data rows for responsive mobile view
         let mobileHtml = '';
         let rows = $('#layby_list_desktop tr');
 
@@ -437,75 +422,36 @@ function loadRecords(){
 }
 
 $(document).ready(function(){
-
     loadRecords();
 
-    /* Set default Due Date (e.g. 30 days from today) */
     let today = new Date();
     today.setDate(today.getDate() + 30);
     document.getElementById('due_date').valueAsDate = today;
 
-    /* TOGGLE ACTIVE / PAID */
     $('#toggle_paid').on('click', function(){
         showingPaid = !showingPaid;
 
         if(showingPaid){
-            $(this).text('View Active')
-                   .removeClass('btn-info')
-                   .addClass('btn-warning');
-
+            $(this).text('View Active').removeClass('btn-info').addClass('btn-warning');
             $('#list_title').html('<i class="fas fa-check-circle text-success me-2"></i>Fully Paid Lay-bys');
-            $('#clear_fully_paid').show();
         } else {
-            $(this).text('View Fully Paid')
-                   .removeClass('btn-warning')
-                   .addClass('btn-info');
-
+            $(this).text('View Fully Paid').removeClass('btn-warning').addClass('btn-info');
             $('#list_title').html('<i class="fas fa-list-alt me-2 text-primary"></i>Active Lay-by Agreements');
-            $('#clear_fully_paid').hide();
         }
 
         loadRecords();
     });
-
-    /* CLEAR FULLY PAID LAYBYS */
-    $('#clear_fully_paid').on('click', function(){
-        if(!confirm("Are you sure you want to delete all fully paid lay-bys? This action cannot be undone.")) return;
-
-        const btn = $(this);
-        btn.prop('disabled', true).text('Clearing...');
-
-        $.post('actions/clear_fully_paid.php', {}, function(res){
-            if(res.status === 'success'){
-                alert("All fully paid lay-bys cleared successfully!");
-                loadRecords();
-            } else {
-                alert("Error: " + (res.message || 'Unable to clear records.'));
-            }
-        }, 'json').fail(function(){
-            alert("Server error occurred while clearing records.");
-        }).always(function(){
-            btn.prop('disabled', false).text('Clear Fully Paid Lay-bys');
-        });
-    });
-
 });
 
-/* PRODUCT SEARCH */
 $('#product_search').on('input', function(){
     let q = $(this).val().trim();
     if(q.length > 1){
-        $.post('actions/fetch_products.php', { 
-            query: q,
-            pharmacy_id: "<?= $pharmacy_id ?>",
-            branch_id: "<?= $branch_id ?>"
-        }, data => $('#product_results').html(data).show());
+        $.post('actions/fetch_products.php', { query: q }, data => $('#product_results').html(data).show());
     } else {
         $('#product_results').hide();
     }
 });
 
-/* ADD TO CART */
 $(document).on('click', '.product-item', function(){
     let item = {
         id: $(this).data('id'),
@@ -524,9 +470,7 @@ $(document).on('click', '.product-item', function(){
 function adjustQty(index, delta) {
     if (cart[index]) {
         cart[index].qty += delta;
-        if (cart[index].qty <= 0) {
-            cart.splice(index, 1);
-        }
+        if (cart[index].qty <= 0) cart.splice(index, 1);
         renderCart();
     }
 }
@@ -597,7 +541,6 @@ function updateBalance() {
 $('#deposit').on('input', updateBalance);
 $('#clear_cart').on('click', function(){ cart = []; renderCart(); });
 
-/* SAVE LAYBY */
 $('#layby_form').on('submit', function(e) {
     e.preventDefault();
     if(cart.length === 0) return alert("Please add at least one item to the cart.");
@@ -626,6 +569,5 @@ $('#layby_form').on('submit', function(e) {
     });
 });
 </script>
-
 </body>
 </html>
