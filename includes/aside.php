@@ -56,7 +56,7 @@ if (isset($conn) && $conn) {
                     </a>
                 </li>
                 <li class="sidebar-item mb-1">
-                    <a class="sidebar-link" href="purchase_orders.php">
+                    <a class="sidebar-link" href="purchase_orders_list.php">
                         <i class="mdi mdi-cart-outline"></i><span>Purchase-orders</span>
                     </a>
                 </li>
