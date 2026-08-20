@@ -138,7 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // -----------------------------------------------------------------------------
-// PAGE VIEW DATA RETRIEVAL
+// PAGE VIEW DATA RETRIEVAL & FILTER PROCESSING
 // -----------------------------------------------------------------------------
 
 // Fetch Dynamic Pharmacy & Branch Information
@@ -182,18 +182,62 @@ $stmt2->execute();
 $emergencyPatients = $stmt2->get_result()->fetch_assoc()['total'] ?? 0;
 $stmt2->close();
 
-// Fetch Patients List
-$patients = [];
-$filter_emergency = ($_GET['filter'] ?? '') === 'emergency';
+// GET FILTERS FROM REQUEST
+$search_query   = trim($_GET['search'] ?? '');
+$filter_priority = trim($_GET['priority'] ?? ''); // 'Yes', 'No', or ''
+$start_date     = trim($_GET['start_date'] ?? '');
+$end_date       = trim($_GET['end_date'] ?? '');
+$record_limit   = trim($_GET['limit'] ?? '50'); // Default 50
 
-if ($filter_emergency) {
-    $stmt = $conn->prepare("SELECT * FROM patients WHERE pharmacy_id = ? AND branch_id = ? AND patient_condation = 'Yes' ORDER BY patient_id DESC");
-} else {
-    $stmt = $conn->prepare("SELECT * FROM patients WHERE pharmacy_id = ? AND branch_id = ? ORDER BY patient_id DESC");
+// Handle shortcut parameter from quick metric cards
+if (($_GET['filter'] ?? '') === 'emergency') {
+    $filter_priority = 'Yes';
 }
-$stmt->bind_param("ii", $pharmacy_id, $branch_id);
+
+// Build SQL Query Dynamically
+$where_clauses = ["pharmacy_id = ?", "branch_id = ?"];
+$param_types   = "ii";
+$param_values  = [$pharmacy_id, $branch_id];
+
+if (!empty($search_query)) {
+    $where_clauses[] = "(first_name LIKE ? OR last_name LIKE ? OR contact_number LIKE ? OR invoice_number LIKE ?)";
+    $search_param = '%' . $search_query . '%';
+    $param_types .= "ssss";
+    array_push($param_values, $search_param, $search_param, $search_param, $search_param);
+}
+
+if ($filter_priority === 'Yes' || $filter_priority === 'No') {
+    $where_clauses[] = "patient_condation = ?";
+    $param_types .= "s";
+    $param_values[] = $filter_priority;
+}
+
+if (!empty($start_date)) {
+    $where_clauses[] = "DATE(registration_date) >= ?";
+    $param_types .= "s";
+    $param_values[] = $start_date;
+}
+
+if (!empty($end_date)) {
+    $where_clauses[] = "DATE(registration_date) <= ?";
+    $param_types .= "s";
+    $param_values[] = $end_date;
+}
+
+$sql = "SELECT * FROM patients WHERE " . implode(" AND ", $where_clauses) . " ORDER BY patient_id DESC";
+
+// Apply Limit if not 'all'
+if ($record_limit !== 'all' && is_numeric($record_limit)) {
+    $limit_num = (int)$record_limit;
+    $sql .= " LIMIT " . $limit_num;
+}
+
+$stmt = $conn->prepare($sql);
+$stmt->bind_param($param_types, ...$param_values);
 $stmt->execute();
 $result = $stmt->get_result();
+
+$patients = [];
 while ($row = $result->fetch_assoc()) {
     $patients[] = $row;
 }
@@ -244,7 +288,7 @@ body {
     font-size: 1.25rem;
 }
 
-.form-card, .table-card {
+.form-card, .table-card, .filter-card {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 16px;
@@ -277,15 +321,15 @@ body {
     color: #94a3b8;
 }
 
-.form-control {
+.form-control, .form-select {
     border-color: var(--border-color);
-    padding: 0.75rem 1rem;
+    padding: 0.65rem 0.85rem;
     font-size: 0.95rem;
     border-radius: 8px;
     transition: all 0.2s;
 }
 
-.form-control:focus {
+.form-control:focus, .form-select:focus {
     border-color: var(--primary-color);
     box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.1);
 }
@@ -342,7 +386,7 @@ body {
     box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);
 }
 
-/* Hidden Print Header (Visible only when printing) */
+/* Print Only Header Styling */
 .print-only-header {
     display: none;
 }
@@ -351,7 +395,7 @@ body {
 @media print {
     body {
         background-color: #ffffff !important;
-        font-size: 12pt;
+        font-size: 11pt;
     }
     #main-wrapper > header,
     #main-wrapper > aside,
@@ -359,6 +403,7 @@ body {
     .topbar,
     .stat-card,
     .form-card,
+    .filter-card,
     .btn,
     .actions-column,
     .no-print {
@@ -370,7 +415,7 @@ body {
     }
     .print-only-header {
         display: block !important;
-        border-bottom: 2px solid #333;
+        border-bottom: 2px solid #000;
         padding-bottom: 15px;
         margin-bottom: 20px;
     }
@@ -383,7 +428,7 @@ body {
         border-collapse: collapse !important;
     }
     th, td {
-        border: 1px solid #ddd !important;
+        border: 1px solid #ccc !important;
         padding: 8px !important;
     }
 }
@@ -398,7 +443,7 @@ body {
     <div class="page-wrapper patient-wrapper">
         <div class="container-fluid max-width-lg p-0">
 
-            <!-- PRINT HEADER (ONLY VISIBLE ON PRINT) -->
+            <!-- PRINT HEADER (ONLY VISIBLE ON PRINT OUTPUT) -->
             <div class="print-only-header">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
@@ -407,8 +452,11 @@ body {
                         <h4 class="mt-2 fw-bold">PATIENT DIRECTORY REPORT</h4>
                     </div>
                     <div class="text-end">
-                        <small>Printed on: <?= date('d M Y, H:i') ?></small><br>
-                        <small>Total Records: <?= count($patients) ?></small>
+                        <small><strong>Printed Date:</strong> <?= date('d M Y, H:i') ?></small><br>
+                        <small><strong>Filtered Records:</strong> <?= count($patients) ?></small><br>
+                        <?php if (!empty($start_date) || !empty($end_date)): ?>
+                            <small><strong>Date Range:</strong> <?= htmlspecialchars($start_date ?: 'Start') ?> to <?= htmlspecialchars($end_date ?: 'Today') ?></small>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -424,7 +472,7 @@ body {
                 </div>
                 <div>
                     <button onclick="window.print()" class="btn btn-outline-dark fw-semibold rounded-2 px-3 me-2">
-                        <i class="fas fa-print me-2"></i> Print Patient List
+                        <i class="fas fa-print me-2"></i> Print Filtered List (<?= count($patients) ?>)
                     </button>
                 </div>
             </div>
@@ -445,7 +493,7 @@ body {
                     </a>
                 </div>
                 <div class="col-12 col-md-6">
-                    <a href="add_patients.php?filter=emergency" class="text-decoration-none">
+                    <a href="add_patients.php?priority=Yes" class="text-decoration-none">
                         <div class="stat-card d-flex align-items-center justify-content-between">
                             <div>
                                 <span class="text-muted small fw-semibold text-uppercase">Emergency Cases</span>
@@ -460,7 +508,7 @@ body {
             </div>
 
             <!-- Main Form Card -->
-            <div class="row justify-content-center mb-5 no-print">
+            <div class="row justify-content-center mb-4 no-print">
                 <div class="col-12 col-xl-10">
                     <div class="form-card">
                         
@@ -568,15 +616,74 @@ body {
                 </div>
             </div>
 
+            <!-- FILTER CONTROLS CARD -->
+            <div class="row justify-content-center mb-4 no-print">
+                <div class="col-12 col-xl-10">
+                    <div class="filter-card p-3">
+                        <form method="GET" action="add_patients.php" class="row g-2 align-items-end">
+                            <!-- Search Query -->
+                            <div class="col-12 col-md-3">
+                                <label class="form-label small fw-semibold text-muted">Search Query</label>
+                                <input type="text" name="search" class="form-control" placeholder="Name, Phone, or Ref #" value="<?= htmlspecialchars($search_query) ?>">
+                            </div>
+
+                            <!-- Care Priority -->
+                            <div class="col-6 col-md-2">
+                                <label class="form-label small fw-semibold text-muted">Priority</label>
+                                <select name="priority" class="form-select">
+                                    <option value="">All Types</option>
+                                    <option value="No" <?= $filter_priority === 'No' ? 'selected' : '' ?>>Routine Only</option>
+                                    <option value="Yes" <?= $filter_priority === 'Yes' ? 'selected' : '' ?>>Emergency Only</option>
+                                </select>
+                            </div>
+
+                            <!-- Date Range: From -->
+                            <div class="col-6 col-md-2">
+                                <label class="form-label small fw-semibold text-muted">From Date</label>
+                                <input type="date" name="start_date" class="form-control" value="<?= htmlspecialchars($start_date) ?>">
+                            </div>
+
+                            <!-- Date Range: To -->
+                            <div class="col-6 col-md-2">
+                                <label class="form-label small fw-semibold text-muted">To Date</label>
+                                <input type="date" name="end_date" class="form-control" value="<?= htmlspecialchars($end_date) ?>">
+                            </div>
+
+                            <!-- Display Limit -->
+                            <div class="col-6 col-md-1">
+                                <label class="form-label small fw-semibold text-muted">Limit</label>
+                                <select name="limit" class="form-select">
+                                    <option value="25" <?= $record_limit == '25' ? 'selected' : '' ?>>25</option>
+                                    <option value="50" <?= $record_limit == '50' ? 'selected' : '' ?>>50</option>
+                                    <option value="100" <?= $record_limit == '100' ? 'selected' : '' ?>>100</option>
+                                    <option value="250" <?= $record_limit == '250' ? 'selected' : '' ?>>250</option>
+                                    <option value="all" <?= $record_limit == 'all' ? 'selected' : '' ?>>All</option>
+                                </select>
+                            </div>
+
+                            <!-- Filter Submit & Reset -->
+                            <div class="col-12 col-md-2 d-flex gap-1">
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="fas fa-filter me-1"></i> Filter
+                                </button>
+                                <a href="add_patients.php" class="btn btn-outline-secondary" title="Reset Filters">
+                                    <i class="fas fa-undo"></i>
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
             <!-- Patient Directory Table Card -->
             <div class="row justify-content-center">
                 <div class="col-12 col-xl-10">
                     <div class="table-card p-3">
                         <div class="d-flex justify-content-between align-items-center mb-3 no-print">
-                            <h5 class="fw-bold text-dark mb-0"><i class="fas fa-list text-primary me-2"></i> Registered Patients</h5>
-                            <?php if ($filter_emergency): ?>
-                                <a href="add_patients.php" class="btn btn-sm btn-outline-secondary">Show All Patients</a>
-                            <?php endif; ?>
+                            <h5 class="fw-bold text-dark mb-0">
+                                <i class="fas fa-list text-primary me-2"></i> Patient Records
+                                <span class="badge bg-primary bg-opacity-10 text-primary ms-2 fs-7"><?= count($patients) ?> records found</span>
+                            </h5>
                         </div>
 
                         <div id="page-alert" class="no-print"></div>
@@ -596,7 +703,7 @@ body {
                                 <tbody>
                                     <?php if (empty($patients)): ?>
                                         <tr>
-                                            <td colspan="6" class="text-center py-4 text-muted">No patients found.</td>
+                                            <td colspan="6" class="text-center py-4 text-muted">No patient records found matching your active filters.</td>
                                         </tr>
                                     <?php else: ?>
                                         <?php foreach ($patients as $p): ?>
