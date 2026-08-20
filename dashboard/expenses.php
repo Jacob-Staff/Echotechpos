@@ -179,19 +179,10 @@ require_once "../includes/head.php";
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<!-- SweetAlert2 JS -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <script>
 $(document).ready(function() {
-    function loadExpenses() {
-        $.get('actions/fetch_expenses.php', function(data) {
-            $('#expenses_list').html(data);
-            calculateTotal();
-        }).fail(function() {
-            $('#expenses_list').html('<tr><td colspan="5" class="text-center text-danger py-4">Failed to load expense logs.</td></tr>');
-        });
-    }
 
     function calculateTotal() {
         let total = 0;
@@ -200,6 +191,15 @@ $(document).ready(function() {
             if (!isNaN(val)) total += val;
         });
         $('#total_display').text(total.toFixed(2));
+    }
+
+    function loadExpenses() {
+        $.get('actions/fetch_expenses.php', function(data) {
+            $('#expenses_list').html(data);
+            calculateTotal(); // Calculated AFTER HTML is rendered
+        }).fail(function() {
+            $('#expenses_list').html('<tr><td colspan="5" class="text-center text-danger py-4">Failed to load expense logs.</td></tr>');
+        });
     }
 
     loadExpenses();
