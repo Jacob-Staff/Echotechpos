@@ -8,7 +8,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// Adjusted paths to step out of dashboard/actions back to root
+// Relative paths to step out of dashboard/actions back to root
 require_once "../../includes/conn.php";
 require_once "../../includes/auth.php";
 
@@ -60,24 +60,23 @@ try {
     
     $layby_id = mysqli_insert_id($conn);
 
-    // 2. Insert items into layby_items table
-    $item_stmt = mysqli_prepare($conn, "INSERT INTO layby_items (layby_id, pharmacy_id, branch_id, product_id, product_name, price, qty, total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    // 2. Insert items into layby_items table (Matching exact schema: layby_id, product_name, price, qty, total, pharmacy_id, branch_id)
+    $item_stmt = mysqli_prepare($conn, "INSERT INTO layby_items (layby_id, product_name, price, qty, total, pharmacy_id, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)");
     
     foreach ($cart as $item) {
-        $p_id    = (int)$item['id'];
         $p_name  = $item['name'];
         $p_price = (float)$item['price'];
         $p_qty   = (int)$item['qty'];
         $p_total = $p_price * $p_qty;
 
-        mysqli_stmt_bind_param($item_stmt, "iiiisdid", $layby_id, $pharmacy_id, $branch_id, $p_id, $p_name, $p_price, $p_qty, $p_total);
+        mysqli_stmt_bind_param($item_stmt, "isdidii", $layby_id, $p_name, $p_price, $p_qty, $p_total, $pharmacy_id, $branch_id);
         mysqli_stmt_execute($item_stmt);
     }
 
     // 3. Record initial deposit in layby_payments if deposit > 0
     if ($deposit > 0) {
-        $pay_stmt = mysqli_prepare($conn, "INSERT INTO layby_payments (layby_id, pharmacy_id, branch_id, user_id, payment_amount, method, payment_date) VALUES (?, ?, ?, ?, ?, 'Cash', NOW())");
-        mysqli_stmt_bind_param($pay_stmt, "iiiid", $layby_id, $pharmacy_id, $branch_id, $user_id, $deposit);
+        $pay_stmt = mysqli_prepare($conn, "INSERT INTO layby_payments (pharmacy_id, layby_id, branch_id, user_id, payment_amount, payment_date, method) VALUES (?, ?, ?, ?, ?, NOW(), 'Cash')");
+        mysqli_stmt_bind_param($pay_stmt, "iiiid", $pharmacy_id, $layby_id, $branch_id, $user_id, $deposit);
         mysqli_stmt_execute($pay_stmt);
     }
 
