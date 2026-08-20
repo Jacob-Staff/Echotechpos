@@ -16,7 +16,7 @@ if (!isset($_SESSION['pharmacy_id']) || !isset($_SESSION['branch_id'])) {
 $pharmacy_id = (int)$_SESSION['pharmacy_id'];
 $branch_id   = (int)$_SESSION['branch_id'];
 
-$sql = "SELECT * FROM expenses WHERE pharmacy_id = $pharmacy_id AND branch_id = $branch_id ORDER BY expense_date DESC, id DESC";
+$sql = "SELECT id, name, amount, category, expense_date FROM expenses WHERE pharmacy_id = $pharmacy_id AND branch_id = $branch_id ORDER BY expense_date DESC, id DESC";
 $result = mysqli_query($conn, $sql);
 
 if ($result && mysqli_num_rows($result) > 0) {
