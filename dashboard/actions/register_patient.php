@@ -27,13 +27,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $patient_condation = trim($_POST['patient_condation'] ?? 'No');
 
     if (empty($first_name) || empty($last_name) || empty($contact_number)) {
-        echo json_encode(['status' => 'error', 'message' => 'Please complete all required fields.']);
+        echo json_encode(['status' => 'error', 'message' => 'Please fill in all required fields.']);
         exit();
     }
 
     $stmt = $conn->prepare("INSERT INTO patients 
         (pharmacy_id, branch_id, invoice_number, first_name, last_name, contact_number, registration_date, status, patient_condation) 
         VALUES (?, ?, ?, ?, ?, ?, NOW(), 'Active', ?)");
+
+    if (!$stmt) {
+        echo json_encode(['status' => 'error', 'message' => 'SQL prepare error: ' . $conn->error]);
+        exit();
+    }
 
     $stmt->bind_param("iisssss", 
         $pharmacy_id, 
@@ -48,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($stmt->execute()) {
         echo json_encode(['status' => 'success', 'message' => 'Patient registered successfully! Ref: ' . $invoice_number]);
     } else {
-        echo json_encode(['status' => 'error', 'message' => 'Failed to save patient record: ' . $stmt->error]);
+        echo json_encode(['status' => 'error', 'message' => 'Database insert error: ' . $stmt->error]);
     }
 
     $stmt->close();
