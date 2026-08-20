@@ -1,6 +1,5 @@
 <?php 
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -20,14 +19,13 @@ $pharmacy_id = (int)$_SESSION['pharmacy_id'];
 $branch_id   = (int)$_SESSION['branch_id'];
 $user_id     = (int)$_SESSION['user_id'];
 
-// Get Lay-by ID from URL query string
 $layby_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 if ($layby_id <= 0) {
     die("<div class='alert alert-warning text-center mt-5'>Invalid Lay-by ID provided. <a href='lay_by_sell.php' class='alert-link'>Go back</a></div>");
 }
 
-// Fetch Lay-by Details
+// Fetch Layby record
 $layby_stmt = mysqli_prepare($conn, "SELECT * FROM laybys WHERE id = ? AND pharmacy_id = ? AND branch_id = ? LIMIT 1");
 mysqli_stmt_bind_param($layby_stmt, "iii", $layby_id, $pharmacy_id, $branch_id);
 mysqli_stmt_execute($layby_stmt);
@@ -38,7 +36,7 @@ if (!$layby) {
     die("<div class='alert alert-danger text-center mt-5'>Lay-by record not found. <a href='lay_by_sell.php' class='alert-link'>Go back</a></div>");
 }
 
-// Fetch Branding Info
+// Fetch Pharmacy & Branch info
 $info_stmt = mysqli_prepare($conn, "SELECT p.name, b.branch_name FROM pharmacies p JOIN branches b ON b.pharmacy_id = p.id WHERE p.id = ? AND b.id = ? LIMIT 1");
 mysqli_stmt_bind_param($info_stmt, "ii", $pharmacy_id, $branch_id);
 mysqli_stmt_execute($info_stmt);
@@ -46,23 +44,22 @@ $info_res = mysqli_stmt_get_result($info_stmt);
 $info = mysqli_fetch_assoc($info_res);
 
 $display_pharm = $info['name'] ?? 'PHARMANOVA';
-$display_bran  = $info['branch_name'] ?? 'Main Branch';
+$display_bran  = $info['branch_name'] ?? 'Nova Lsk';
 
-// Fetch Purchased Items
-$items_stmt = mysqli_prepare($conn, "SELECT * FROM layby_items WHERE layby_id = ?");
-mysqli_stmt_bind_param($items_stmt, "i", $layby_id);
+// Fetch Reserved Items
+$items_stmt = mysqli_prepare($conn, "SELECT * FROM layby_items WHERE layby_id = ? AND pharmacy_id = ? AND branch_id = ?");
+mysqli_stmt_bind_param($items_stmt, "iii", $layby_id, $pharmacy_id, $branch_id);
 mysqli_stmt_execute($items_stmt);
 $items_res = mysqli_stmt_get_result($items_stmt);
 
-// Fetch Payment History
-$payments_stmt = mysqli_prepare($conn, "SELECT p.*, u.username FROM layby_payments p LEFT JOIN users u ON p.user_id = u.id WHERE p.layby_id = ? ORDER BY p.id DESC");
-mysqli_stmt_bind_param($payments_stmt, "i", $layby_id);
+// Fetch Payment Log
+$payments_stmt = mysqli_prepare($conn, "SELECT p.*, u.username FROM layby_payments p LEFT JOIN users u ON p.user_id = u.id WHERE p.layby_id = ? AND p.pharmacy_id = ? AND p.branch_id = ? ORDER BY p.id DESC");
+mysqli_stmt_bind_param($payments_stmt, "iii", $layby_id, $pharmacy_id, $branch_id);
 mysqli_stmt_execute($payments_stmt);
 $payments_res = mysqli_stmt_get_result($payments_stmt);
 
 function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
 
-// Correct Page Head Include
 require_once "../includes/head.php";
 ?>
 
@@ -70,19 +67,15 @@ require_once "../includes/head.php";
 .layby-view-wrapper {
     background-color: #f4f6f9 !important;
     min-height: calc(100vh - 70px);
-    padding: 1rem;
+    padding: 1.25rem;
     color: #212529;
-}
-
-@media (min-width: 768px) {
-    .layby-view-wrapper { padding: 1.5rem; }
 }
 
 .card-custom {
     background-color: #ffffff;
     border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03);
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
     margin-bottom: 1.5rem;
 }
 
@@ -90,8 +83,8 @@ require_once "../includes/head.php";
     background-color: #f8fafc;
     padding: 1rem 1.25rem;
     border-bottom: 1px solid #e2e8f0;
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
 }
 
 .table-custom {
@@ -119,7 +112,6 @@ require_once "../includes/head.php";
 
 <div id="main-wrapper">
     <?php 
-    // Correct Header & Aside Includes
     if (file_exists("../includes/header.php")) require_once "../includes/header.php"; 
     if (file_exists("../includes/aside.php")) require_once "../includes/aside.php"; 
     ?>
@@ -127,7 +119,6 @@ require_once "../includes/head.php";
     <div class="page-wrapper layby-view-wrapper">
         <div class="container-fluid p-0">
 
-            <!-- Top Action Header -->
             <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
                 <div>
                     <h3 class="fw-bold text-dark mb-0">Lay-by Agreement #<?php echo e($layby['id']); ?></h3>
@@ -143,7 +134,7 @@ require_once "../includes/head.php";
             </div>
 
             <div class="row g-4">
-                <!-- Customer & Summary Details -->
+                <!-- Customer & Financial Summary -->
                 <div class="col-12 col-lg-4">
                     <div class="card card-custom h-100">
                         <div class="card-custom-header">
@@ -176,7 +167,7 @@ require_once "../includes/head.php";
                                 <?php endif; ?>
                             </div>
 
-                            <!-- Record Payment Button / Form -->
+                            <!-- Installment Payment Form -->
                             <?php if ($layby['balance_due'] > 0): ?>
                                 <hr>
                                 <h6 class="fw-bold text-dark mb-2"><i class="fas fa-money-bill-wave me-1 text-success"></i>Record Installment</h6>
@@ -203,7 +194,7 @@ require_once "../includes/head.php";
                     </div>
                 </div>
 
-                <!-- Purchased Items & Payment Log -->
+                <!-- Items and Payment Log -->
                 <div class="col-12 col-lg-8">
                     <!-- Reserved Items -->
                     <div class="card card-custom">
@@ -263,7 +254,7 @@ require_once "../includes/head.php";
                                                     <td class="text-start ps-3"><?php echo date('d M Y, H:i', strtotime($pay['payment_date'])); ?></td>
                                                     <td class="fw-bold text-success">K<?php echo number_format($pay['payment_amount'], 2); ?></td>
                                                     <td><span class="badge bg-light text-dark border"><?php echo e($pay['method']); ?></span></td>
-                                                    <td><?php echo e($pay['username'] ?? 'Staff'); ?></td>
+                                                    <td><?php echo e($pay['username'] ?? 'Jac'); ?></td>
                                                 </tr>
                                             <?php endwhile; ?>
                                         <?php else: ?>
@@ -294,17 +285,24 @@ $('#payment_form').on('submit', function(e) {
     const btn = $('#pay_btn');
     btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Processing...');
 
-    $.post('actions/record_layby_payment.php', $(this).serialize(), function(res) {
-        if (res.status === 'success') {
-            alert("Payment recorded successfully!");
-            location.reload();
-        } else {
-            alert("Error: " + (res.message || "Could not record payment."));
+    $.ajax({
+        url: 'actions/record_layby_payment.php',
+        type: 'POST',
+        data: $(this).serialize(),
+        dataType: 'json',
+        success: function(res) {
+            if (res.status === 'success') {
+                alert("Payment recorded successfully!");
+                location.reload();
+            } else {
+                alert("Error: " + (res.message || "Could not record payment."));
+                btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Submit Payment');
+            }
+        },
+        error: function(xhr, status, error) {
+            alert("Server returned error response:\n\n" + xhr.responseText);
             btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Submit Payment');
         }
-    }, 'json').fail(function() {
-        alert("Server error occurred while saving payment.");
-        btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Submit Payment');
     });
 });
 </script>
