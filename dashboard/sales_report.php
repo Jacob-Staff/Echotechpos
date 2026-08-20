@@ -18,7 +18,7 @@ if (!$pharmacy_id || !$branch_id) {
 }
 
 // Default fallbacks
-$display_pharmacy_name = "PHARMANOVA"; 
+$display_pharmacy_name = "Echo Prime Ltd"; 
 $display_branch_name   = "Main Branch";
 
 $pharm_query = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
@@ -38,6 +38,17 @@ if ($row = $branch_res->fetch_assoc()) {
     $display_branch_name = $row['branch_name'];
 }
 $branch_query->close();
+
+// Fetch unique categories for the filter dropdown
+$cat_options = [];
+$cat_stmt = $conn->prepare("SELECT DISTINCT category FROM store_items WHERE pharmacy_id = ? AND category IS NOT NULL AND category != '' ORDER BY category ASC");
+$cat_stmt->bind_param("i", $pharmacy_id);
+$cat_stmt->execute();
+$cat_res = $cat_stmt->get_result();
+while ($c_row = $cat_res->fetch_assoc()) {
+    $cat_options[] = $c_row['category'];
+}
+$cat_stmt->close();
 
 require_once "../includes/head.php";
 ?>
@@ -89,6 +100,55 @@ require_once "../includes/head.php";
     padding: 12px;
     font-size: 0.9rem;
 }
+
+/* Print Specific Stylesheet */
+@media print {
+    body {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+    }
+
+    #header, #aside, .no-print, nav, .btn, .input-group, form, footer {
+        display: none !important;
+    }
+
+    .sales-report-wrapper {
+        padding: 0 !important;
+        background-color: #ffffff !important;
+    }
+
+    .card {
+        border: 1px solid #ddd !important;
+        box-shadow: none !important;
+    }
+
+    .table-custom {
+        width: 100% !important;
+        border-collapse: collapse !important;
+    }
+
+    .table-custom th, .table-custom td {
+        border: 1px solid #ccc !important;
+        padding: 6px !important;
+        font-size: 11px !important;
+    }
+
+    .print-header {
+        display: block !important;
+        text-align: center;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #333;
+        padding-bottom: 10px;
+    }
+
+    .chart-container {
+        page-break-inside: avoid;
+    }
+}
+
+.print-header {
+    display: none;
+}
 </style>
 
 <div id="main-wrapper">
@@ -100,7 +160,14 @@ require_once "../includes/head.php";
     <div class="page-wrapper sales-report-wrapper">
         <div class="container-fluid p-0">
 
-            <!-- Title & Subtitle -->
+            <!-- Print Header Banner (Only visible during printing) -->
+            <div class="print-header">
+                <h2 class="fw-bold mb-1"><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></h2>
+                <h5 class="mb-1"><?= htmlspecialchars($display_branch_name) ?> - Sales Report</h5>
+                <small class="text-muted">Generated on: <?= date('d M Y, H:i A') ?></small>
+            </div>
+
+            <!-- Page Title & Top Actions -->
             <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
                 <div>
                     <h3 class="fw-bold text-dark mb-0">
@@ -109,6 +176,11 @@ require_once "../includes/head.php";
                     <span class="text-secondary small">
                         <b><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></b> | <?= htmlspecialchars($display_branch_name) ?>
                     </span>
+                </div>
+                <div class="no-print">
+                    <button class="btn btn-outline-dark fw-bold me-2" onclick="window.print();">
+                        <i class="fas fa-print me-1"></i> Print / Export PDF
+                    </button>
                 </div>
             </div>
 
@@ -155,24 +227,52 @@ require_once "../includes/head.php";
                 </div>
             </div>
 
-            <!-- Filter Controls -->
-            <div class="card card-custom p-3 mb-4">
+            <!-- Enhanced Filter Controls -->
+            <div class="card card-custom p-3 mb-4 no-print">
                 <div class="row g-3 align-items-end">
-                    <div class="col-12 col-md-4">
-                        <label class="form-label small fw-bold text-muted mb-1">Search Keywords</label>
-                        <div class="input-group">
-                            <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted"></i></span>
-                            <input type="text" id="search" class="form-control border-start-0" placeholder="Search Invoice No or Product...">
+                    <!-- Quick Date Presets -->
+                    <div class="col-12">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('today')">Today</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('yesterday')">Yesterday</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('this_month')">This Month</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('last_month')">Last Month</button>
                         </div>
                     </div>
+
+                    <!-- Search Input -->
                     <div class="col-12 col-md-3">
+                        <label class="form-label small fw-bold text-muted mb-1">Search Keyword</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted"></i></span>
+                            <input type="text" id="search" class="form-control border-start-0" placeholder="Invoice No or Item Name...">
+                        </div>
+                    </div>
+
+                    <!-- Category Filter -->
+                    <div class="col-12 col-md-3">
+                        <label class="form-label small fw-bold text-muted mb-1">Category</label>
+                        <select id="category" class="form-select">
+                            <option value="">-- All Categories --</option>
+                            <?php foreach ($cat_options as $cat): ?>
+                                <option value="<?= htmlspecialchars($cat) ?>"><?= htmlspecialchars($cat) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <!-- Start Date -->
+                    <div class="col-12 col-md-2">
                         <label class="form-label small fw-bold text-muted mb-1">Start Date</label>
                         <input type="date" id="startDate" class="form-control" value="<?= date('Y-m-01') ?>">
                     </div>
-                    <div class="col-12 col-md-3">
+
+                    <!-- End Date -->
+                    <div class="col-12 col-md-2">
                         <label class="form-label small fw-bold text-muted mb-1">End Date</label>
                         <input type="date" id="endDate" class="form-control" value="<?= date('Y-m-d') ?>">
                     </div>
+
+                    <!-- Action Button -->
                     <div class="col-12 col-md-2 d-grid">
                         <button class="btn btn-primary fw-bold py-2" id="filter-btn">
                             <i class="fas fa-sync-alt me-1"></i> UPDATE
@@ -182,7 +282,7 @@ require_once "../includes/head.php";
             </div>
 
             <!-- Analytics Charts -->
-            <div class="row g-4 mb-4">
+            <div class="row g-4 mb-4 chart-container">
                 <div class="col-12 col-lg-8">
                     <div class="card card-custom p-3 h-100">
                         <h6 class="fw-bold text-dark mb-3"><i class="fas fa-chart-area me-2 text-primary"></i>Daily Revenue Trend</h6>
@@ -201,10 +301,11 @@ require_once "../includes/head.php";
                 </div>
             </div>
 
-            <!-- Itemized Table -->
+            <!-- Itemized Sales History Table -->
             <div class="card card-custom">
-                <div class="card-header bg-white py-3 border-bottom">
+                <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
                     <h5 class="fw-bold text-dark mb-0"><i class="fas fa-list me-2 text-primary"></i>Itemized Sales History</h5>
+                    <span id="record-count" class="badge bg-secondary">0 Records</span>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
@@ -247,6 +348,31 @@ require_once "../includes/head.php";
 let mChart = null;
 let wChart = null;
 
+function setDatePreset(type) {
+    const today = new Date();
+    let start = new Date();
+    let end = new Date();
+
+    if (type === 'today') {
+        start = today;
+        end = today;
+    } else if (type === 'yesterday') {
+        start.setDate(today.getDate() - 1);
+        end.setDate(today.getDate() - 1);
+    } else if (type === 'this_month') {
+        start = new Date(today.getFullYear(), today.getMonth(), 1);
+        end = today;
+    } else if (type === 'last_month') {
+        start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        end = new Date(today.getFullYear(), today.getMonth(), 0);
+    }
+
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    $('#startDate').val(formatDate(start));
+    $('#endDate').val(formatDate(end));
+    loadSales();
+}
+
 function loadSales() {
     const btn = $('#filter-btn');
     btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> UPDATING...');
@@ -256,6 +382,7 @@ function loadSales() {
         method: 'POST',
         data: {
             search: $('#search').val(),
+            category: $('#category').val(),
             startDate: $('#startDate').val(),
             endDate: $('#endDate').val()
         },
@@ -273,8 +400,10 @@ function loadSales() {
                         <td class="text-center text-muted small">${s.date}</td>
                     </tr>`;
                 });
+                $('#record-count').text(res.sales.length + ' Records');
             } else {
-                rows = '<tr><td colspan="6" class="text-center py-4 text-muted">No sales transactions found for the selected range.</td></tr>';
+                rows = '<tr><td colspan="6" class="text-center py-4 text-muted">No sales transactions found for the selected filter range.</td></tr>';
+                $('#record-count').text('0 Records');
             }
             
             $('#sales-body').html(rows);
@@ -286,7 +415,7 @@ function loadSales() {
         },
         error: function(xhr) {
             console.error(xhr.responseText);
-            $('#sales-body').html('<tr><td colspan="6" class="text-center text-danger py-4">Failed to load sales data. Check server logs.</td></tr>');
+            $('#sales-body').html('<tr><td colspan="6" class="text-center text-danger py-4">Failed to load sales data. Check server response.</td></tr>');
         },
         complete: function() {
             btn.prop('disabled', false).html('<i class="fas fa-sync-alt me-1"></i> UPDATE');
