@@ -290,7 +290,6 @@ body {
     box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.1);
 }
 
-/* Priority Selector Tiles */
 .priority-option {
     border: 2px solid var(--border-color);
     border-radius: 12px;
@@ -342,6 +341,52 @@ body {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);
 }
+
+/* Hidden Print Header (Visible only when printing) */
+.print-only-header {
+    display: none;
+}
+
+/* PRINT STYLESHEET */
+@media print {
+    body {
+        background-color: #ffffff !important;
+        font-size: 12pt;
+    }
+    #main-wrapper > header,
+    #main-wrapper > aside,
+    .left-sidebar,
+    .topbar,
+    .stat-card,
+    .form-card,
+    .btn,
+    .actions-column,
+    .no-print {
+        display: none !important;
+    }
+    .page-wrapper {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .print-only-header {
+        display: block !important;
+        border-bottom: 2px solid #333;
+        padding-bottom: 15px;
+        margin-bottom: 20px;
+    }
+    .table-card {
+        border: none !important;
+        box-shadow: none !important;
+    }
+    table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+    }
+    th, td {
+        border: 1px solid #ddd !important;
+        padding: 8px !important;
+    }
+}
 </style>
 
 <div id="main-wrapper">
@@ -353,8 +398,23 @@ body {
     <div class="page-wrapper patient-wrapper">
         <div class="container-fluid max-width-lg p-0">
 
+            <!-- PRINT HEADER (ONLY VISIBLE ON PRINT) -->
+            <div class="print-only-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h2 class="fw-bold mb-0" style="text-transform: uppercase;"><?= htmlspecialchars($display_pharmacy_name) ?></h2>
+                        <p class="mb-0 text-muted"><?= htmlspecialchars($display_branch_name) ?></p>
+                        <h4 class="mt-2 fw-bold">PATIENT DIRECTORY REPORT</h4>
+                    </div>
+                    <div class="text-end">
+                        <small>Printed on: <?= date('d M Y, H:i') ?></small><br>
+                        <small>Total Records: <?= count($patients) ?></small>
+                    </div>
+                </div>
+            </div>
+
             <!-- Top Action Navigation -->
-            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3 no-print">
                 <div>
                     <h3 class="fw-bold text-dark mb-1">Patient Management</h3>
                     <p class="text-muted mb-0 small">
@@ -362,10 +422,15 @@ body {
                         <strong><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></strong> &bull; <?= htmlspecialchars($display_branch_name) ?>
                     </p>
                 </div>
+                <div>
+                    <button onclick="window.print()" class="btn btn-outline-dark fw-semibold rounded-2 px-3 me-2">
+                        <i class="fas fa-print me-2"></i> Print Patient List
+                    </button>
+                </div>
             </div>
 
             <!-- Stats Bar -->
-            <div class="row g-3 mb-4">
+            <div class="row g-3 mb-4 no-print">
                 <div class="col-12 col-md-6">
                     <a href="add_patients.php" class="text-decoration-none">
                         <div class="stat-card d-flex align-items-center justify-content-between">
@@ -395,7 +460,7 @@ body {
             </div>
 
             <!-- Main Form Card -->
-            <div class="row justify-content-center mb-5">
+            <div class="row justify-content-center mb-5 no-print">
                 <div class="col-12 col-xl-10">
                     <div class="form-card">
                         
@@ -419,7 +484,6 @@ body {
                                 <input type="hidden" name="invoice_number" value="<?= $patient_no ?>">
 
                                 <div class="row g-4">
-                                    <!-- First Name -->
                                     <div class="col-12 col-md-6">
                                         <label class="form-label">First Name <span class="text-danger">*</span></label>
                                         <div class="input-group">
@@ -428,7 +492,6 @@ body {
                                         </div>
                                     </div>
 
-                                    <!-- Last Name -->
                                     <div class="col-12 col-md-6">
                                         <label class="form-label">Last Name <span class="text-danger">*</span></label>
                                         <div class="input-group">
@@ -437,21 +500,17 @@ body {
                                         </div>
                                     </div>
 
-                                    <!-- Contact Number -->
                                     <div class="col-12">
                                         <label class="form-label">Phone / Contact Number <span class="text-danger">*</span></label>
                                         <div class="input-group">
                                             <span class="input-group-text"><i class="fas fa-phone-alt"></i></span>
                                             <input type="text" name="contact_number" class="form-control" placeholder="0971234567" required>
                                         </div>
-                                        <small class="text-muted fs-7">Used for patient lookup, notifications, and prescription tracking.</small>
                                     </div>
 
-                                    <!-- Triage Priority Selection -->
                                     <div class="col-12 mt-4">
                                         <label class="form-label d-block mb-3">Triage / Care Priority</label>
                                         <div class="row g-3">
-                                            <!-- Routine Option -->
                                             <div class="col-12 col-md-6">
                                                 <label class="priority-option w-100">
                                                     <input type="radio" name="patient_condation" value="No" checked>
@@ -472,7 +531,6 @@ body {
                                                 </label>
                                             </div>
 
-                                            <!-- Emergency Option -->
                                             <div class="col-12 col-md-6">
                                                 <label class="priority-option w-100">
                                                     <input type="radio" name="patient_condation" value="Yes">
@@ -495,7 +553,6 @@ body {
                                         </div>
                                     </div>
 
-                                    <!-- Submit Controls -->
                                     <div class="col-12 mt-4 pt-2">
                                         <button type="submit" id="submitBtn" class="btn btn-primary-custom w-100 py-3 text-uppercase">
                                             <i class="fas fa-save me-2"></i> Register Patient
@@ -504,7 +561,6 @@ body {
                                 </div>
                             </form>
 
-                            <!-- Feedback Message Handler -->
                             <div id="form-message" class="mt-4"></div>
                         </div>
 
@@ -516,14 +572,14 @@ body {
             <div class="row justify-content-center">
                 <div class="col-12 col-xl-10">
                     <div class="table-card p-3">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-3 no-print">
                             <h5 class="fw-bold text-dark mb-0"><i class="fas fa-list text-primary me-2"></i> Registered Patients</h5>
                             <?php if ($filter_emergency): ?>
                                 <a href="add_patients.php" class="btn btn-sm btn-outline-secondary">Show All Patients</a>
                             <?php endif; ?>
                         </div>
 
-                        <div id="page-alert"></div>
+                        <div id="page-alert" class="no-print"></div>
 
                         <div class="table-responsive">
                             <table class="table table-hover align-middle mb-0">
@@ -534,7 +590,7 @@ body {
                                         <th>Contact Number</th>
                                         <th>Care Priority</th>
                                         <th>Reg. Date</th>
-                                        <th class="text-end">Actions</th>
+                                        <th class="text-end actions-column">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -556,8 +612,7 @@ body {
                                                     <?php endif; ?>
                                                 </td>
                                                 <td><?= date('d M Y, H:i', strtotime($p['registration_date'])) ?></td>
-                                                <td class="text-end">
-                                                    <!-- Actions: Edit and Delete Only -->
+                                                <td class="text-end actions-column">
                                                     <button type="button" class="btn btn-sm btn-outline-primary me-1 btn-edit-patient" 
                                                         data-id="<?= $p['patient_id'] ?>"
                                                         data-invoice="<?= htmlspecialchars($p['invoice_number']) ?>"
@@ -644,6 +699,28 @@ body {
     </div>
 </div>
 
+<!-- CUSTOMIZED DELETE CONFIRMATION MODAL -->
+<div class="modal fade" id="deletePatientModal" tabindex="-1" aria-labelledby="deletePatientModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-body text-center p-4">
+                <div class="text-danger mb-3">
+                    <i class="fas fa-exclamation-triangle fa-3x"></i>
+                </div>
+                <h5 class="fw-bold text-dark mb-2">Delete Patient?</h5>
+                <p class="text-muted small mb-3">Are you sure you want to remove <strong id="delete_patient_name" class="text-dark"></strong> from records? This action cannot be undone.</p>
+                
+                <input type="hidden" id="delete_patient_id">
+
+                <div class="d-flex justify-content-center gap-2 mt-4">
+                    <button type="button" class="btn btn-light px-3 fw-semibold" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" id="confirmDeleteBtn" class="btn btn-danger px-3 fw-semibold"><i class="fas fa-trash me-1"></i> Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
@@ -680,7 +757,7 @@ $(document).ready(function(){
                     btn.prop('disabled', false).html('<i class="fas fa-save me-2"></i> REGISTER PATIENT');
                 }
             },
-            error: function(xhr){
+            error: function(){
                 $('#form-message').html(`
                     <div class="alert alert-danger border-0 shadow-sm d-flex align-items-center" role="alert">
                         <i class="fas fa-exclamation-triangle fa-lg me-3"></i>
@@ -692,7 +769,7 @@ $(document).ready(function(){
         });
     });
 
-    // Open Edit Modal with Pre-populated Data
+    // Open Edit Modal
     $(document).on('click', '.btn-edit-patient', function(){
         let id = $(this).data('id');
         let invoice = $(this).data('invoice');
@@ -712,7 +789,7 @@ $(document).ready(function(){
         $('#editPatientModal').modal('show');
     });
 
-    // Update Patient AJAX
+    // Save Edited Patient AJAX
     $('#editPatientForm').submit(function(e){
         e.preventDefault();
         let btn = $('#saveEditBtn');
@@ -751,38 +828,53 @@ $(document).ready(function(){
         });
     });
 
-    // Delete Patient AJAX
+    // Trigger Custom Delete Modal
     $(document).on('click', '.btn-delete-patient', function(){
-        let patientId = $(this).data('id');
-        let patientName = $(this).data('name');
+        let id = $(this).data('id');
+        let name = $(this).data('name');
 
-        if(confirm(`Are you sure you want to delete patient "${patientName}"?`)){
-            $.ajax({
-                url: 'add_patients.php',
-                type: 'POST',
-                data: { 
-                    action: 'delete_patient', 
-                    patient_id: patientId 
-                },
-                dataType: 'json',
-                success: function(res){
-                    if(res.status === 'success'){
-                        $(`#patient-row-${patientId}`).fadeOut(300, function(){ $(this).remove(); });
-                        $('#page-alert').html(`
-                            <div class="alert alert-success alert-dismissible fade show border-0 shadow-sm" role="alert">
-                                <i class="fas fa-check-circle me-2"></i> ${res.message}
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            </div>
-                        `);
-                    } else {
-                        alert(res.message);
-                    }
-                },
-                error: function(){
-                    alert('Error deleting patient record.');
+        $('#delete_patient_id').val(id);
+        $('#delete_patient_name').text(name);
+        $('#deletePatientModal').modal('show');
+    });
+
+    // Confirm Delete Action AJAX
+    $('#confirmDeleteBtn').click(function(){
+        let patientId = $('#delete_patient_id').val();
+        let btn = $(this);
+
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Deleting...');
+
+        $.ajax({
+            url: 'add_patients.php',
+            type: 'POST',
+            data: { 
+                action: 'delete_patient', 
+                patient_id: patientId 
+            },
+            dataType: 'json',
+            success: function(res){
+                $('#deletePatientModal').modal('hide');
+                btn.prop('disabled', false).html('<i class="fas fa-trash me-1"></i> Delete');
+
+                if(res.status === 'success'){
+                    $(`#patient-row-${patientId}`).fadeOut(300, function(){ $(this).remove(); });
+                    $('#page-alert').html(`
+                        <div class="alert alert-success alert-dismissible fade show border-0 shadow-sm" role="alert">
+                            <i class="fas fa-check-circle me-2"></i> ${res.message}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    `);
+                } else {
+                    alert(res.message);
                 }
-            });
-        }
+            },
+            error: function(){
+                $('#deletePatientModal').modal('hide');
+                btn.prop('disabled', false).html('<i class="fas fa-trash me-1"></i> Delete');
+                alert('Error processing patient deletion.');
+            }
+        });
     });
 
 });
