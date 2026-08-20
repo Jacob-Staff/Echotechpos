@@ -63,6 +63,9 @@ function e($v) { return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
 require_once "../includes/head.php";
 ?>
 
+<!-- SweetAlert2 CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+
 <style>
 .layby-view-wrapper {
     background-color: #f4f6f9 !important;
@@ -143,7 +146,7 @@ require_once "../includes/head.php";
                         <div class="card-body p-3">
                             <p class="mb-2"><strong>Customer Name:</strong> <span class="text-dark"><?php echo e($layby['customer_name']); ?></span></p>
                             <p class="mb-2"><strong>Phone Number:</strong> <span class="text-dark"><?php echo e($layby['customer_phone']); ?></span></p>
-                            <p class="mb-2"><strong>Created Date:</strong> <span class="text-dark"><?php echo date('d M Y, H:i', strtotime($layby['created_at'])); ?></span></p>
+                            <p class="mb-2"><strong>Created Date:</strong> <span class="text-dark"><?php echo date('d M Y', strtotime($layby['created_at'])); ?></span></p>
                             <p class="mb-3"><strong>Due Date:</strong> <span class="text-danger fw-bold"><?php echo date('d M Y', strtotime($layby['due_date'])); ?></span></p>
                             <hr>
                             <div class="d-flex justify-content-between mb-2">
@@ -278,6 +281,8 @@ require_once "../includes/head.php";
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- SweetAlert2 JS -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <script>
 $('#payment_form').on('submit', function(e) {
@@ -292,15 +297,32 @@ $('#payment_form').on('submit', function(e) {
         dataType: 'json',
         success: function(res) {
             if (res.status === 'success') {
-                alert("Payment recorded successfully!");
-                location.reload();
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Payment Recorded!',
+                    text: res.message || 'Payment added successfully.',
+                    confirmButtonColor: '#198754',
+                    confirmButtonText: 'OK'
+                }).then(() => {
+                    location.reload();
+                });
             } else {
-                alert("Error: " + (res.message || "Could not record payment."));
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Payment Failed',
+                    text: res.message || 'Could not record payment.',
+                    confirmButtonColor: '#dc3545'
+                });
                 btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Submit Payment');
             }
         },
         error: function(xhr, status, error) {
-            alert("Server returned error response:\n\n" + xhr.responseText);
+            Swal.fire({
+                icon: 'error',
+                title: 'Server Error',
+                text: 'Response: ' + xhr.responseText,
+                confirmButtonColor: '#dc3545'
+            });
             btn.prop('disabled', false).html('<i class="fas fa-check-circle me-1"></i> Submit Payment');
         }
     });
