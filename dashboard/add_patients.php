@@ -185,8 +185,6 @@ require_once "../includes/head.php";
 
                         <form id="addPatientForm">
                             <input type="hidden" name="invoice_number" value="<?= $patient_no ?>">
-                            <input type="hidden" name="pharmacy_id" value="<?= $pharmacy_id ?>">
-                            <input type="hidden" name="branch_id" value="<?= $branch_id ?>">
 
                             <div class="row g-3">
                                 <div class="col-12 col-md-6">
@@ -198,17 +196,12 @@ require_once "../includes/head.php";
                                     <input type="text" name="last_name" class="form-control" placeholder="Enter last name" required>
                                 </div>
 
-                                <div class="col-12 col-md-6">
+                                <div class="col-12 col-md-12">
                                     <label class="form-label">Contact Number <span class="text-danger">*</span></label>
                                     <input type="text" name="contact_number" class="form-control" placeholder="097..." required>
                                 </div>
 
-                                <div class="col-12 col-md-6">
-                                    <label class="form-label">Patient Condition / Notes</label>
-                                    <input type="text" name="patient_condation_notes" class="form-control" placeholder="Short description of health status">
-                                </div>
-
-                                <div class="col-12 mt-4">
+                                <div class="col-12 mt-3">
                                     <label class="form-label d-block">Is this an Emergency?</label>
                                     <div class="form-check form-check-inline">
                                         <input class="form-check-input" type="radio" name="patient_condation" value="Yes" id="yesEm">
@@ -267,7 +260,7 @@ $(document).ready(function(){
             },
             error: function(xhr){
                 console.error(xhr.responseText);
-                $('#form-message').html('<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i> Error saving data or network issue.</div>');
+                $('#form-message').html('<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i> Server communication error. Check console.</div>');
                 btn.prop('disabled', false).html('<i class="fas fa-check-circle me-2"></i> COMPLETE REGISTRATION');
             }
         });
