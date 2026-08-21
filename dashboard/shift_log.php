@@ -18,7 +18,7 @@ $is_supervisor = in_array(strtolower($user_role), ['admin', 'supervisor', 'manag
 // -------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'clock_in') {
-        $shift_type = trim($_POST['shift_type'] ?? 'Morning Shift');
+        $shift_type = trim($_POST['shift_type'] ?? 'Morning duty');
         
         $stmt = $conn->prepare("INSERT INTO shift_logs (pharmacy_id, user_id, branch_id, clock_in, status, notes) VALUES (?, ?, (SELECT id FROM branches WHERE branch_name = ? LIMIT 1), NOW(), 'active', ?)");
         if ($stmt) {
@@ -52,8 +52,8 @@ if ($active_stmt) {
 // -------------------------------------------------------------------------
 $filter_date = trim($_GET['filter_date'] ?? '');
 $where_clauses = ["sl.pharmacy_id = ?"];
-$param_types   = "i";
-$param_values  = [$pharmacy_id];
+$param_types   = "sss" . "i";
+$param_values  = [$user_name, $user_role, $branch_name, $pharmacy_id];
 
 if (!$is_supervisor) {
     $where_clauses[] = "sl.user_id = ?";
@@ -76,9 +76,9 @@ $logs_query = "
         sl.clock_out, 
         sl.status, 
         sl.notes,
-        COALESCE(NULLIF(u.full_name, ''), NULLIF(u.username, ''), '$user_name') AS staff_name, 
-        COALESCE(u.role, '$user_role') AS role, 
-        COALESCE(b.branch_name, '$branch_name') AS branch_name 
+        COALESCE(NULLIF(u.full_name, ''), NULLIF(u.username, ''), ?) AS staff_name, 
+        COALESCE(NULLIF(u.role, ''), ?) AS role, 
+        COALESCE(NULLIF(b.branch_name, ''), ?) AS branch_name 
     FROM shift_logs sl
     LEFT JOIN users u ON sl.user_id = u.id
     LEFT JOIN branches b ON sl.branch_id = b.id
@@ -108,45 +108,108 @@ include_once __DIR__ . '/../includes/head.php';
 ?>
 
 <style>
-    /* Page specific overrides */
+    /* App Layout Wrapper Integration */
+    .app-container {
+        display: flex;
+        width: 100%;
+        min-height: 100vh;
+    }
+
+    .main-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0; /* Prevents flex children from pushing out horizontal scroll */
+        background-color: #f8fafc;
+    }
+
+    .content-container {
+        flex: 1;
+        padding: 24px;
+    }
+
+    /* Card & Clock Styles */
     .clock-card {
         background: #ffffff;
-        border-radius: 10px;
-        padding: 20px 25px;
+        border-radius: 12px;
+        padding: 24px 30px;
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 25px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        border: 1px solid #f1f5f9;
     }
     .live-clock-display { text-align: center; }
     .live-clock-display .label { font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 1px; }
-    .live-clock-display .time { font-size: 28px; font-weight: 700; color: #0f172a; }
+    .live-clock-display .time { font-size: 32px; font-weight: 700; color: #0f172a; margin-top: 2px; }
     
     .shift-btn {
-        padding: 10px 20px;
+        padding: 12px 24px;
         border: none;
-        border-radius: 6px;
-        font-size: 14px;
-        font-weight: 600;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: 700;
         color: #fff;
         cursor: pointer;
         display: inline-flex;
         align-items: center;
         gap: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transition: all 0.2s ease;
     }
     .btn-clock-in { background-color: #10b981; }
-    .btn-clock-out { background-color: #ef4444; }
+    .btn-clock-in:hover { background-color: #059669; }
+    .btn-clock-out { background-color: #e11d48; }
+    .btn-clock-out:hover { background-color: #be123c; }
     
     .table-card {
         background: #ffffff;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        border: 1px solid #f1f5f9;
     }
-    .staff-cell .name { font-weight: 600; color: #0f172a; }
-    .staff-cell .role { font-size: 12px; color: #64748b; }
-    .time-blue { color: #0284c7; font-weight: 600; }
+    .table-card-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: #1e293b;
+        margin-bottom: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .staff-cell .name { font-weight: 700; color: #0f172a; font-size: 14px; }
+    .staff-cell .role { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .time-blue { color: #2563eb; font-weight: 600; }
+
+    /* Custom Badges */
+    .badge-status {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        display: inline-block;
+    }
+    .badge-status.active { background-color: #d1fae5; color: #065f46; }
+    .badge-status.completed { background-color: #e2e8f0; color: #475569; }
+
+    /* Table Styling */
+    .table th {
+        border-top: none;
+        border-bottom: 1px solid #e2e8f0;
+        color: #0f172a;
+        font-weight: 700;
+        font-size: 14px;
+        padding-bottom: 12px;
+    }
+    .table td {
+        vertical-align: middle;
+        padding: 16px 12px;
+        border-top: 1px solid #f1f5f9;
+        font-size: 14px;
+        color: #334155;
+    }
 
     /* Modal Styles */
     .modal-overlay {
@@ -181,111 +244,117 @@ include_once __DIR__ . '/../includes/head.php';
 </style>
 
 <body>
-    <?php include_once __DIR__ . '/../includes/aside.php'; ?>
-    
-    <div class="main-wrapper">
-        <?php include_once __DIR__ . '/../includes/header.php'; ?>
+    <div class="app-container">
+        <?php include_once __DIR__ . '/../includes/aside.php'; ?>
+        
+        <div class="main-wrapper">
+            <?php include_once __DIR__ . '/../includes/header.php'; ?>
 
-        <div class="content-container p-4">
-            
-            <div class="page-title mb-4">
-                <h1 class="h4 font-weight-bold"><i class="fa-solid fa-user-clock text-primary"></i> Shift Reporting & Clock-In</h1>
-                <p class="text-muted small">Record duty start times and monitor team reporting activity.</p>
-            </div>
-
-            <!-- LIVE CLOCK & ACTION CARD -->
-            <div class="clock-card">
-                <div>
-                    <h3 class="h6 font-weight-bold mb-1"><i class="fa-solid fa-user text-primary"></i> User</h3>
-                    <p class="text-muted small mb-0">Role: <strong><?= htmlspecialchars($user_role) ?></strong></p>
+            <div class="content-container">
+                
+                <div class="page-title mb-4">
+                    <h1 class="h3 font-weight-bold d-flex align-items-center gap-2" style="color:#0f172a;">
+                        <i class="fa-solid fa-user-clock text-primary"></i> Shift Reporting & Clock-In
+                    </h1>
+                    <p class="text-muted small mb-0">Record duty start times and monitor team reporting activity.</p>
                 </div>
 
-                <div class="live-clock-display">
-                    <div class="label">LIVE TIME</div>
-                    <div class="time" id="liveClock">--:--:-- --</div>
-                </div>
-
-                <div>
-                    <?php if ($active_shift): ?>
-                        <form method="POST">
-                            <input type="hidden" name="action" value="clock_out">
-                            <button type="submit" class="shift-btn btn-clock-out">
-                                <i class="fa-solid fa-right-from-bracket"></i> Clock Out Shift
-                            </button>
-                        </form>
-                        <div class="text-success small mt-1 text-right font-weight-bold">
-                            <i class="fa-solid fa-circle" style="font-size:8px;"></i> Clocked in at <?= date('H:i', strtotime($active_shift['clock_in'])) ?>
-                        </div>
-                    <?php else: ?>
-                        <button type="button" class="shift-btn btn-clock-in" onclick="openShiftModal()">
-                            <i class="fa-solid fa-right-to-bracket"></i> Clock In Shift
-                        </button>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            <!-- DUTY REPORTING LOGS TABLE -->
-            <div class="table-card">
-                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-                    <div class="h6 font-weight-bold mb-0">
-                        <i class="fa-solid fa-clipboard-list"></i> Duty Reporting Logs
+                <!-- LIVE CLOCK & ACTION CARD -->
+                <div class="clock-card">
+                    <div>
+                        <h3 class="h6 font-weight-bold mb-1" style="color:#0f172a;">
+                            <i class="fa-solid fa-user text-primary mr-1"></i> User
+                        </h3>
+                        <p class="text-muted small mb-0">Role: <strong><?= htmlspecialchars($user_role) ?></strong></p>
                     </div>
 
-                    <form method="GET" class="d-flex gap-2 align-items-center">
-                        <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date) ?>">
-                        <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-filter"></i> Filter</button>
-                        <a href="?" class="btn btn-secondary btn-sm">Reset</a>
-                    </form>
+                    <div class="live-clock-display">
+                        <div class="label">LIVE TIME</div>
+                        <div class="time" id="liveClock">--:--:-- --</div>
+                    </div>
+
+                    <div class="text-right">
+                        <?php if ($active_shift): ?>
+                            <form method="POST">
+                                <input type="hidden" name="action" value="clock_out">
+                                <button type="submit" class="shift-btn btn-clock-out">
+                                    <i class="fa-solid fa-right-from-bracket"></i> Clock Out Shift
+                                </button>
+                            </form>
+                            <div class="text-success small mt-2 font-weight-bold d-flex align-items-center justify-content-end gap-1">
+                                <i class="fa-solid fa-circle" style="font-size:8px;"></i> Clocked in at <?= date('H:i', strtotime($active_shift['clock_in'])) ?>
+                            </div>
+                        <?php else: ?>
+                            <button type="button" class="shift-btn btn-clock-in" onclick="openShiftModal()">
+                                <i class="fa-solid fa-right-to-bracket"></i> Clock In Shift
+                            </button>
+                        <?php endif; ?>
+                    </div>
                 </div>
 
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>Staff Name & Role</th>
-                                <th>Branch</th>
-                                <th>Clock In Time</th>
-                                <th>Clock Out Time</th>
-                                <th>Duration</th>
-                                <th>Status</th>
-                                <th>Notes</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if ($logs_res && $logs_res->num_rows > 0): ?>
-                                <?php while ($row = $logs_res->fetch_assoc()): ?>
-                                    <tr>
-                                        <td class="staff-cell">
-                                            <div class="name"><?= htmlspecialchars($row['staff_name']) ?></div>
-                                            <div class="role"><?= htmlspecialchars($row['role']) ?></div>
-                                        </td>
-                                        <td><?= htmlspecialchars($row['branch_name']) ?></td>
-                                        <td class="time-blue"><?= date('d M Y, H:i:s', strtotime($row['clock_in'])) ?></td>
-                                        <td>
-                                            <?= $row['clock_out'] ? date('d M Y, H:i:s', strtotime($row['clock_out'])) : '<span class="text-muted">In Progress</span>' ?>
-                                        </td>
-                                        <td><?= get_shift_duration($row['clock_in'], $row['clock_out']) ?></td>
-                                        <td>
-                                            <span class="badge badge-<?= strtolower($row['status']) === 'active' ? 'success' : 'secondary' ?>">
-                                                <?= ucfirst(htmlspecialchars($row['status'])) ?>
-                                            </span>
-                                        </td>
-                                        <td><?= htmlspecialchars(!empty($row['notes']) ? $row['notes'] : '-') ?></td>
-                                    </tr>
-                                <?php endwhile; ?>
-                            <?php else: ?>
+                <!-- DUTY REPORTING LOGS TABLE -->
+                <div class="table-card">
+                    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                        <div class="table-card-title">
+                            <i class="fa-solid fa-clipboard-list text-secondary"></i> Duty Reporting Logs
+                        </div>
+
+                        <form method="GET" class="d-flex gap-2 align-items-center">
+                            <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date) ?>">
+                            <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-filter"></i> Filter</button>
+                            <a href="?" class="btn btn-secondary btn-sm">Reset</a>
+                        </form>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table border-0">
+                            <thead>
                                 <tr>
-                                    <td colspan="7" class="text-center py-4 text-muted">No shift logs found.</td>
+                                    <th>Staff Name & Role</th>
+                                    <th>Branch</th>
+                                    <th>Clock In Time</th>
+                                    <th>Clock Out Time</th>
+                                    <th>Duration</th>
+                                    <th>Status</th>
+                                    <th>Notes</th>
                                 </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                <?php if ($logs_res && $logs_res->num_rows > 0): ?>
+                                    <?php while ($row = $logs_res->fetch_assoc()): ?>
+                                        <tr>
+                                            <td class="staff-cell">
+                                                <div class="name"><?= htmlspecialchars($row['staff_name']) ?></div>
+                                                <div class="role"><?= htmlspecialchars($row['role']) ?></div>
+                                            </td>
+                                            <td><?= htmlspecialchars($row['branch_name']) ?></td>
+                                            <td class="time-blue"><?= date('j M Y, H:i:s', strtotime($row['clock_in'])) ?></td>
+                                            <td>
+                                                <?= $row['clock_out'] ? date('j M Y, H:i:s', strtotime($row['clock_out'])) : '<span class="text-muted">In Progress</span>' ?>
+                                            </td>
+                                            <td><?= get_shift_duration($row['clock_in'], $row['clock_out']) ?></td>
+                                            <td>
+                                                <span class="badge-status <?= strtolower($row['status']) === 'active' ? 'active' : 'completed' ?>">
+                                                    <?= ucfirst(htmlspecialchars($row['status'])) ?>
+                                                </span>
+                                            </td>
+                                            <td><?= htmlspecialchars(!empty($row['notes']) ? $row['notes'] : 'Morning duty') ?></td>
+                                        </tr>
+                                    <?php endwhile; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="7" class="text-center py-4 text-muted">No shift logs found.</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
+
             </div>
 
+            <?php include_once __DIR__ . '/../includes/footer.php'; ?>
         </div>
-
-        <?php include_once __DIR__ . '/../includes/footer.php'; ?>
     </div>
 
     <!-- CLOCK IN SHIFT SELECTION MODAL -->
@@ -297,8 +366,8 @@ include_once __DIR__ . '/../includes/head.php';
                 <div class="modal-body">
                     <label for="shift_type">Choose Duty Shift</label>
                     <select name="shift_type" id="shift_type" required>
-                        <option value="Morning Shift">Morning Shift</option>
-                        <option value="Afternoon Shift">Afternoon Shift</option>
+                        <option value="Morning duty">Morning duty</option>
+                        <option value="Afternoon duty">Afternoon duty</option>
                         <option value="Full Day">Full Day</option>
                     </select>
                 </div>
