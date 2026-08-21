@@ -235,6 +235,7 @@ require_once "../includes/head.php";
     .status-received { background-color: #d4edda; color: #155724; }
     .status-rejected { background-color: #f8d7da; color: #721c24; }
     label { font-size: 0.8rem; font-weight: 700; color: #475569; margin-bottom: 5px; text-transform: uppercase; }
+    .filter-card { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 15px; margin-bottom: 20px; }
 </style>
 
 <div id="main-wrapper">
@@ -249,7 +250,7 @@ require_once "../includes/head.php";
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
                     <h3 class="fw-bold text-dark mb-0"><i class="fas fa-exchange-alt me-2 text-primary"></i> Inter-Branch Stock Transfer</h3>
-                    <p class="text-muted small mb-0">Initiate, approve, and reconcile stock movement across locations.</p>
+                    <p class="text-muted small mb-0">Initiate, approve, filter, and reconcile stock movement across locations.</p>
                 </div>
                 <button class="btn btn-primary fw-bold shadow-sm" data-bs-toggle="modal" data-bs-target="#newTransferModal">
                     <i class="fas fa-plus me-1"></i> New Transfer Request
@@ -258,13 +259,48 @@ require_once "../includes/head.php";
 
             <?= $message ?>
 
+            <!-- Filter & Search Section -->
+            <div class="filter-card shadow-sm">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label><i class="fas fa-search me-1"></i> Live Search</label>
+                        <input type="text" id="liveSearchInput" class="form-control" placeholder="Search by Code, Branch, or Requester...">
+                    </div>
+                    <div class="col-md-3">
+                        <label><i class="fas fa-filter me-1"></i> Status Filter</label>
+                        <select id="statusFilter" class="form-select">
+                            <option value="all">All Statuses</option>
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="received">Received</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label><i class="fas fa-sort me-1"></i> Sort By</label>
+                        <select id="sortOrder" class="form-select">
+                            <option value="newest">Date: Newest First</option>
+                            <option value="oldest">Date: Oldest First</option>
+                            <option value="code_asc">Code: A to Z</option>
+                            <option value="code_desc">Code: Z to A</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2 text-end">
+                        <button type="button" id="resetFilters" class="btn btn-outline-secondary w-100 fw-bold">
+                            <i class="fas fa-undo me-1"></i> Reset
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card card-transfer shadow-sm">
-                <div class="card-header bg-white py-3">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 fw-bold text-dark"><i class="fas fa-list me-2 text-secondary"></i> Transfer Records</h5>
+                    <span class="badge bg-light text-dark border" id="recordCount">0 Records Found</span>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0">
+                        <table class="table table-hover align-middle mb-0" id="transfersTable">
                             <thead class="table-light">
                                 <tr>
                                     <th>Transfer Code</th>
@@ -278,7 +314,13 @@ require_once "../includes/head.php";
                             <tbody>
                                 <?php if (mysqli_num_rows($transfers_res) > 0): ?>
                                     <?php while ($row = mysqli_fetch_assoc($transfers_res)): ?>
-                                        <tr>
+                                        <tr class="transfer-row" 
+                                            data-code="<?= strtolower(htmlspecialchars($row['transfer_code'])) ?>"
+                                            data-from="<?= strtolower(htmlspecialchars($row['from_branch'])) ?>"
+                                            data-to="<?= strtolower(htmlspecialchars($row['to_branch'])) ?>"
+                                            data-requester="<?= strtolower(htmlspecialchars($row['requester'] ?? 'N/A')) ?>"
+                                            data-status="<?= strtolower(htmlspecialchars($row['status'])) ?>"
+                                            data-timestamp="<?= strtotime($row['created_at']) ?>">
                                             <td><strong class="text-dark"><?= htmlspecialchars($row['transfer_code']) ?></strong></td>
                                             <td>
                                                 <small class="text-muted">From:</small> <strong><?= htmlspecialchars($row['from_branch']) ?></strong><br>
@@ -310,7 +352,7 @@ require_once "../includes/head.php";
                                         </tr>
                                     <?php endwhile; ?>
                                 <?php else: ?>
-                                    <tr>
+                                    <tr id="noRecordsRow">
                                         <td colspan="6" class="text-center py-4 text-muted">No stock transfer records found.</td>
                                     </tr>
                                 <?php endif; ?>
@@ -407,6 +449,8 @@ require_once "../includes/head.php";
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     $(document).ready(function() {
+
+        // Add/Remove item rows in Modal
         $('#addRowBtn').click(function() {
             let row = $('#transferItemsTable tbody tr:first').clone();
             row.find('input').val('1');
@@ -419,6 +463,77 @@ require_once "../includes/head.php";
                 $(this).closest('tr').remove();
             }
         });
+
+        // Dynamic Filtering and Sorting Logic
+        function applyFiltersAndSort() {
+            let query = $('#liveSearchInput').val().toLowerCase().trim();
+            let statusFilter = $('#statusFilter').val().toLowerCase();
+            let sortOrder = $('#sortOrder').val();
+
+            let rows = $('.transfer-row');
+            let visibleCount = 0;
+
+            rows.each(function() {
+                let $row = $(this);
+                let code = $row.data('code');
+                let from = $row.data('from');
+                let to = $row.data('to');
+                let requester = $row.data('requester');
+                let status = $row.data('status');
+
+                let matchesSearch = !query || code.includes(query) || from.includes(query) || to.includes(query) || requester.includes(query);
+                let matchesStatus = (statusFilter === 'all') || (status === statusFilter);
+
+                if (matchesSearch && matchesStatus) {
+                    $row.show();
+                    visibleCount++;
+                } else {
+                    $row.hide();
+                }
+            });
+
+            // Sorting logic on visible elements
+            let tbody = $('#transfersTable tbody');
+            let sortedRows = rows.filter(':visible').get().sort(function(a, b) {
+                let keyA, keyB;
+
+                if (sortOrder === 'newest') {
+                    keyA = parseInt($(b).data('timestamp'));
+                    keyB = parseInt($(a).data('timestamp'));
+                    return keyA - keyB;
+                } else if (sortOrder === 'oldest') {
+                    keyA = parseInt($(a).data('timestamp'));
+                    keyB = parseInt($(b).data('timestamp'));
+                    return keyA - keyB;
+                } else if (sortOrder === 'code_asc') {
+                    return $(a).data('code').localeCompare($(b).data('code'));
+                } else if (sortOrder === 'code_desc') {
+                    return $(b).data('code').localeCompare($(a).data('code'));
+                }
+            });
+
+            $.each(sortedRows, function(index, row) {
+                tbody.append(row);
+            });
+
+            // Update record count UI
+            $('#recordCount').text(visibleCount + ' Record' + (visibleCount === 1 ? '' : 's') + ' Found');
+        }
+
+        // Event Listeners for Filters
+        $('#liveSearchInput').on('keyup input', applyFiltersAndSort);
+        $('#statusFilter, #sortOrder').on('change', applyFiltersAndSort);
+
+        // Reset Filters Button
+        $('#resetFilters').click(function() {
+            $('#liveSearchInput').val('');
+            $('#statusFilter').val('all');
+            $('#sortOrder').val('newest');
+            applyFiltersAndSort();
+        });
+
+        // Run once on initial load
+        applyFiltersAndSort();
     });
 </script>
 </body>
