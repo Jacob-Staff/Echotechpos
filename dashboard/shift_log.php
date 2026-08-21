@@ -5,7 +5,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 // Point to db_connection.php in the root directory
-require_once __DIR__ . '/../db_connection.php';
+require_once __DIR__ . 'db_connection.php';
 
 // Ensure mandatory session variables are set
 $pharmacy_id   = (int)($_SESSION['pharmacy_id'] ?? 0);
