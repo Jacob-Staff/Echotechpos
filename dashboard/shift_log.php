@@ -50,14 +50,21 @@ if ($active_stmt) {
 // -------------------------------------------------------------------------
 // FETCH SHIFT LOGS
 // -------------------------------------------------------------------------
+$filter_date = trim($_GET['filter_date'] ?? '');
 $where_clauses = ["sl.pharmacy_id = ?"];
-$param_types   = "i";
-$param_values  = [$pharmacy_id];
+$param_types   = "sss" . "i";
+$param_values  = [$user_name, $user_role, $branch_name, $pharmacy_id];
 
 if (!$is_supervisor) {
     $where_clauses[] = "sl.user_id = ?";
     $param_types   .= "i";
     $param_values[]  = $user_id;
+}
+
+if (!empty($filter_date)) {
+    $where_clauses[] = "DATE(sl.clock_in) = ?";
+    $param_types   .= "s";
+    $param_values[]  = $filter_date;
 }
 
 $where_sql = implode(' AND ', $where_clauses);
@@ -78,9 +85,6 @@ $logs_query = "
     WHERE $where_sql
     ORDER BY sl.id DESC
 ";
-
-$param_types   = "sss" . $param_types;
-$param_values  = array_merge([$user_name, $user_role, $branch_name], $param_values);
 
 $logs_stmt = $conn->prepare($logs_query);
 $logs_res = null;
@@ -132,8 +136,10 @@ include_once __DIR__ . '/../includes/head.php';
         align-items: center;
         gap: 8px;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transition: all 0.2s ease;
     }
     .btn-clock-in { background-color: #10b981; }
+    .btn-clock-in:hover { background-color: #059669; }
     .btn-clock-out { background-color: #e11d48; }
     .btn-clock-out:hover { background-color: #be123c; }
     
@@ -148,7 +154,7 @@ include_once __DIR__ . '/../includes/head.php';
         font-size: 18px;
         font-weight: 700;
         color: #1e293b;
-        margin-bottom: 20px;
+        margin-bottom: 0;
         display: flex;
         align-items: center;
         gap: 10px;
@@ -157,7 +163,7 @@ include_once __DIR__ . '/../includes/head.php';
     .staff-cell .role { font-size: 12px; color: #64748b; margin-top: 2px; }
     .time-blue { color: #2563eb; font-weight: 600; }
 
-    /* Badges */
+    /* Custom Badges */
     .badge-status {
         padding: 4px 12px;
         border-radius: 20px;
@@ -267,8 +273,16 @@ include_once __DIR__ . '/../includes/head.php';
 
             <!-- DUTY REPORTING LOGS TABLE -->
             <div class="table-card">
-                <div class="table-card-title">
-                    <i class="fa-solid fa-clipboard-list text-secondary"></i> Duty Reporting Logs
+                <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                    <div class="table-card-title">
+                        <i class="fa-solid fa-clipboard-list text-secondary"></i> Duty Reporting Logs
+                    </div>
+
+                    <form method="GET" class="d-flex gap-2 align-items-center">
+                        <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date) ?>">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-filter"></i> Filter</button>
+                        <a href="?" class="btn btn-secondary btn-sm">Reset</a>
+                    </form>
                 </div>
 
                 <div class="table-responsive">
