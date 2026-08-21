@@ -107,7 +107,7 @@ $logs_query = "
 ";
 $logs_res = mysqli_query($conn, $logs_query);
 
-// Fetch staff list for supervisor filter (Fixed SQL query without is_active)
+// Fetch staff list for supervisor filter
 $staff_res = mysqli_query($conn, "SELECT id, full_name FROM users WHERE pharmacy_id = '$pharmacy_id' ORDER BY full_name ASC");
 
 require_once "../includes/head.php";
@@ -144,8 +144,8 @@ require_once "../includes/head.php";
                     <div class="card clock-card shadow-sm p-3">
                         <div class="d-flex flex-wrap justify-content-between align-items-center">
                             <div>
-                                <h5 class="fw-bold mb-1"><i class="fas fa-id-badge text-primary me-2"></i><?= htmlspecialchars($user_name) ?></h5>
-                                <p class="text-muted small mb-0">Role: <strong><?= htmlspecialchars($user_role) ?></strong></p>
+                                <h5 class="fw-bold mb-1"><i class="fas fa-id-badge text-primary me-2"></i><?= htmlspecialchars($user_name ?? '') ?></h5>
+                                <p class="text-muted small mb-0">Role: <strong><?= htmlspecialchars($user_role ?? '') ?></strong></p>
                             </div>
 
                             <div class="text-center my-2 my-md-0">
@@ -189,13 +189,13 @@ require_once "../includes/head.php";
                                         <option value="0">All Staff Members</option>
                                         <?php while ($s = mysqli_fetch_assoc($staff_res)): ?>
                                             <option value="<?= $s['id'] ?>" <?= $filter_user == $s['id'] ? 'selected' : '' ?>>
-                                                <?= htmlspecialchars($s['full_name']) ?>
+                                                <?= htmlspecialchars($s['full_name'] ?? '') ?>
                                             </option>
                                         <?php endwhile; ?>
                                     </select>
                                 </div>
                                 <div class="col-md-4">
-                                    <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date) ?>" onchange="this.form.submit()">
+                                    <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date ?? '') ?>" onchange="this.form.submit()">
                                 </div>
                                 <?php if ($filter_user || $filter_date): ?>
                                     <div class="col-auto">
@@ -236,18 +236,18 @@ require_once "../includes/head.php";
                                         ?>
                                         <tr>
                                             <td>
-                                                <strong class="text-dark"><?= htmlspecialchars($row['full_name']) ?></strong><br>
-                                                <small class="text-muted"><?= htmlspecialchars($row['role']) ?></small>
+                                                <strong class="text-dark"><?= htmlspecialchars($row['full_name'] ?? '') ?></strong><br>
+                                                <small class="text-muted"><?= htmlspecialchars($row['role'] ?? 'Staff') ?></small>
                                             </td>
-                                            <td><?= htmlspecialchars($row['branch_name']) ?></td>
+                                            <td><?= htmlspecialchars($row['branch_name'] ?? '') ?></td>
                                             <td><span class="text-primary fw-bold"><?= $cin->format('d M Y, H:i:s') ?></span></td>
                                             <td>
                                                 <?= $cout ? $cout->format('d M Y, H:i:s') : '<span class="text-muted">In Progress</span>' ?>
                                             </td>
                                             <td><small><?= $duration_str ?></small></td>
                                             <td>
-                                                <span class="status-<?= htmlspecialchars($row['status']) ?>">
-                                                    <?= ucfirst(htmlspecialchars($row['status'])) ?>
+                                                <span class="status-<?= htmlspecialchars($row['status'] ?? 'active') ?>">
+                                                    <?= ucfirst(htmlspecialchars($row['status'] ?? 'active')) ?>
                                                 </span>
                                             </td>
                                             <td><small class="text-muted"><?= htmlspecialchars($row['notes'] ?? 'None') ?></small></td>
