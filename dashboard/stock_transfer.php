@@ -23,6 +23,9 @@ if (!$pharmacy_id || !$branch_id || !$user_id) {
 $is_admin = in_array(strtolower($user_role), ['admin', 'manager', 'supervisor', 'superadmin']);
 $message = '';
 
+// Filter variable for the page
+$status_filter = $_GET['filter_status'] ?? 'all';
+
 // =========================================================================
 // ACTION HANDLERS
 // =========================================================================
@@ -200,13 +203,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'receive') {
 // FETCH DATA FOR DISPLAY
 // =========================================================================
 
-// Fetch Destination Branches
+// Destination Branches
 $branches_res = mysqli_query($conn, "SELECT id, branch_name FROM branches WHERE pharmacy_id = '$pharmacy_id' AND is_active = 1 AND id != '$branch_id'");
 
-// Fetch Inventory Items
+// Inventory Items for Active Branch
 $inventory_res = mysqli_query($conn, "SELECT id, item_name, quantity, strength FROM store_items WHERE pharmacy_id = '$pharmacy_id' AND branch_id = '$branch_id' AND is_active = 1 AND quantity > 0 ORDER BY item_name ASC");
 
-// Fetch Transfers
+// Build Query Filter
+$where_clause = " WHERE st.pharmacy_id = '$pharmacy_id' AND (st.from_branch_id = '$branch_id' OR st.to_branch_id = '$branch_id')";
+if (in_array($status_filter, ['pending', 'approved', 'received', 'rejected'])) {
+    $where_clause .= " AND st.status = '" . mysqli_real_escape_string($conn, $status_filter) . "'";
+}
+
 $transfers_res = mysqli_query($conn, "
     SELECT st.*, 
            fb.branch_name AS from_branch, 
@@ -220,12 +228,16 @@ $transfers_res = mysqli_query($conn, "
     LEFT JOIN users u1 ON st.requested_by = u1.id
     LEFT JOIN users u2 ON st.approved_by = u2.id
     LEFT JOIN users u3 ON st.received_by = u3.id
-    WHERE st.pharmacy_id = '$pharmacy_id' AND (st.from_branch_id = '$branch_id' OR st.to_branch_id = '$branch_id')
+    $where_clause
     ORDER BY st.id DESC
 ");
 
 require_once "../includes/head.php";
 ?>
+
+<!-- Select2 CSS for Live Search -->
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet" />
 
 <style>
     .card-transfer { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; }
@@ -235,6 +247,7 @@ require_once "../includes/head.php";
     .status-received { background-color: #d4edda; color: #155724; }
     .status-rejected { background-color: #f8d7da; color: #721c24; }
     label { font-size: 0.8rem; font-weight: 700; color: #475569; margin-bottom: 5px; text-transform: uppercase; }
+    .select2-container { width: 100% !important; }
 </style>
 
 <div id="main-wrapper">
@@ -258,34 +271,29 @@ require_once "../includes/head.php";
 
             <?= $message ?>
 
-            <!-- Main Card with Live Filter Header -->
             <div class="card card-transfer shadow-sm">
+                <!-- Filter Bar and Live Search -->
                 <div class="card-header bg-white py-3">
                     <div class="row g-2 align-items-center">
                         <div class="col-md-4">
-                            <div class="input-group input-group-sm">
+                            <h5 class="mb-0 fw-bold text-dark"><i class="fas fa-list me-2 text-secondary"></i> Transfer Records</h5>
+                        </div>
+                        <div class="col-md-5">
+                            <div class="input-group">
                                 <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted"></i></span>
-                                <input type="text" id="liveSearchInput" class="form-control bg-light border-start-0" placeholder="Search code, branch, requester...">
+                                <input type="text" id="recordSearch" class="form-control bg-light border-start-0" placeholder="Live search code, route, or requester...">
                             </div>
                         </div>
                         <div class="col-md-3">
-                            <select id="statusFilter" class="form-select form-select-sm">
-                                <option value="">-- All Statuses --</option>
-                                <option value="pending">Pending</option>
-                                <option value="approved">Approved</option>
-                                <option value="received">Received</option>
-                                <option value="rejected">Rejected</option>
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <select id="sortOrder" class="form-select form-select-sm">
-                                <option value="newest">Sort: Newest First</option>
-                                <option value="oldest">Sort: Oldest First</option>
-                                <option value="code">Sort: Code (A-Z)</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2 text-end">
-                            <span class="badge bg-secondary" id="recordCount">0 Records</span>
+                            <form method="get" id="filterForm">
+                                <select name="filter_status" class="form-select" onchange="document.getElementById('filterForm').submit()">
+                                    <option value="all" <?= $status_filter === 'all' ? 'selected' : '' ?>>All Statuses</option>
+                                    <option value="pending" <?= $status_filter === 'pending' ? 'selected' : '' ?>>Pending Approval</option>
+                                    <option value="approved" <?= $status_filter === 'approved' ? 'selected' : '' ?>>In Transit (Approved)</option>
+                                    <option value="received" <?= $status_filter === 'received' ? 'selected' : '' ?>>Received</option>
+                                    <option value="rejected" <?= $status_filter === 'rejected' ? 'selected' : '' ?>>Rejected</option>
+                                </select>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -306,7 +314,7 @@ require_once "../includes/head.php";
                             <tbody>
                                 <?php if (mysqli_num_rows($transfers_res) > 0): ?>
                                     <?php while ($row = mysqli_fetch_assoc($transfers_res)): ?>
-                                        <tr data-status="<?= htmlspecialchars($row['status']) ?>" data-code="<?= htmlspecialchars($row['transfer_code']) ?>" data-time="<?= strtotime($row['created_at']) ?>">
+                                        <tr>
                                             <td><strong class="text-dark"><?= htmlspecialchars($row['transfer_code']) ?></strong></td>
                                             <td>
                                                 <small class="text-muted">From:</small> <strong><?= htmlspecialchars($row['from_branch']) ?></strong><br>
@@ -338,7 +346,7 @@ require_once "../includes/head.php";
                                         </tr>
                                     <?php endwhile; ?>
                                 <?php else: ?>
-                                    <tr id="noDataRow">
+                                    <tr id="noResultsRow">
                                         <td colspan="6" class="text-center py-4 text-muted">No stock transfer records found.</td>
                                     </tr>
                                 <?php endif; ?>
@@ -381,13 +389,7 @@ require_once "../includes/head.php";
                         </div>
                     </div>
 
-                    <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
-                        <h6 class="fw-bold mb-0">Transfer Items</h6>
-                        <div class="w-50">
-                            <input type="text" id="modalProductFilter" class="form-control form-control-sm" placeholder="🔍 Filter inventory items list...">
-                        </div>
-                    </div>
-
+                    <h6 class="fw-bold mt-4 mb-2">Transfer Items</h6>
                     <table class="table table-bordered align-middle" id="transferItemsTable">
                         <thead class="table-light">
                             <tr>
@@ -400,14 +402,14 @@ require_once "../includes/head.php";
                             <tr>
                                 <td>
                                     <select class="form-select product-select" name="product_ids[]" required>
-                                        <option value="">-- Select Item --</option>
+                                        <option value="">-- Search & Select Product --</option>
                                         <?php 
                                         if (mysqli_num_rows($inventory_res) > 0) {
                                             mysqli_data_seek($inventory_res, 0);
                                             while ($item = mysqli_fetch_assoc($inventory_res)): 
                                             ?>
                                                 <option value="<?= $item['id'] ?>">
-                                                    <?= htmlspecialchars($item['item_name']) ?> (Available: <?= $item['quantity'] ?>)
+                                                    <?= htmlspecialchars($item['item_name']) ?> <?= !empty($item['strength']) ? '('.htmlspecialchars($item['strength']).')' : '' ?> - [Stock: <?= $item['quantity'] ?>]
                                                 </option>
                                             <?php 
                                             endwhile; 
@@ -439,91 +441,66 @@ require_once "../includes/head.php";
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Select2 JS for Live Search inside Modal -->
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
 <script>
     $(document).ready(function() {
+        // Initialize Select2 Live Search on product dropdowns
+        function initSelect2(element) {
+            $(element).select2({
+                theme: 'bootstrap-5',
+                dropdownParent: $('#newTransferModal'),
+                placeholder: '-- Search & Select Product --',
+                allowClear: true
+            });
+        }
 
-        // -----------------------------------------------------------------
-        // 1. DYNAMIC ROW ADD / REMOVE
-        // -----------------------------------------------------------------
+        // Initialize for first row
+        initSelect2('.product-select');
+
+        // Add new item row dynamically
         $('#addRowBtn').click(function() {
+            // Destroy Select2 on template row before cloning
+            $('.product-select').select2('destroy');
+
             let row = $('#transferItemsTable tbody tr:first').clone();
             row.find('input').val('1');
             row.find('select').val('');
-            row.find('option').show();
             $('#transferItemsTable tbody').append(row);
+
+            // Re-initialize Select2 on all rows
+            $('.product-select').each(function() {
+                initSelect2(this);
+            });
         });
 
+        // Remove row
         $(document).on('click', '.remove-row', function() {
             if ($('#transferItemsTable tbody tr').length > 1) {
                 $(this).closest('tr').remove();
             }
         });
 
-        // -----------------------------------------------------------------
-        // 2. LIVE FILTER ITEMS INSIDE MODAL
-        // -----------------------------------------------------------------
-        $('#modalProductFilter').on('keyup input', function() {
-            let term = $(this).val().toLowerCase();
-            $('.product-select option').each(function() {
-                let text = $(this).text().toLowerCase();
-                if ($(this).val() === "" || text.indexOf(term) > -1) {
-                    $(this).show();
-                } else {
-                    $(this).hide();
-                }
+        // Live Search Filter for Table Records
+        $('#recordSearch').on('keyup', function() {
+            let value = $(this).val().toLowerCase();
+            let visibleRows = 0;
+
+            $('#transfersTable tbody tr').not('#noResultsRow').filter(function() {
+                let isMatch = $(this).text().toLowerCase().indexOf(value) > -1;
+                $(this).toggle(isMatch);
+                if (isMatch) visibleRows++;
             });
+
+            if (visibleRows === 0) {
+                if ($('#noSearchMatch').length === 0) {
+                    $('#transfersTable tbody').append('<tr id="noSearchMatch"><td colspan="6" class="text-center py-4 text-muted">No matching transfer records found.</td></tr>');
+                }
+            } else {
+                $('#noSearchMatch').remove();
+            }
         });
-
-        // -----------------------------------------------------------------
-        // 3. LIVE SEARCH, FILTER & SORT TABLE RECORDS
-        // -----------------------------------------------------------------
-        function filterAndSortTable() {
-            let searchVal = $('#liveSearchInput').val().toLowerCase();
-            let statusVal = $('#statusFilter').val();
-            let sortVal   = $('#sortOrder').val();
-
-            let rows = $('#transfersTable tbody tr').not('#noDataRow').get();
-            let visibleCount = 0;
-
-            $.each(rows, function(index, row) {
-                let text = $(row).text().toLowerCase();
-                let status = $(row).data('status');
-
-                let matchesSearch = (text.indexOf(searchVal) > -1);
-                let matchesStatus = (statusVal === "" || status === statusVal);
-
-                if (matchesSearch && matchesStatus) {
-                    $(row).show();
-                    visibleCount++;
-                } else {
-                    $(row).hide();
-                }
-            });
-
-            // Update record counter
-            $('#recordCount').text(visibleCount + ' Records');
-
-            // Sorting logic
-            rows.sort(function(a, b) {
-                if (sortVal === 'newest') {
-                    return $(b).data('time') - $(a).data('time');
-                } else if (sortVal === 'oldest') {
-                    return $(a).data('time') - $(b).data('time');
-                } else if (sortVal === 'code') {
-                    return $(a).data('code').localeCompare($(b).data('code'));
-                }
-            });
-
-            $.each(rows, function(index, row) {
-                $('#transfersTable tbody').append(row);
-            });
-        }
-
-        // Attach Event Listeners
-        $('#liveSearchInput, #statusFilter, #sortOrder').on('keyup change input', filterAndSortTable);
-
-        // Initial count execution
-        filterAndSortTable();
     });
 </script>
 </body>
