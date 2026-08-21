@@ -41,6 +41,7 @@ if (!empty($filter_date)) {
 
 $where_sql = implode(' AND ', $where_clauses);
 
+// COALESCE checks full_name, name, username, first_name in order
 $logs_query = "
     SELECT 
         sl.id, 
@@ -51,12 +52,12 @@ $logs_query = "
         sl.clock_out, 
         sl.status, 
         sl.notes,
-        u.full_name, 
+        COALESCE(NULLIF(u.full_name, ''), NULLIF(u.name, ''), NULLIF(u.username, ''), NULLIF(u.first_name, ''), 'Unknown User') AS staff_name, 
         u.role, 
         b.branch_name 
     FROM shift_logs sl
-    INNER JOIN users u ON sl.user_id = u.id
-    INNER JOIN branches b ON sl.branch_id = b.id
+    LEFT JOIN users u ON sl.user_id = u.id
+    LEFT JOIN branches b ON sl.branch_id = b.id
     WHERE $where_sql
     ORDER BY sl.id DESC
 ";
@@ -123,8 +124,8 @@ if ($logs_stmt) {
                 <?php while ($row = $logs_res->fetch_assoc()): ?>
                     <tr>
                         <td><?= htmlspecialchars((string)($row['id'] ?? '')) ?></td>
-                        <td><?= htmlspecialchars($row['full_name'] ?? 'N/A') ?></td>
-                        <td><?= htmlspecialchars(ucfirst($row['role'] ?? '')) ?></td>
+                        <td><?= htmlspecialchars($row['staff_name'] ?? 'Unknown User') ?></td>
+                        <td><?= htmlspecialchars(ucfirst($row['role'] ?? 'Pharmacist')) ?></td>
                         <td><?= htmlspecialchars($row['branch_name'] ?? 'N/A') ?></td>
                         <td><?= htmlspecialchars($row['clock_in'] ?? '') ?></td>
                         <td><?= htmlspecialchars($row['clock_out'] ?? 'N/A') ?></td>
