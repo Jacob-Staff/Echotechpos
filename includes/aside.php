@@ -72,15 +72,11 @@ if (isset($conn) && $conn) {
                 </li>
                 <a href="stock_transfer.php" class="sidebar-link">
     <i class="fas fa-exchange-alt"></i> Stock Transfers
-
 <li class="sidebar-item">
     <a href="shift_log.php" class="sidebar-link waves-effect waves-dark">
         <i class="fas fa-user-clock"></i>
         <span class="hide-menu">Duty & Shift Log</span>
-    </a>
-</li>
-
-                    
+    </a>         
             </ul>
         </nav>
     </div>
