@@ -14830,34 +14830,3 @@ File: scss
 @media (max-width: 991.98px) {
   .do-block {
     display: block !important; } }
-
-
-/* Prevent horizontal overflow page-wide */
-html, body {
-    width: 100%;
-    max-width: 100vw;
-    overflow-x: hidden !important;
-    margin: 0;
-    padding: 0;
-}
-
-/* Fix grid overflow caused by Bootstrap .row margins */
-.row {
-    --bs-gutter-x: 1.5rem;
-    margin-right: 0 !important;
-    margin-left: 0 !important;
-}
-
-/* Ensure wrapper stays within screen bounds */
-.page-wrapper {
-    margin-left: 240px;
-    width: calc(100% - 240px) !important;
-    box-sizing: border-box !important;
-}
-
-@media (max-width: 768px) {
-    .page-wrapper {
-        margin-left: 0 !important;
-        width: 100% !important;
-    }
-}
