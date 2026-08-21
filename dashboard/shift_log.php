@@ -87,9 +87,14 @@ $filter_user = (int)($_GET['filter_user'] ?? 0);
 $filter_date = $_GET['filter_date'] ?? '';
 
 $where_conditions = ["sl.pharmacy_id = '$pharmacy_id'"];
-if ($filter_user > 0) {
+
+// Regular staff members can only view their own shift logs
+if (!$is_supervisor) {
+    $where_conditions[] = "sl.user_id = '$user_id'";
+} elseif ($filter_user > 0) {
     $where_conditions[] = "sl.user_id = '$filter_user'";
 }
+
 if (!empty($filter_date)) {
     $safe_date = mysqli_real_escape_string($conn, $filter_date);
     $where_conditions[] = "DATE(sl.clock_in) = '$safe_date'";
@@ -107,7 +112,7 @@ $logs_query = "
 ";
 $logs_res = mysqli_query($conn, $logs_query);
 
-// Fetch staff list for supervisor filter
+// Fetch staff list for supervisor filter dropdown
 $staff_res = mysqli_query($conn, "SELECT id, full_name FROM users WHERE pharmacy_id = '$pharmacy_id' ORDER BY full_name ASC");
 
 require_once "../includes/head.php";
@@ -175,7 +180,7 @@ require_once "../includes/head.php";
                 </div>
             </div>
 
-            <!-- Reporting Control Panel for Adams / Management -->
+            <!-- Reporting Control Panel -->
             <div class="card clock-card shadow-sm">
                 <div class="card-header bg-white py-3">
                     <div class="row g-2 align-items-center">
@@ -183,26 +188,29 @@ require_once "../includes/head.php";
                             <h5 class="mb-0 fw-bold text-dark"><i class="fas fa-clipboard-list me-2 text-secondary"></i> Duty Reporting Logs</h5>
                         </div>
                         <div class="col-md-8">
-                            <form method="get" class="row g-2 justify-content-end">
-                                <div class="col-md-4">
-                                    <select name="filter_user" class="form-select form-select-sm" onchange="this.form.submit()">
-                                        <option value="0">All Staff Members</option>
-                                        <?php while ($s = mysqli_fetch_assoc($staff_res)): ?>
-                                            <option value="<?= $s['id'] ?>" <?= $filter_user == $s['id'] ? 'selected' : '' ?>>
-                                                <?= htmlspecialchars($s['full_name'] ?? '') ?>
-                                            </option>
-                                        <?php endwhile; ?>
-                                    </select>
-                                </div>
-                                <div class="col-md-4">
-                                    <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date ?? '') ?>" onchange="this.form.submit()">
-                                </div>
-                                <?php if ($filter_user || $filter_date): ?>
-                                    <div class="col-auto">
-                                        <a href="shift_log.php" class="btn btn-sm btn-light border"><i class="fas fa-undo"></i></a>
+                            <?php if ($is_supervisor): ?>
+                                <!-- Filter controls for Supervisors and Admin -->
+                                <form method="get" class="row g-2 justify-content-end">
+                                    <div class="col-md-4">
+                                        <select name="filter_user" class="form-select form-select-sm" onchange="this.form.submit()">
+                                            <option value="0">All Staff Members</option>
+                                            <?php while ($s = mysqli_fetch_assoc($staff_res)): ?>
+                                                <option value="<?= $s['id'] ?>" <?= $filter_user == $s['id'] ? 'selected' : '' ?>>
+                                                    <?= htmlspecialchars($s['full_name'] ?? '') ?>
+                                                </option>
+                                            <?php endwhile; ?>
+                                        </select>
                                     </div>
-                                <?php endif; ?>
-                            </form>
+                                    <div class="col-md-4">
+                                        <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date ?? '') ?>" onchange="this.form.submit()">
+                                    </div>
+                                    <?php if ($filter_user || $filter_date): ?>
+                                        <div class="col-auto">
+                                            <a href="shift_log.php" class="btn btn-sm btn-light border"><i class="fas fa-undo"></i></a>
+                                        </div>
+                                    <?php endif; ?>
+                                </form>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -212,7 +220,7 @@ require_once "../includes/head.php";
                         <table class="table table-hover align-middle mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th>Staff Name</th>
+                                    <th>Staff Name & Role</th>
                                     <th>Branch</th>
                                     <th>Clock In Time</th>
                                     <th>Clock Out Time</th>
@@ -236,7 +244,7 @@ require_once "../includes/head.php";
                                         ?>
                                         <tr>
                                             <td>
-                                                <strong class="text-dark"><?= htmlspecialchars($row['full_name'] ?? '') ?></strong><br>
+                                                <strong class="text-dark d-block"><?= htmlspecialchars($row['full_name'] ?? 'Unknown User') ?></strong>
                                                 <small class="text-muted"><?= htmlspecialchars($row['role'] ?? 'Staff') ?></small>
                                             </td>
                                             <td><?= htmlspecialchars($row['branch_name'] ?? '') ?></td>
