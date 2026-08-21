@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if (!$active_shift) {
             $message = '<div class="alert alert-warning border-0 shadow-sm">No active shift found to clock out from.</div>';
         } else {
-            $shift_id = $active_shift['id'];
+            $shift_id = (int)$active_shift['id'];
             $stmt = $conn->prepare("UPDATE shift_logs SET clock_out = NOW(), status = 'completed' WHERE id = ? AND user_id = ?");
             $stmt->bind_param("ii", $shift_id, $user_id);
             
@@ -84,24 +84,30 @@ if (isset($_GET['msg'])) {
 // DATA FETCHING FOR REPORTING PANEL
 // -------------------------------------------------------------------------
 $filter_user = (int)($_GET['filter_user'] ?? 0);
-$filter_date = $_GET['filter_date'] ?? '';
+$filter_date = trim($_GET['filter_date'] ?? '');
 
-$where_conditions = ["sl.pharmacy_id = '$pharmacy_id'"];
+$where_clauses = ["sl.pharmacy_id = ?"];
+$param_types = "i";
+$param_values = [$pharmacy_id];
 
-// Regular staff members can only view their own shift logs
 if (!$is_supervisor) {
-    $where_conditions[] = "sl.user_id = '$user_id'";
+    $where_clauses[] = "sl.user_id = ?";
+    $param_types .= "i";
+    $param_values[] = $user_id;
 } elseif ($filter_user > 0) {
-    $where_conditions[] = "sl.user_id = '$filter_user'";
+    $where_clauses[] = "sl.user_id = ?";
+    $param_types .= "i";
+    $param_values[] = $filter_user;
 }
 
 if (!empty($filter_date)) {
-    $safe_date = mysqli_real_escape_string($conn, $filter_date);
-    $where_conditions[] = "DATE(sl.clock_in) = '$safe_date'";
+    $where_clauses[] = "DATE(sl.clock_in) = ?";
+    $param_types .= "s";
+    $param_values[] = $filter_date;
 }
-$where_sql = implode(' AND ', $where_conditions);
 
-// Query shift logs
+$where_sql = implode(' AND ', $where_clauses);
+
 $logs_query = "
     SELECT sl.*, u.full_name, u.role, b.branch_name 
     FROM shift_logs sl
@@ -110,10 +116,17 @@ $logs_query = "
     WHERE $where_sql
     ORDER BY sl.id DESC
 ";
-$logs_res = mysqli_query($conn, $logs_query);
+
+$logs_stmt = $conn->prepare($logs_query);
+$logs_stmt->bind_param($param_types, ...$param_values);
+$logs_stmt->execute();
+$logs_res = $logs_stmt->get_result();
 
 // Fetch staff list for supervisor filter dropdown
-$staff_res = mysqli_query($conn, "SELECT id, full_name FROM users WHERE pharmacy_id = '$pharmacy_id' ORDER BY full_name ASC");
+$staff_stmt = $conn->prepare("SELECT id, full_name FROM users WHERE pharmacy_id = ? ORDER BY full_name ASC");
+$staff_stmt->bind_param("i", $pharmacy_id);
+$staff_stmt->execute();
+$staff_res = $staff_stmt->get_result();
 
 require_once "../includes/head.php";
 ?>
@@ -149,8 +162,8 @@ require_once "../includes/head.php";
                     <div class="card clock-card shadow-sm p-3">
                         <div class="d-flex flex-wrap justify-content-between align-items-center">
                             <div>
-                                <h5 class="fw-bold mb-1"><i class="fas fa-id-badge text-primary me-2"></i><?= htmlspecialchars($user_name ?? '') ?></h5>
-                                <p class="text-muted small mb-0">Role: <strong><?= htmlspecialchars($user_role ?? '') ?></strong></p>
+                                <h5 class="fw-bold mb-1"><i class="fas fa-id-badge text-primary me-2"></i><?= htmlspecialchars($user_name) ?></h5>
+                                <p class="text-muted small mb-0">Role: <strong><?= htmlspecialchars($user_role) ?></strong></p>
                             </div>
 
                             <div class="text-center my-2 my-md-0">
@@ -189,12 +202,11 @@ require_once "../includes/head.php";
                         </div>
                         <div class="col-md-8">
                             <?php if ($is_supervisor): ?>
-                                <!-- Filter controls for Supervisors and Admin -->
                                 <form method="get" class="row g-2 justify-content-end">
                                     <div class="col-md-4">
                                         <select name="filter_user" class="form-select form-select-sm" onchange="this.form.submit()">
                                             <option value="0">All Staff Members</option>
-                                            <?php while ($s = mysqli_fetch_assoc($staff_res)): ?>
+                                            <?php while ($s = $staff_res->fetch_assoc()): ?>
                                                 <option value="<?= $s['id'] ?>" <?= $filter_user == $s['id'] ? 'selected' : '' ?>>
                                                     <?= htmlspecialchars($s['full_name'] ?? '') ?>
                                                 </option>
@@ -202,7 +214,7 @@ require_once "../includes/head.php";
                                         </select>
                                     </div>
                                     <div class="col-md-4">
-                                        <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date ?? '') ?>" onchange="this.form.submit()">
+                                        <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date) ?>" onchange="this.form.submit()">
                                     </div>
                                     <?php if ($filter_user || $filter_date): ?>
                                         <div class="col-auto">
@@ -230,11 +242,11 @@ require_once "../includes/head.php";
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if (mysqli_num_rows($logs_res) > 0): ?>
-                                    <?php while ($row = mysqli_fetch_assoc($logs_res)): ?>
+                                <?php if ($logs_res->num_rows > 0): ?>
+                                    <?php while ($row = $logs_res->fetch_assoc()): ?>
                                         <?php
                                             $cin = new DateTime($row['clock_in']);
-                                            $cout = $row['clock_out'] ? new DateTime($row['clock_out']) : null;
+                                            $cout = !empty($row['clock_out']) ? new DateTime($row['clock_out']) : null;
                                             $duration_str = '-';
 
                                             if ($cout) {
