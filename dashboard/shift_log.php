@@ -89,9 +89,9 @@ if ($active_stmt) {
 // FETCH SHIFT LOGS
 // -------------------------------------------------------------------------
 $filter_date = trim($_GET['filter_date'] ?? '');
-$where_clauses = ["sl.pharmacy_id = ?"];
-$param_types   = "i";
-$param_values  = [$pharmacy_id];
+$where_clauses = ["sl.pharmacy_id = ?", "sl.branch_id = ?"];
+$param_types   = "ii";
+$param_values  = [$pharmacy_id, $branch_id];
 
 if (!$is_supervisor) {
     $where_clauses[] = "sl.user_id = ?";
@@ -116,16 +116,13 @@ $logs_query = "
         sl.notes,
         COALESCE(NULLIF(u.full_name, ''), NULLIF(u.username, ''), 'Staff') AS staff_name, 
         COALESCE(NULLIF(u.role, ''), 'Pharmacist') AS role, 
-        COALESCE(NULLIF(b.branch_name, ''), ?) AS branch_name 
+        COALESCE(b.branch_name, 'Main Branch') AS branch_name 
     FROM shift_logs sl
     LEFT JOIN users u ON sl.user_id = u.id
     LEFT JOIN branches b ON sl.branch_id = b.id
     WHERE $where_sql
     ORDER BY sl.id DESC
 ";
-
-$param_types  .= "s";
-$param_values[] = $display_branch_name;
 
 $logs_stmt = $conn->prepare($logs_query);
 $logs_res = null;
@@ -161,9 +158,8 @@ body {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
-/* Fix margin and padding alignment with sidebar */
 .page-wrapper {
-    margin-left: 240px; /* Offset for dashboard sidebar */
+    margin-left: 240px;
     padding: 2rem 1.5rem;
     min-height: 100vh;
     box-sizing: border-box;
@@ -206,7 +202,6 @@ body {
 .badge-status.active { background-color: #d1fae5; color: #065f46; }
 .badge-status.completed { background-color: #e2e8f0; color: #475569; }
 
-/* Modal Overlay */
 .modal-overlay {
     display: none;
     position: fixed;
