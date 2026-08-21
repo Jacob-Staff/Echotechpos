@@ -4,7 +4,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// Point to include/db_connect.php in the parent directory
+// Point to includes/db_connect.php in the parent directory
 require_once __DIR__ . '/../includes/db_connect.php';
 
 // Ensure mandatory session variables are set
@@ -98,9 +98,9 @@ if ($logs_stmt) {
 
     <form method="GET" class="filter-form">
         <?php if ($is_supervisor): ?>
-            <input type="number" name="filter_user" placeholder="User ID" value="<?= htmlspecialchars($filter_user ?: '') ?>">
+            <input type="number" name="filter_user" placeholder="User ID" value="<?= htmlspecialchars((string)($filter_user ?: '')) ?>">
         <?php endif; ?>
-        <input type="date" name="filter_date" value="<?= htmlspecialchars($filter_date) ?>">
+        <input type="date" name="filter_date" value="<?= htmlspecialchars($filter_date ?? '') ?>">
         <button type="submit">Filter</button>
         <a href="?">Reset</a>
     </form>
@@ -122,15 +122,15 @@ if ($logs_stmt) {
             <?php if ($logs_res && $logs_res->num_rows > 0): ?>
                 <?php while ($row = $logs_res->fetch_assoc()): ?>
                     <tr>
-                        <td><?= htmlspecialchars($row['id']) ?></td>
-                        <td><?= htmlspecialchars($row['full_name']) ?></td>
-                        <td><?= htmlspecialchars(ucfirst($row['role'])) ?></td>
-                        <td><?= htmlspecialchars($row['branch_name']) ?></td>
-                        <td><?= htmlspecialchars($row['clock_in']) ?></td>
+                        <td><?= htmlspecialchars((string)($row['id'] ?? '')) ?></td>
+                        <td><?= htmlspecialchars($row['full_name'] ?? 'N/A') ?></td>
+                        <td><?= htmlspecialchars(ucfirst($row['role'] ?? '')) ?></td>
+                        <td><?= htmlspecialchars($row['branch_name'] ?? 'N/A') ?></td>
+                        <td><?= htmlspecialchars($row['clock_in'] ?? '') ?></td>
                         <td><?= htmlspecialchars($row['clock_out'] ?? 'N/A') ?></td>
                         <td>
-                            <span class="badge badge-<?= htmlspecialchars($row['status']) ?>">
-                                <?= htmlspecialchars(ucfirst($row['status'])) ?>
+                            <span class="badge badge-<?= htmlspecialchars($row['status'] ?? 'completed') ?>">
+                                <?= htmlspecialchars(ucfirst($row['status'] ?? '')) ?>
                             </span>
                         </td>
                         <td><?= htmlspecialchars($row['notes'] ?? '-') ?></td>
