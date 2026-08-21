@@ -46,8 +46,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->bind_param("iiis", $pharmacy_id, $branch_id, $user_id, $notes);
             
             if ($stmt->execute()) {
-                $message = '<div class="alert alert-success border-0 shadow-sm"><strong>Shift Started!</strong> Clock-in timestamp successfully logged.</div>';
-                // Refresh active shift status
                 header("Location: shift_log.php?msg=clocked_in");
                 exit();
             } else {
@@ -109,8 +107,8 @@ $logs_query = "
 ";
 $logs_res = mysqli_query($conn, $logs_query);
 
-// Fetch staff list for supervisor filter
-$staff_res = mysqli_query($conn, "SELECT id, full_name FROM users WHERE pharmacy_id = '$pharmacy_id' AND is_active = 1 ORDER BY full_name ASC");
+// Fetch staff list for supervisor filter (Fixed SQL query without is_active)
+$staff_res = mysqli_query($conn, "SELECT id, full_name FROM users WHERE pharmacy_id = '$pharmacy_id' ORDER BY full_name ASC");
 
 require_once "../includes/head.php";
 ?>
