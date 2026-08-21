@@ -4,12 +4,13 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-require_once 'db_connection.php'; // Update this path if your DB config file has a different name
+// Point to db_connection.php in the root directory
+require_once __DIR__ . '/../db_connection.php';
 
 // Ensure mandatory session variables are set
-$pharmacy_id  = (int)($_SESSION['pharmacy_id'] ?? 0);
-$user_id      = (int)($_SESSION['user_id'] ?? 0);
-$user_role    = strtolower($_SESSION['role'] ?? '');
+$pharmacy_id   = (int)($_SESSION['pharmacy_id'] ?? 0);
+$user_id       = (int)($_SESSION['user_id'] ?? 0);
+$user_role     = strtolower($_SESSION['role'] ?? '');
 $is_supervisor = in_array($user_role, ['admin', 'supervisor', 'manager'], true);
 
 // -------------------------------------------------------------------------
