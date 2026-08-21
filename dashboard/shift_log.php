@@ -1,334 +1,192 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+// /var/www/html/dashboard/shift_log.php
+session_start();
+require_once '../config/db.php'; // Adjust path if necessary
+
+// Authentication check
+if (!isset($_SESSION['user_id'])) {
+    header("Location: ../login.php");
+    exit();
 }
 
-require_once __DIR__ . '/../includes/db_connect.php';
+$user_id = $_SESSION['user_id'];
+$branch_id = $_SESSION['branch_id'] ?? null;
+$message = '';
+$error = '';
 
-$pharmacy_id   = (int)($_SESSION['pharmacy_id'] ?? 1);
-$user_id       = (int)($_SESSION['user_id'] ?? 0);
-$user_name     = $_SESSION['full_name'] ?? $_SESSION['username'] ?? 'Jac';
-$user_role     = $_SESSION['role'] ?? 'Pharmacist';
-$branch_name   = $_SESSION['branch_name'] ?? 'Nova Lsk';
+// Handle Shift Start / End actions
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['action'])) {
+        $action = $_POST['action'];
 
-$is_supervisor = in_array(strtolower($user_role), ['admin', 'supervisor', 'manager'], true);
-
-// -------------------------------------------------------------------------
-// POST ACTIONS: CLOCK IN / CLOCK OUT
-// -------------------------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    if ($_POST['action'] === 'clock_in') {
-        $shift_type = trim($_POST['shift_type'] ?? 'Morning Shift');
-        
-        $stmt = $conn->prepare("INSERT INTO shift_logs (pharmacy_id, user_id, branch_id, clock_in, status, notes) VALUES (?, ?, (SELECT id FROM branches WHERE branch_name = ? LIMIT 1), NOW(), 'active', ?)");
-        if ($stmt) {
-            $stmt->bind_param("iiss", $pharmacy_id, $user_id, $branch_name, $shift_type);
-            $stmt->execute();
-        }
-    } elseif ($_POST['action'] === 'clock_out') {
-        $stmt = $conn->prepare("UPDATE shift_logs SET clock_out = NOW(), status = 'completed' WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
-        if ($stmt) {
-            $stmt->bind_param("i", $user_id);
-            $stmt->execute();
-        }
-    }
-    header("Location: " . $_SERVER['PHP_SELF']);
-    exit;
-}
-
-// -------------------------------------------------------------------------
-// FETCH CURRENT ACTIVE SHIFT
-// -------------------------------------------------------------------------
-$active_shift = null;
-$active_stmt = $conn->prepare("SELECT * FROM shift_logs WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
-if ($active_stmt) {
-    $active_stmt->bind_param("i", $user_id);
-    $active_stmt->execute();
-    $active_shift = $active_stmt->get_result()->fetch_assoc();
-}
-
-// -------------------------------------------------------------------------
-// FETCH SHIFT LOGS
-// -------------------------------------------------------------------------
-$filter_date = trim($_GET['filter_date'] ?? '');
-$where_clauses = ["sl.pharmacy_id = ?"];
-$param_types   = "i";
-$param_values  = [$pharmacy_id];
-
-if (!$is_supervisor) {
-    $where_clauses[] = "sl.user_id = ?";
-    $param_types   .= "i";
-    $param_values[]  = $user_id;
-}
-
-if (!empty($filter_date)) {
-    $where_clauses[] = "DATE(sl.clock_in) = ?";
-    $param_types   .= "s";
-    $param_values[]  = $filter_date;
-}
-
-$where_sql = implode(' AND ', $where_clauses);
-
-$logs_query = "
-    SELECT 
-        sl.id, 
-        sl.clock_in, 
-        sl.clock_out, 
-        sl.status, 
-        sl.notes,
-        COALESCE(NULLIF(u.full_name, ''), NULLIF(u.username, ''), '$user_name') AS staff_name, 
-        COALESCE(u.role, '$user_role') AS role, 
-        COALESCE(b.branch_name, '$branch_name') AS branch_name 
-    FROM shift_logs sl
-    LEFT JOIN users u ON sl.user_id = u.id
-    LEFT JOIN branches b ON sl.branch_id = b.id
-    WHERE $where_sql
-    ORDER BY sl.id DESC
-";
-
-$logs_stmt = $conn->prepare($logs_query);
-$logs_res = null;
-if ($logs_stmt) {
-    $logs_stmt->bind_param($param_types, ...$param_values);
-    $logs_stmt->execute();
-    $logs_res = $logs_stmt->get_result();
-}
-
-function get_shift_duration($start, $end) {
-    if (!$end) return '-';
-    $d1 = new DateTime($start);
-    $d2 = new DateTime($end);
-    $diff = $d1->diff($d2);
-    $hours = $diff->h + ($diff->days * 24);
-    return "{$hours} hrs {$diff->i} mins";
-}
-
-// Include shared head
-include_once __DIR__ . '/../includes/head.php';
-?>
-
-<style>
-    /* Page specific overrides */
-    .clock-card {
-        background: #ffffff;
-        border-radius: 10px;
-        padding: 20px 25px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 25px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
-    .live-clock-display { text-align: center; }
-    .live-clock-display .label { font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 1px; }
-    .live-clock-display .time { font-size: 28px; font-weight: 700; color: #0f172a; }
-    
-    .shift-btn {
-        padding: 10px 20px;
-        border: none;
-        border-radius: 6px;
-        font-size: 14px;
-        font-weight: 600;
-        color: #fff;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-    }
-    .btn-clock-in { background-color: #10b981; }
-    .btn-clock-out { background-color: #ef4444; }
-    
-    .table-card {
-        background: #ffffff;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
-    .staff-cell .name { font-weight: 600; color: #0f172a; }
-    .staff-cell .role { font-size: 12px; color: #64748b; }
-    .time-blue { color: #0284c7; font-weight: 600; }
-
-    /* Modal Styles */
-    .modal-overlay {
-        display: none;
-        position: fixed;
-        top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(15, 23, 42, 0.6);
-        z-index: 9999;
-        align-items: center;
-        justify-content: center;
-    }
-    .modal-card {
-        background: #fff;
-        width: 100%;
-        max-width: 420px;
-        border-radius: 12px;
-        padding: 24px;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-    }
-    .modal-header { font-size: 18px; font-weight: 700; margin-bottom: 15px; color: #0f172a; }
-    .modal-body { margin-bottom: 20px; }
-    .modal-body label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #334155; }
-    .modal-body select {
-        width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; outline: none; font-size: 14px;
-    }
-    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
-    .btn-cancel { background: #94a3b8; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
-    
-    @media (max-width: 768px) {
-        .clock-card { flex-direction: column; gap: 15px; text-align: center; }
-    }
-</style>
-
-<body>
-    <?php include_once __DIR__ . '/../includes/aside.php'; ?>
-    
-    <div class="main-wrapper">
-        <?php include_once __DIR__ . '/../includes/header.php'; ?>
-
-        <div class="content-container p-4">
+        if ($action === 'start_shift') {
+            $opening_balance = floatval($_POST['opening_balance'] ?? 0);
             
-            <div class="page-title mb-4">
-                <h1 class="h4 font-weight-bold"><i class="fa-solid fa-user-clock text-primary"></i> Shift Reporting & Clock-In</h1>
-                <p class="text-muted small">Record duty start times and monitor team reporting activity.</p>
-            </div>
+            // Check if user already has an active shift
+            $stmt = $pdo->prepare("SELECT shift_id FROM shift_logs WHERE user_id = ? AND status = 'active' LIMIT 1");
+            $stmt->execute([$user_id]);
+            if ($stmt->fetch()) {
+                $error = "You already have an active shift in progress.";
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO shift_logs (user_id, branch_id, start_time, opening_balance, status) VALUES (?, ?, NOW(), ?, 'active')");
+                if ($stmt->execute([$user_id, $branch_id, $opening_balance])) {
+                    $message = "Shift started successfully.";
+                } else {
+                    $error = "Failed to start shift. Please try again.";
+                }
+            }
+        } elseif ($action === 'end_shift') {
+            $closing_balance = floatval($_POST['closing_balance'] ?? 0);
+            $notes = trim($_POST['notes'] ?? '');
 
-            <!-- LIVE CLOCK & ACTION CARD -->
-            <div class="clock-card">
-                <div>
-                    <h3 class="h6 font-weight-bold mb-1"><i class="fa-solid fa-user text-primary"></i> User</h3>
-                    <p class="text-muted small mb-0">Role: <strong><?= htmlspecialchars($user_role) ?></strong></p>
+            // Get current active shift
+            $stmt = $pdo->prepare("SELECT shift_id FROM shift_logs WHERE user_id = ? AND status = 'active' LIMIT 1");
+            $stmt->execute([$user_id]);
+            $active_shift = $stmt->fetch();
+
+            if ($active_shift) {
+                $shift_id = $active_shift['shift_id'];
+                $stmt = $pdo->prepare("UPDATE shift_logs SET end_time = NOW(), closing_balance = ?, notes = ?, status = 'closed' WHERE shift_id = ?");
+                if ($stmt->execute([$closing_balance, $notes, $shift_id])) {
+                    $message = "Shift ended and logged successfully.";
+                } else {
+                    $error = "Failed to close shift.";
+                }
+            } else {
+                $error = "No active shift found to close.";
+            }
+        }
+    }
+}
+
+// Fetch current active shift
+$stmt = $pdo->prepare("SELECT * FROM shift_logs WHERE user_id = ? AND status = 'active' ORDER BY start_time DESC LIMIT 1");
+$stmt->execute([$user_id]);
+$current_shift = $stmt->fetch(PDO::FETCH_ASSOC);
+
+// Fetch historical shift logs
+$stmt = $pdo->prepare("SELECT sl.*, u.username FROM shift_logs sl LEFT JOIN users u ON sl.user_id = u.user_id WHERE sl.branch_id = ? ORDER BY sl.start_time DESC LIMIT 50");
+$stmt->execute([$branch_id]);
+$shift_history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shift Management - POS Dashboard</title>
+    <link rel="stylesheet" href="../assets/css/style.css">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f6f9; }
+        .container { max-width: 1000px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-danger { background: #f8d7da; color: #721c24; }
+        .card { border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input, .form-group textarea { width: 100%; padding: 8px; box-sizing: border-box; }
+        .btn { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; color: #fff; }
+        .btn-success { background-color: #28a745; }
+        .btn-danger { background-color: #dc3545; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f8f9fa; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; color: #fff; }
+        .badge-active { background-color: #28a745; }
+        .badge-closed { background-color: #6c757d; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>Shift Operations Log</h2>
+
+    <?php if ($message): ?>
+        <div class="alert alert-success"><?= htmlspecialchars($message) ?></div>
+    <?php endif; ?>
+    
+    <?php if ($error): ?>
+        <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
+    <?php endif; ?>
+
+    <!-- Current Shift Controls -->
+    <div class="card">
+        <h3>Current Status</h3>
+        <?php if ($current_shift): ?>
+            <p><strong>Status:</strong> <span class="badge badge-active">ACTIVE</span></p>
+            <p><strong>Started At:</strong> <?= htmlspecialchars($current_shift['start_time']) ?></p>
+            <p><strong>Opening Balance:</strong> $<?= number_format($current_shift['opening_balance'], 2) ?></p>
+
+            <form method="POST" action="shift_log.php">
+                <input type="hidden" name="action" value="end_shift">
+                <div class="form-group">
+                    <label for="closing_balance">Closing Drawer Balance ($)</label>
+                    <input type="number" step="0.01" id="closing_balance" name="closing_balance" required>
                 </div>
-
-                <div class="live-clock-display">
-                    <div class="label">LIVE TIME</div>
-                    <div class="time" id="liveClock">--:--:-- --</div>
+                <div class="form-group">
+                    <label for="notes">Shift Notes / Discrepancies</label>
+                    <textarea id="notes" name="notes" rows="3"></textarea>
                 </div>
-
-                <div>
-                    <?php if ($active_shift): ?>
-                        <form method="POST">
-                            <input type="hidden" name="action" value="clock_out">
-                            <button type="submit" class="shift-btn btn-clock-out">
-                                <i class="fa-solid fa-right-from-bracket"></i> Clock Out Shift
-                            </button>
-                        </form>
-                        <div class="text-success small mt-1 text-right font-weight-bold">
-                            <i class="fa-solid fa-circle" style="font-size:8px;"></i> Clocked in at <?= date('H:i', strtotime($active_shift['clock_in'])) ?>
-                        </div>
-                    <?php else: ?>
-                        <button type="button" class="shift-btn btn-clock-in" onclick="openShiftModal()">
-                            <i class="fa-solid fa-right-to-bracket"></i> Clock In Shift
-                        </button>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            <!-- DUTY REPORTING LOGS TABLE -->
-            <div class="table-card">
-                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-                    <div class="h6 font-weight-bold mb-0">
-                        <i class="fa-solid fa-clipboard-list"></i> Duty Reporting Logs
-                    </div>
-
-                    <form method="GET" class="d-flex gap-2 align-items-center">
-                        <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date) ?>">
-                        <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-filter"></i> Filter</button>
-                        <a href="?" class="btn btn-secondary btn-sm">Reset</a>
-                    </form>
-                </div>
-
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>Staff Name & Role</th>
-                                <th>Branch</th>
-                                <th>Clock In Time</th>
-                                <th>Clock Out Time</th>
-                                <th>Duration</th>
-                                <th>Status</th>
-                                <th>Notes</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if ($logs_res && $logs_res->num_rows > 0): ?>
-                                <?php while ($row = $logs_res->fetch_assoc()): ?>
-                                    <tr>
-                                        <td class="staff-cell">
-                                            <div class="name"><?= htmlspecialchars($row['staff_name']) ?></div>
-                                            <div class="role"><?= htmlspecialchars($row['role']) ?></div>
-                                        </td>
-                                        <td><?= htmlspecialchars($row['branch_name']) ?></td>
-                                        <td class="time-blue"><?= date('d M Y, H:i:s', strtotime($row['clock_in'])) ?></td>
-                                        <td>
-                                            <?= $row['clock_out'] ? date('d M Y, H:i:s', strtotime($row['clock_out'])) : '<span class="text-muted">In Progress</span>' ?>
-                                        </td>
-                                        <td><?= get_shift_duration($row['clock_in'], $row['clock_out']) ?></td>
-                                        <td>
-                                            <span class="badge badge-<?= strtolower($row['status']) === 'active' ? 'success' : 'secondary' ?>">
-                                                <?= ucfirst(htmlspecialchars($row['status'])) ?>
-                                            </span>
-                                        </td>
-                                        <td><?= htmlspecialchars(!empty($row['notes']) ? $row['notes'] : '-') ?></td>
-                                    </tr>
-                                <?php me: ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="7" class="text-center py-4 text-muted">No shift logs found.</td>
-                                </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-        </div>
-
-        <?php include_once __DIR__ . '/../includes/footer.php'; ?>
-    </div>
-
-    <!-- CLOCK IN SHIFT SELECTION MODAL -->
-    <div class="modal-overlay" id="shiftModal">
-        <div class="modal-card">
-            <div class="modal-header">Select Shift Type</div>
-            <form method="POST">
-                <input type="hidden" name="action" value="clock_in">
-                <div class="modal-body">
-                    <label for="shift_type">Choose Duty Shift</label>
-                    <select name="shift_type" id="shift_type" required>
-                        <option value="Morning Shift">Morning Shift</option>
-                        <option value="Afternoon Shift">Afternoon Shift</option>
-                        <option value="Full Day">Full Day</option>
-                    </select>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn-cancel" onclick="closeShiftModal()">Cancel</button>
-                    <button type="submit" class="shift-btn btn-clock-in">Confirm Clock In</button>
-                </div>
+                <button type="submit" class="btn btn-danger">End & Close Shift</button>
             </form>
-        </div>
+        <?php else: ?>
+            <p><strong>Status:</strong> <span class="badge badge-closed">NO ACTIVE SHIFT</span></p>
+            
+            <form method="POST" action="shift_log.php">
+                <input type="hidden" name="action" value="start_shift">
+                <div class="form-group">
+                    <label for="opening_balance">Opening Drawer Balance ($)</label>
+                    <input type="number" step="0.01" id="opening_balance" name="opening_balance" required>
+                </div>
+                <button type="submit" class="btn btn-success">Start New Shift</button>
+            </form>
+        <?php endif; ?>
     </div>
 
-    <script>
-        function updateClock() {
-            const now = new Date();
-            let hours = now.getHours();
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const seconds = String(now.getSeconds()).padStart(2, '0');
-            const ampm = hours >= 12 ? 'PM' : 'AM';
-            hours = hours % 12 || 12;
-            document.getElementById('liveClock').textContent = `${hours}:${minutes}:${seconds} ${ampm}`;
-        }
-        setInterval(updateClock, 1000);
-        updateClock();
-
-        function openShiftModal() {
-            document.getElementById('shiftModal').style.display = 'flex';
-        }
-        function closeShiftModal() {
-            document.getElementById('shiftModal').style.display = 'none';
-        }
-    </script>
+    <!-- Historical Shift Table -->
+    <div class="card">
+        <h3>Recent Branch Shifts</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Shift ID</th>
+                    <th>User</th>
+                    <th>Start Time</th>
+                    <th>End Time</th>
+                    <th>Opening ($)</th>
+                    <th>Closing ($)</th>
+                    <th>Status</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if (empty($shift_history)): ?>
+                    <tr>
+                        <td colspan="8" style="text-align: center;">No shift records found.</td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($shift_history as $log): ?>
+                        <tr>
+                            <td><?= htmlspecialchars($log['shift_id']) ?></td>
+                            <td><?= htmlspecialchars($log['username'] ?? 'User #' . $log['user_id']) ?></td>
+                            <td><?= htmlspecialchars($log['start_time']) ?></td>
+                            <td><?= htmlspecialchars($log['end_time'] ?? 'N/A') ?></td>
+                            <td><?= number_format($log['opening_balance'], 2) ?></td>
+                            <td><?= $log['closing_balance'] !== null ? number_format($log['closing_balance'], 2) : '-' ?></td>
+                            <td>
+                                <?php if ($log['status'] === 'active'): ?>
+                                    <span class="badge badge-active">Active</span>
+                                <?php else: ?>
+                                    <span class="badge badge-closed">Closed</span>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= htmlspecialchars($log['notes'] ?? '') ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
 </body>
 </html>
