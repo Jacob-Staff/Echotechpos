@@ -153,13 +153,14 @@ require_once "../includes/head.php";
     --border-color: #e2e8f0;
 }
 
-body {
-    background-color: var(--bg-page) !important;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+html, body {
+    max-width: 100vw;
+    overflow-x: hidden; /* Prevents unwanted horizontal scrollbars */
 }
 
 .page-wrapper {
     margin-left: 240px;
+    width: calc(100% - 240px); /* Adjusts width to account for sidebar offset */
     padding: 2rem 1.5rem;
     min-height: 100vh;
     box-sizing: border-box;
@@ -168,6 +169,7 @@ body {
 @media (max-width: 768px) {
     .page-wrapper {
         margin-left: 0 !important;
+        width: 100% !important;
         padding: 1rem;
     }
 }
