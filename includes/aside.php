@@ -6,21 +6,23 @@ if (session_status() === PHP_SESSION_NONE) {
 $user_id = (int)($_SESSION['user_id'] ?? 19);
 
 // Fetch User Profile Details Safely
-$display_name =$_SESSION['username'] ?? 'Jac';
-$display_role =$_SESSION['role'] ?? 'Pharmacist';
+$display_name = $_SESSION['username'] ?? 'Jac';
+$display_role = $_SESSION['role'] ?? 'Pharmacist';
 
-if (isset($conn) &&$conn) {
-    $user_stmt =$conn->prepare("SELECT full_name, username, role FROM users WHERE id = ? LIMIT 1");
-    if ($user_stmt) {$user_stmt->bind_param("i", $user_id);$user_stmt->execute();
-        $user_res =$user_stmt->get_result();
-        if ($user_data =$user_res->fetch_assoc()) {
+if (isset($conn) && $conn) {
+    $user_stmt = $conn->prepare("SELECT full_name, username, role FROM users WHERE id = ? LIMIT 1");
+    if ($user_stmt) {
+        $user_stmt->bind_param("i", $user_id);
+        $user_stmt->execute();
+        $user_res = $user_stmt->get_result();
+        if ($user_data = $user_res->fetch_assoc()) {
             if (!empty($user_data['full_name'])) {
-                $display_name =$user_data['full_name'];
+                $display_name = $user_data['full_name'];
             } elseif (!empty($user_data['username'])) {
-                $display_name =$user_data['username'];
+                $display_name = $user_data['username'];
             }
             if (!empty($user_data['role'])) {
-                $display_role =$user_data['role'];
+                $display_role = $user_data['role'];
             }
         }
         $user_stmt->close();
@@ -29,8 +31,8 @@ if (isset($conn) &&$conn) {
 
 // Active link helper function
 $current_page = basename($_SERVER['PHP_SELF']);
-function is_active_menu($page_name,$current_page) {
-    return ($current_page ===$page_name) ? 'active' : '';
+function is_active_menu($page_name, $current_page) {
+    return ($current_page === $page_name) ? 'active' : '';
 }
 ?>
 
@@ -94,7 +96,7 @@ function is_active_menu($page_name,$current_page) {
         </nav>
     </div>
 
-    <!-- Fixed Bright Red Logout Button -->
+    <!-- Original Fixed Bright Red Logout Button -->
     <div class="logout-btn-container">
         <a href="../logout.php" class="btn logout-btn w-100 text-center text-decoration-none">Logout</a>
     </div>
@@ -113,14 +115,22 @@ function is_active_menu($page_name,$current_page) {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    box-sizing: border-box;
-    overflow: hidden;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
 }
 
 .sidebar-inner {
     flex: 1;
     overflow-y: auto;
-    padding: 1rem 0.75rem;
+    padding: 1rem 0.75rem 0.5rem 0.75rem;
+    box-sizing: border-box;
+}
+
+/* Hide scrollbar visually while retaining smooth scrolling */
+.sidebar-inner::-webkit-scrollbar {
+    width: 0px;
+    background: transparent;
 }
 
 .user-profile-box {
@@ -162,19 +172,23 @@ function is_active_menu($page_name,$current_page) {
     background-color: #334155;
 }
 
+/* Restored Original Logout Button Styling */
 .logout-btn-container {
-    padding: 1rem 0.75rem;
-    border-top: 1px solid #334155;
+    padding: 0.75rem;
     background-color: #1e293b;
+    box-sizing: border-box;
 }
 
 .logout-btn {
     background-color: #ff3b5c;
     color: #ffffff !important;
     font-weight: 700;
-    border-radius: 8px;
-    padding: 0.6rem 1rem;
+    font-size: 1.05rem;
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
     border: none;
+    display: block;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .logout-btn:hover {
