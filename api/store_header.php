@@ -3,18 +3,18 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// 1. Database Connection
+require_once __DIR__ . "/../includes/conn.php";
+
+// 2. Resolve Branch ID
 if (isset($_GET['bid'])) {
     $new_branch = intval($_GET['bid']);
     $_SESSION['current_branch_id'] = $new_branch;
 }
 
-// 1. Establish connection
-require_once(__DIR__ . "/../includes/conn.php");
-
-// 2. Get Branch ID from URL, default to 10
 $branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : (isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 10); 
 
-// 3. Multi-Tenant Query
+// 3. Multi-Tenant Branch & Pharmacy Context
 $sql = "SELECT 
             p.id as pharmacy_id,
             p.name as tenant_name, 
@@ -25,6 +25,7 @@ $sql = "SELECT
         FROM branches b
         INNER JOIN pharmacies p ON b.pharmacy_id = p.id
         WHERE b.id = ? AND b.is_active = 1";
+
 $stmt = $conn->prepare($sql);
 if ($stmt) {
     $stmt->bind_param("i", $branch_id);
@@ -42,22 +43,26 @@ if (!$tenant_context) {
     $branch_name = "Main Branch";
     $phone = "260974140989";
     $parent_pharmacy_id = 0;
-    $tenant_context = ['tenant_logo' => 'default_logo.png']; 
+    $db_logo = 'default_logo.png';
 } else {
     $pharmacy_name = $tenant_context['tenant_name'] ?? 'Echo Prime';
     $branch_name = $tenant_context['branch_name'] ?? 'Main Branch';
     $phone = $tenant_context['branch_phone'] ?? '260974140989';
     $parent_pharmacy_id = intval($tenant_context['pharmacy_id']);
+    $db_logo = $tenant_context['tenant_logo'] ?? 'default_logo.png';
 }
 
 // Fetch categories safely
 $cat_query = $conn->query("SELECT * FROM categories WHERE status = 1 LIMIT 8");
-$project_root = "/pharmacy_v1-master"; 
-$db_logo = $tenant_context['tenant_logo'] ?? ''; 
-$logo_filename = (!empty($db_logo)) ? $db_logo : 'default_logo.png';
-$logo_web_path = $project_root . "/uploads/logos/" . $logo_filename;
 
-// Check unread client support responses
+// Image path resolution
+$logo_filename = (!empty($db_logo)) ? $db_logo : 'default_logo.png';
+$logo_local_path = __DIR__ . "/../uploads/logos/" . $logo_filename;
+$logo_web_path = file_exists($logo_local_path) 
+    ? "uploads/logos/" . $logo_filename 
+    : "assets/img/default_logo.png";
+
+// Unread client notifications count
 $response_count = 0;
 if (isset($_SESSION['client_id'])) {
     $c_id = intval($_SESSION['client_id']);
@@ -81,7 +86,6 @@ if (isset($_SESSION['client_id'])) {
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -169,8 +173,6 @@ if (isset($_SESSION['client_id'])) {
                 <ul class="dropdown-menu shadow border-0">
                     <li class="dropdown-header small text-uppercase fw-bold text-muted">Switch Branch</li>
 <?php 
-$base_store_url = (defined('BASE_URL') ? BASE_URL : '') . 'online_store.php';
-
 $stmt_br = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1");
 if ($stmt_br) {
     $stmt_br->bind_param("i", $parent_pharmacy_id);
@@ -178,10 +180,10 @@ if ($stmt_br) {
     $br_list = $stmt_br->get_result();
 
     while ($bl = $br_list->fetch_assoc()): 
-        $switch_url = htmlspecialchars($base_store_url . '?bid=' . $bl['id']);
+        $switch_url = 'online_store.php?bid=' . $bl['id'];
     ?>
         <li>
-            <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo $switch_url; ?>">
+            <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo htmlspecialchars($switch_url); ?>">
                 <?php echo htmlspecialchars($bl['branch_name']); ?>
             </a>
         </li>
@@ -215,14 +217,14 @@ if ($stmt_br) {
                        <?php echo $is_subscribed ? '✓ Subscribed' : 'Subscribe'; ?>
                     </a>
                 <?php else: ?>
-                    <a href="login_client.php" class="apollo-nav-pill">Login</a>
+                    <a href="api/login_client.php" class="apollo-nav-pill">Login</a>
                 <?php endif; ?>
                 <a href="api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Pharmacists</a>
                 <a href="api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Prescriptions</a>
             </nav>
 
             <div class="d-flex align-items-center gap-2">
-                <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>api/view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
+                <a href="api/view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
                     <i class="mdi mdi-cart-outline fs-4"></i>
                     <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge" style="font-size: 9px;">
                         <?php 
@@ -269,12 +271,12 @@ if ($stmt_br) {
                             <h6><?php echo htmlspecialchars($user_data['full_name'] ?? ''); ?></h6>
                             <p>User ID: #<?php echo str_pad($user_data['id'] ?? 0, 5, '0', STR_PAD_LEFT); ?></p>
                             <hr class="my-1">
-                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
-                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
+                            <a href="profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
+                            <a href="client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
                         <?php else: ?>
                             <h6>Guest Menu</h6>
                             <hr class="my-1">
-                            <a href="login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
+                            <a href="api/login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
                         <?php endif; ?>
 
                         <div class="d-lg-none">
@@ -303,7 +305,7 @@ if ($stmt_br) {
 
                         <?php if(isset($_SESSION['client_id'])): ?>
                             <hr class="my-1">
-                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
+                            <a href="api/logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -363,7 +365,7 @@ if ($stmt_br) {
 
             <div class="col-12 col-md-4 col-lg-4 mt-2 mt-md-0">
                 <div class="nav-icon-grid">
-                    <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-home"></i>Home
                     </a>
                     <a href="#" class="hng-nav-icon"><i class="mdi mdi-view-grid"></i>Category</a>
