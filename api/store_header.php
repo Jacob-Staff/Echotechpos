@@ -167,30 +167,30 @@ if (isset($_SESSION['client_id'])) {
                 </div>
                 <ul class="dropdown-menu shadow border-0">
                     <li class="dropdown-header small text-uppercase fw-bold text-muted">Switch Branch</li>
-                    <?php 
-                    $current_page = $_SERVER['PHP_SELF'];
-                    $existing_params = $_GET;
+<?php 
+// Always route branch switching to online_store.php
+$base_store_url = (defined('BASE_URL') ? BASE_URL : '') . 'online_store.php';
 
-                    $stmt_br = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1");
-                    if ($stmt_br) {
-                        $stmt_br->bind_param("i", $parent_pharmacy_id);
-                        $stmt_br->execute();
-                        $br_list = $stmt_br->get_result();
+$stmt_br = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1");
+if ($stmt_br) {
+    $stmt_br->bind_param("i", $parent_pharmacy_id);
+    $stmt_br->execute();
+    $br_list = $stmt_br->get_result();
 
-                        while ($bl = $br_list->fetch_assoc()): 
-                            $existing_params['bid'] = $bl['id'];
-                            $switch_url = htmlspecialchars($current_page . '?' . http_build_query($existing_params));
-                        ?>
-                            <li>
-                                <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo $switch_url; ?>">
-                                    <?php echo htmlspecialchars($bl['branch_name']); ?>
-                                </a>
-                            </li>
-                        <?php 
-                        endwhile;
-                        $stmt_br->close();
-                    } 
-                    ?>
+    while ($bl = $br_list->fetch_assoc()): 
+        // Force redirect to online_store.php?bid=X
+        $switch_url = htmlspecialchars($base_store_url . '?bid=' . $bl['id']);
+    ?>
+        <li>
+            <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo $switch_url; ?>">
+                <?php echo htmlspecialchars($bl['branch_name']); ?>
+            </a>
+        </li>
+    <?php 
+    endwhile;
+    $stmt_br->close();
+} 
+?>
                 </ul>
             </div>
         </div>
