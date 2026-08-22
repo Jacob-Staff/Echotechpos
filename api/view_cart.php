@@ -1,28 +1,23 @@
 <?php
-header('Content-Type: application/json');
 session_start();
 
-// Include database configuration located in the same directory (api/config.php)
+// Enable clean JSON output header
+header('Content-Type: application/json');
+
+// Include database configuration
 require_once __DIR__ . '/config.php';
 
-// 1. Check if session cart exists
+// 1. Resolve active branch ID (from Session, GET parameter, or default fallback for testing)
+$branch_id = $_SESSION['branch_id'] ?? $_GET['branch_id'] ?? 13; // Set '13' or your active default branch ID
+
+// 2. Check if session cart exists
 if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])) {
     echo json_encode([
         "status" => "success",
+        "branch_id" => (int)$branch_id,
         "cart" => [],
         "total_amount" => 0,
         "message" => "Cart is empty."
-    ]);
-    exit;
-}
-
-// 2. Get active branch ID from session or query string
-$branch_id = $_SESSION['branch_id'] ?? $_GET['branch_id'] ?? null;
-
-if (!$branch_id) {
-    echo json_encode([
-        "status" => "error",
-        "message" => "Active branch session not found."
     ]);
     exit;
 }
@@ -31,7 +26,6 @@ $cart_items = [];
 $grand_total = 0;
 
 try {
-    // 3. Prepare statement to query store items
     $stmt = $pdo->prepare("
         SELECT id, item_name, price, quantity AS stock_qty 
         FROM store_items 
@@ -50,7 +44,7 @@ try {
         $product = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($product) {
-            $subtotal = $product['price'] * $qty;
+            $subtotal = (float)$product['price'] * (int)$qty;
             $grand_total += $subtotal;
 
             $cart_items[] = [
@@ -59,14 +53,14 @@ try {
                 'price' => (float)$product['price'],
                 'quantity' => (int)$qty,
                 'stock_qty' => (int)$product['stock_qty'],
-                'subtotal' => (float)$subtotal
+                'subtotal' => $subtotal
             ];
         }
     }
 
     echo json_encode([
         "status" => "success",
-        "branch_id" => $branch_id,
+        "branch_id" => (int)$branch_id,
         "cart" => $cart_items,
         "total_amount" => $grand_total
     ]);
@@ -74,7 +68,7 @@ try {
 } catch (PDOException $e) {
     echo json_encode([
         "status" => "error",
-        "message" => "Database query failed: " . $e->getMessage()
+        "message" => "Database query error: " . $e->getMessage()
     ]);
 }
 ?>
