@@ -59,10 +59,6 @@ if(isset($_SESSION['client_id'])) {
         $response_count = $stmt_res->get_result()->fetch_assoc()['total'];
     }
 }
-
-// Compute dynamic URI path so branch switching works from any subfolder/page
-$current_uri_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$query_params = $_GET;
 ?>
 
 <!DOCTYPE html>
@@ -74,9 +70,6 @@ $query_params = $_GET;
     
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
-    
-    <!-- Enforce Bootstrap JS Bundle for Dropdown interactivity across all sub-pages -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
     
     <style>
         :root {
@@ -152,22 +145,24 @@ $query_params = $_GET;
                 <?php echo htmlspecialchars($pharmacy_name); ?>
             </h3>
             <div class="dropdown">
-                <button class="btn btn-sm border-0 p-0 location-selector dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <div class="location-selector dropdown-toggle" data-bs-toggle="dropdown">
                     <i class="mdi mdi-map-marker-outline fs-6"></i> 
                     <span class="text-primary"><?php echo htmlspecialchars($branch_name); ?></span>
-                </button>
-                <ul class="dropdown-menu shadow border-0" style="z-index: 1050;">
+                </div>
+                <ul class="dropdown-menu shadow border-0">
                     <li class="dropdown-header small text-uppercase fw-bold text-muted">Switch Branch</li>
                     <?php 
+                    $current_page = $_SERVER['PHP_SELF'];
+                    $existing_params = $_GET;
+
                     $br_list = $conn->query("SELECT id, branch_name FROM branches WHERE pharmacy_id = '$parent_pharmacy_id' AND is_active = 1");
                     if($br_list):
                         while($bl = $br_list->fetch_assoc()): 
-                            $temp_params = $query_params;
-                            $temp_params['bid'] = $bl['id'];
-                            $branch_url = $current_uri_path . '?' . http_build_query($temp_params);
+                            $existing_params['bid'] = $bl['id'];
+                            $switch_url = htmlspecialchars($current_page . '?' . http_build_query($existing_params));
                         ?>
                             <li>
-                                <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo htmlspecialchars($branch_url); ?>">
+                                <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo $switch_url; ?>">
                                     <?php echo htmlspecialchars($bl['branch_name']); ?>
                                 </a>
                             </li>
@@ -197,14 +192,14 @@ $query_params = $_GET;
                        <?php echo $is_subscribed ? '✓ Subscribed' : 'Subscribe'; ?>
                     </a>
                 <?php else: ?>
-                    <a href="<?php echo $project_root; ?>/login_client.php" class="apollo-nav-pill">Login</a>
+                    <a href="login_client.php" class="apollo-nav-pill">Login</a>
                 <?php endif; ?>
-                <a href="<?php echo $project_root; ?>/api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Pharmacists</a>
-                <a href="<?php echo $project_root; ?>/api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Prescriptions</a>
+                <a href="api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Pharmacists</a>
+                <a href="api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Prescriptions</a>
             </nav>
 
             <div class="d-flex align-items-center gap-2">
-                <a href="<?php echo $project_root; ?>/api/view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
+                <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>api/view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
                     <i class="mdi mdi-cart-outline fs-4"></i>
                     <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge" style="font-size: 9px;">
                         <?php 
@@ -242,19 +237,19 @@ $query_params = $_GET;
                             <h6><?php echo htmlspecialchars($user_data['full_name'] ?? ''); ?></h6>
                             <p>User ID: #<?php echo str_pad($user_data['id'] ?? 0, 5, '0', STR_PAD_LEFT); ?></p>
                             <hr class="my-1">
-                            <a href="<?php echo $project_root; ?>/profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
-                            <a href="<?php echo $project_root; ?>/client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
+                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
+                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
                         <?php else: ?>
                             <h6>Guest Menu</h6>
                             <hr class="my-1">
-                            <a href="<?php echo $project_root; ?>/login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
+                            <a href="login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
                         <?php endif; ?>
 
-                        <!-- Mobile Fallback Links -->
+                        <!-- Mobile Fallback Links (Only visible on screens smaller than LG) -->
                         <div class="d-lg-none">
                             <hr class="my-1">
-                            <a href="<?php echo $project_root; ?>/api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
-                            <a href="<?php echo $project_root; ?>/api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a>
+                            <a href="api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
+                            <a href="api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a>
                             
                             <?php if(isset($_SESSION['client_id'])): 
                                 $check_sub = $conn->prepare("SELECT id FROM customers WHERE client_id = ? AND branch_id = ?");
@@ -276,7 +271,7 @@ $query_params = $_GET;
 
                         <?php if(isset($_SESSION['client_id'])): ?>
                             <hr class="my-1">
-                            <a href="<?php echo $project_root; ?>/logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
+                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -311,7 +306,7 @@ $query_params = $_GET;
                     <img src="<?php echo $logo_web_path; ?>" 
                          alt="Logo" 
                          style="height: 38px; width: 38px; object-fit: contain;"
-                         onerror="this.src='<?php echo $project_root; ?>/assets/img/default_logo.png';">
+                         onerror="this.src='assets/img/default_logo.png';">
                     <div>
                         <h5 class="mb-0 fw-bold text-white" style="font-size: 1rem; line-height: 1.1;">
                             <?php echo htmlspecialchars($pharmacy_name); ?>
@@ -322,7 +317,7 @@ $query_params = $_GET;
             </div>
 
             <div class="col-12 col-md-5 col-lg-5">
-                <form action="<?php echo $project_root; ?>/api/search.php" method="GET" class="hng-search-container">
+                <form action="api/search.php" method="GET" class="hng-search-container">
                     <input type="hidden" name="bid" value="<?php echo $branch_id; ?>">
                     <select name="type">
                         <option value="all">All</option>
@@ -335,14 +330,14 @@ $query_params = $_GET;
 
             <div class="col-12 col-md-4 col-lg-4 mt-2 mt-md-0">
                 <div class="nav-icon-grid">
-                    <a href="<?php echo $project_root; ?>/online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-home"></i>Home
                     </a>
                     <a href="#" class="hng-nav-icon"><i class="mdi mdi-view-grid"></i>Category</a>
-                    <a href="<?php echo $project_root; ?>/api/offers.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="api/offers.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-label-percent"></i>Offer
                     </a>
-                    <a href="<?php echo $project_root; ?>/help.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="help.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-help-circle"></i>Help
                     </a>
                     <a href="javascript:void(0);" onclick="openBankDetails()" class="hng-nav-icon">
