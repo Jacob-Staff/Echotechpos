@@ -15,8 +15,7 @@ if (ini_get("session.use_cookies")) {
 
 session_destroy();
 
-// Redirect using a Root-Relative path
-// This ensures it works from /online_store.php AND /api/view_cart.php
-header("Location: /pharmacy_v1-master/login_client.php");
+// Dynamic redirect path that works seamlessly on both local XAMPP and live Render
+header("Location: login_client.php");
 exit();
 ?>
