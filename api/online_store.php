@@ -1,18 +1,22 @@
 <?php 
-// 1. Header handles session_start() and database connection
-require "api/store_header.php"; 
+// 1. Header handles session_start(), database connection, and tenant context
+require_once __DIR__ . "/api/store_header.php"; 
 
 // 2. Fetch products using Prepared Statements
 $category_filter = isset($_GET['cat']) ? trim($_GET['cat']) : '';
 
 if ($category_filter !== '') {
-    $product_sql = "SELECT id, item_name, strength, category, price, image FROM store_items 
-                    WHERE branch_id = ? AND is_active = 1 AND is_online = 1 AND category = ? LIMIT 12";
+    $product_sql = "SELECT id, item_name, strength, category, price, image 
+                    FROM store_items 
+                    WHERE branch_id = ? AND is_active = 1 AND is_online = 1 AND category = ? 
+                    LIMIT 12";
     $p_stmt = $conn->prepare($product_sql);
     $p_stmt->bind_param("is", $branch_id, $category_filter);
 } else {
-    $product_sql = "SELECT id, item_name, strength, category, price, image FROM store_items 
-                    WHERE branch_id = ? AND is_active = 1 AND is_online = 1 LIMIT 12";
+    $product_sql = "SELECT id, item_name, strength, category, price, image 
+                    FROM store_items 
+                    WHERE branch_id = ? AND is_active = 1 AND is_online = 1 
+                    LIMIT 12";
     $p_stmt = $conn->prepare($product_sql);
     $p_stmt->bind_param("i", $branch_id);
 }
@@ -111,7 +115,7 @@ $items = $p_stmt->get_result();
                 }
             ?>
             <div class="col-6 col-sm-4 col-md-3 col-lg-2"> 
-                <div class="product-card shadow-sm h-100 d-flex flex-column justify-content-between p-2 p-md-3">
+                <div class="product-card shadow-sm h-100 d-flex flex-column justify-content-between p-2 p-md-3 bg-white border rounded">
                     <a href="api/product_details.php?id=<?php echo $row['id']; ?>&bid=<?php echo $branch_id; ?>" class="product-link">
                         <div class="text-center mb-2">
                             <img src="<?php echo $web_path; ?>" class="img-fluid" style="height:85px; object-fit: contain;" alt="<?php echo htmlspecialchars($row['item_name']); ?>">
@@ -125,7 +129,7 @@ $items = $p_stmt->get_result();
                         </div>
                     </a>
 
-                    <button class="add-to-cart-btn add-cart-js mt-2 w-100" data-id="<?php echo $row['id']; ?>" data-branch="<?php echo $branch_id; ?>">
+                    <button class="add-to-cart-btn add-cart-js mt-2 w-100 btn btn-outline-success btn-sm" data-id="<?php echo $row['id']; ?>" data-branch="<?php echo $branch_id; ?>">
                         <i class="mdi mdi-cart-plus me-1"></i> ADD
                     </button>
                 </div>
@@ -140,11 +144,15 @@ $items = $p_stmt->get_result();
     </div>
 </div>
 
-<a href="https://wa.me/<?php echo $phone; ?>" class="wa-sticky" target="_blank">
-    <i class="mdi mdi-whatsapp"></i>
+<a href="https://wa.me/<?php echo $phone; ?>" class="wa-sticky position-fixed bottom-0 end-0 m-3 btn btn-success rounded-circle shadow p-3" target="_blank" style="z-index: 1000;">
+    <i class="mdi mdi-whatsapp fs-3"></i>
 </a>
 
-<?php if(file_exists(__DIR__ . "/includes/footer.php")) require __DIR__ . "/includes/footer.php"; ?>
+<?php 
+if(file_exists(__DIR__ . "/includes/footer.php")) {
+    require __DIR__ . "/includes/footer.php"; 
+}
+?>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -166,10 +174,10 @@ $(document).ready(function() {
             success: function(response) {
                 if(!isNaN(response)) {
                     $('.cart-badge').text(response).fadeOut(100).fadeIn(100);
-                    btn.html('<i class="mdi mdi-check"></i> OK').addClass('btn-success text-white');
+                    btn.html('<i class="mdi mdi-check"></i> OK').addClass('btn-success text-white').removeClass('btn-outline-success');
                 }
                 setTimeout(function() {
-                    btn.html('<i class="mdi mdi-cart-plus me-1"></i> ADD').removeClass('btn-success text-white');
+                    btn.html('<i class="mdi mdi-cart-plus me-1"></i> ADD').removeClass('btn-success text-white').addClass('btn-outline-success');
                 }, 1500);
             }
         });
