@@ -1,10 +1,15 @@
 <?php
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
-// Clear all session data
+// Preserve active branch ID if needed for post-logout redirect
+$current_branch = isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 0;
+
+// Clear all session variables
 $_SESSION = array();
 
-// Destroy the session cookie if it exists
+// Destroy session cookies safely
 if (ini_get("session.use_cookies")) {
     $params = session_get_cookie_params();
     setcookie(session_name(), '', time() - 42000,
@@ -15,7 +20,12 @@ if (ini_get("session.use_cookies")) {
 
 session_destroy();
 
-// Dynamic redirect path that works seamlessly on both local XAMPP and live Render
-header("Location: login_client.php");
+// Redirect contextually to login_client.php
+$redirect_url = "login_client.php";
+if ($current_branch > 0) {
+    $redirect_url .= "?bid=" . $current_branch;
+}
+
+header("Location: " . $redirect_url);
 exit();
 ?>
