@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . "/../includes/conn.php");
 
-$branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : 10;
+$branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : (isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 10);
 $_SESSION['current_branch_id'] = $branch_id;
 
 // Load header
