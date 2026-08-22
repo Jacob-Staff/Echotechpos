@@ -1,8 +1,18 @@
 <?php 
-// 1. Header handles session_start(), database connection, and tenant context
-require_once __DIR__ . "/api/store_header.php"; 
+// 1. Dynamic Header Inclusion (Handles both /api/ folder and root directory)
+if (file_exists(__DIR__ . "/store_header.php")) {
+    require_once __DIR__ . "/store_header.php";
+} elseif (file_exists(__DIR__ . "/api/store_header.php")) {
+    require_once __DIR__ . "/api/store_header.php";
+} else {
+    die("Error: store_header.php could not be found.");
+}
 
-// 2. Fetch products using Prepared Statements
+// 2. Determine base directory path for relative links
+$is_in_api_folder = (basename(__DIR__) === 'api');
+$path_prefix = $is_in_api_folder ? '' : 'api/';
+
+// 3. Fetch products using Prepared Statements
 $category_filter = isset($_GET['cat']) ? trim($_GET['cat']) : '';
 
 if ($category_filter !== '') {
@@ -31,7 +41,6 @@ $items = $p_stmt->get_result();
     .product-link { text-decoration: none; color: inherit; display: block; }
     .product-link:hover .product-title { color: #00b386; }
     
-    /* Mobile responsive adjustments */
     @media (max-width: 576px) {
         .feature-card { padding: 0.75rem !important; }
         .feature-card i { font-size: 1.5rem !important; margin-right: 0.5rem !important; }
@@ -46,7 +55,7 @@ $items = $p_stmt->get_result();
 <div class="container mt-3 mt-md-4">
     <div class="row g-2 g-md-3">
         <div class="col-6 col-md-3">
-            <a href="api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none">
+            <a href="<?php echo $path_prefix; ?>upload_prescription.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none">
                 <div class="feature-card d-flex align-items-center p-3 bg-white border rounded shadow-sm h-100 transition-hover">
                     <i class="mdi mdi-prescription text-success fs-2 me-3"></i>
                     <div>
@@ -58,7 +67,7 @@ $items = $p_stmt->get_result();
         </div>
         
         <div class="col-6 col-md-3">
-            <a href="api/lab_results.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none">
+            <a href="<?php echo $path_prefix; ?>lab_results.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none">
                 <div class="feature-card d-flex align-items-center p-3 bg-white border rounded shadow-sm h-100 transition-hover">
                     <i class="mdi mdi-flask-outline text-primary fs-2 me-3"></i>
                     <div>
@@ -99,24 +108,25 @@ $items = $p_stmt->get_result();
 <div class="container my-4 my-md-5">
     <div class="d-flex justify-content-between align-items-center mb-3 mb-md-4">
         <h4 class="fw-bold mb-0 fs-5 fs-md-4">Shop Medicines</h4>
-        <a href="all_products.php?bid=<?php echo $branch_id; ?>" class="text-primary fw-bold text-decoration-none small">VIEW ALL</a>
+        <a href="<?php echo $path_prefix; ?>all_products.php?bid=<?php echo $branch_id; ?>" class="text-primary fw-bold text-decoration-none small">VIEW ALL</a>
     </div>
 
     <div class="row g-2 g-md-3" id="product-grid"> 
         <?php 
+        $upload_root = $is_in_api_folder ? dirname(__DIR__) : __DIR__;
         if($items && $items->num_rows > 0):
             while($row = $items->fetch_assoc()): 
                 $img_name = (!empty($row['image'])) ? $row['image'] : 'default_med.png';
-                $local_path = __DIR__ . "/uploads/products/" . $img_name;
-                $web_path = "uploads/products/" . $img_name;
+                $local_path = $upload_root . "/uploads/products/" . $img_name;
+                $web_path = ($is_in_api_folder ? "../" : "") . "uploads/products/" . $img_name;
                 
                 if(!file_exists($local_path)) {
-                    $web_path = "assets/img/default_med.png";
+                    $web_path = ($is_in_api_folder ? "../" : "") . "assets/img/default_med.png";
                 }
             ?>
             <div class="col-6 col-sm-4 col-md-3 col-lg-2"> 
                 <div class="product-card shadow-sm h-100 d-flex flex-column justify-content-between p-2 p-md-3 bg-white border rounded">
-                    <a href="api/product_details.php?id=<?php echo $row['id']; ?>&bid=<?php echo $branch_id; ?>" class="product-link">
+                    <a href="<?php echo $path_prefix; ?>product_details.php?id=<?php echo $row['id']; ?>&bid=<?php echo $branch_id; ?>" class="product-link">
                         <div class="text-center mb-2">
                             <img src="<?php echo $web_path; ?>" class="img-fluid" style="height:85px; object-fit: contain;" alt="<?php echo htmlspecialchars($row['item_name']); ?>">
                         </div>
@@ -149,8 +159,9 @@ $items = $p_stmt->get_result();
 </a>
 
 <?php 
-if(file_exists(__DIR__ . "/includes/footer.php")) {
-    require __DIR__ . "/includes/footer.php"; 
+$footer_path = $is_in_api_folder ? dirname(__DIR__) . "/includes/footer.php" : __DIR__ . "/includes/footer.php";
+if(file_exists($footer_path)) {
+    require $footer_path; 
 }
 ?>
 
@@ -159,6 +170,8 @@ if(file_exists(__DIR__ . "/includes/footer.php")) {
 
 <script>
 $(document).ready(function() {
+    var apiPrefix = "<?php echo $path_prefix; ?>";
+
     $(document).on('click', '.add-cart-js', function(e) {
         e.preventDefault();
         e.stopPropagation();
@@ -168,7 +181,7 @@ $(document).ready(function() {
         var btn = $(this);
 
         $.ajax({
-            url: 'api/cart_handler.php', 
+            url: apiPrefix + 'cart_handler.php', 
             method: 'POST',
             data: { item_id: itemId, branch_id: branchId },
             success: function(response) {
@@ -193,7 +206,7 @@ $(document).ready(function() {
         $('#product-grid').html('<div class="col-12 text-center py-5"><div class="spinner-border text-success"></div></div>');
 
         $.ajax({
-            url: 'api/filter_products.php',
+            url: apiPrefix + 'filter_products.php',
             method: 'GET',
             data: { category: categoryName, bid: branch },
             success: function(response) {
