@@ -11,8 +11,10 @@ $branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : 10;
 
 // 3. Multi-Tenant Query (Fixes 'Unknown column name' by using explicit aliases & table references)
 $sql = "SELECT 
+// 3. Multi-Tenant Query
+$sql = "SELECT 
             p.id as pharmacy_id,
-            COALESCE(p.pharmacy_name, p.name) as tenant_name, 
+            p.name as tenant_name, 
             p.logo as tenant_logo,
             b.branch_name,
             b.location,
@@ -20,7 +22,6 @@ $sql = "SELECT
         FROM branches b
         INNER JOIN pharmacies p ON b.pharmacy_id = p.id
         WHERE b.id = ? AND b.is_active = 1";
-
 $stmt = $conn->prepare($sql);
 if ($stmt) {
     $stmt->bind_param("i", $branch_id);
