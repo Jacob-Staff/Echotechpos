@@ -152,11 +152,18 @@ if(isset($_SESSION['client_id'])) {
                 <ul class="dropdown-menu shadow border-0">
                     <li class="dropdown-header small text-uppercase fw-bold text-muted">Switch Branch</li>
                     <?php 
+                    // Dynamic URI handling to keep users on the current page when switching branches
+                    $current_page = $_SERVER['PHP_SELF'];
+                    $query_params = $_GET;
+
                     $br_list = $conn->query("SELECT id, branch_name FROM branches WHERE pharmacy_id = '$parent_pharmacy_id' AND is_active = 1");
                     if($br_list):
-                        while($bl = $br_list->fetch_assoc()): ?>
+                        while($bl = $br_list->fetch_assoc()): 
+                            $query_params['bid'] = $bl['id'];
+                            $branch_url = $current_page . '?' . http_build_query($query_params);
+                        ?>
                             <li>
-                                <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="?bid=<?php echo $bl['id']; ?>">
+                                <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo htmlspecialchars($branch_url); ?>">
                                     <?php echo htmlspecialchars($bl['branch_name']); ?>
                                 </a>
                             </li>
