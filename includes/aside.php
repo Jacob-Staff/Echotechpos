@@ -54,7 +54,7 @@ function is_active_menu($page_name, $current_page) {
             <ul id="sidebarnav" class="list-unstyled mb-0">
                 <li class="sidebar-item mb-1">
                     <a class="sidebar-link <?= is_active_menu('top_up_pharmacy.php', $current_page); ?>" href="top_up_pharmacy.php">
-                        <i class="mdi mdi-plus-box-outline me-2"></i><span>Top up Pharmacy</span>
+                        <i class="mdi mdi-plus-box-outline me-2"></i><span>Online App</span>
                     </a>
                 </li>
                 <li class="sidebar-item mb-1">
