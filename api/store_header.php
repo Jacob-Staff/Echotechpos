@@ -11,8 +11,6 @@ $branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : 10;
 
 // 3. Multi-Tenant Query (Fixes 'Unknown column name' by using explicit aliases & table references)
 $sql = "SELECT 
-// 3. Multi-Tenant Query
-$sql = "SELECT 
             p.id as pharmacy_id,
             p.name as tenant_name, 
             p.logo as tenant_logo,
