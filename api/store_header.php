@@ -1,74 +1,77 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
+// Set response content type to JSON
+header('Content-Type: application/json; charset=utf-8');
+
+// Include database connection (adjust path if db.php is elsewhere)
+require_once __DIR__ . '/../db.php'; 
+
+$response = [
+    'status'  => 'error',
+    'message' => '',
+    'data'    => null
+];
+
+try {
+    // Get store/branch ID from request (defaulting to session or primary record if available)
     session_start();
-}
+    $branch_id = $_GET['branch_id'] ?? $_SESSION['branch_id'] ?? 1;
 
-require_once __DIR__ . "/../includes/conn.php";
+    /* 
+     * Note on column names: 
+     * We alias `branch_name` AS `name` to ensure compatibility across all API endpoints 
+     * without triggering "Column not found: 1054 Unknown column 'name'".
+     */
+    $sql = "SELECT 
+                id,
+                branch_name AS name,
+                address,
+                phone,
+                email,
+                tax_number,
+                receipt_footer
+            FROM branches 
+            WHERE id = ? 
+            LIMIT 1";
 
-// Fetch available active branches
-$branches_query = $conn->query("SELECT id, name FROM branches ORDER BY name ASC");
-$all_branches = [];
-if ($branches_query) {
-    while ($row = $branches_query->fetch_assoc()) {
-        $all_branches[] = $row;
+    if ($stmt = $conn->prepare($sql)) {
+        $stmt->bind_param("i", $branch_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        if ($store = $result->fetch_assoc()) {
+            $response['status'] = 'success';
+            $response['data']   = [
+                'id'             => (int)$store['id'],
+                'name'           => $store['name'] ?? 'Pharmacy Store',
+                'address'        => $store['address'] ?? '',
+                'phone'          => $store['phone'] ?? '',
+                'email'          => $store['email'] ?? '',
+                'tax_number'     => $store['tax_number'] ?? '',
+                'receipt_footer' => $store['receipt_footer'] ?? 'Thank you for your business!'
+            ];
+        } else {
+            // Fallback if branch ID doesn't exist
+            $response['status']  = 'warning';
+            $response['message'] = 'Branch details not found. Returning default store profile.';
+            $response['data']    = [
+                'id'             => 0,
+                'name'           => 'Pharmacy Store',
+                'address'        => 'Main Branch',
+                'phone'          => '',
+                'email'          => '',
+                'receipt_footer' => 'Thank you for your business!'
+            ];
+        }
+        $stmt->close();
+    } else {
+        throw new Exception("Database query preparation failed: " . $conn->error);
     }
+} catch (Exception $e) {
+    http_response_code(500);
+    $response['status']  = 'error';
+    $response['message'] = $e->getMessage();
 }
 
-// Active branch resolution
-$branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : (isset($_SESSION['current_branch_id']) ? $_SESSION['current_branch_id'] : 10);
-$_SESSION['current_branch_id'] = $branch_id;
-
-// Fetch current branch name
-$pharmacy_name = "Echo Pharmacy";
-$stmt = $conn->prepare("SELECT name FROM branches WHERE id = ?");
-if ($stmt) {
-    $stmt->bind_param("i", $branch_id);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    if ($row = $res->fetch_assoc()) {
-        $pharmacy_name = $row['name'];
-    }
-    $stmt->close();
-}
-
-// Calculate total cart badge items for CURRENT active branch
-$cart_badge_count = 0;
-if (isset($_SESSION['carts'][$branch_id])) {
-    foreach ($_SESSION['carts'][$branch_id] as $c_item) {
-        $cart_badge_count += $c_item['qty'];
-    }
-}
-?>
-
-<nav class="navbar navbar-expand-lg navbar-dark" style="background-color: #003339;">
-  <div class="container">
-    <a class="navbar-brand fw-bold" href="../online_store.php?bid=<?php echo $branch_id; ?>">
-      <?php echo htmlspecialchars($pharmacy_name); ?>
-    </a>
-
-    <!-- Branch Switcher Dropdown -->
-    <div class="dropdown me-3">
-      <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="branchDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-        <i class="mdi mdi-store-outline me-1"></i> Switch Branch
-      </button>
-      <ul class="dropdown-menu" aria-labelledby="branchDropdown">
-        <?php foreach ($all_branches as $b): ?>
-          <li>
-            <a class="dropdown-item <?php echo ($b['id'] == $branch_id) ? 'active fw-bold' : ''; ?>" 
-               href="../online_store.php?bid=<?php echo $b['id']; ?>">
-              <?php echo htmlspecialchars($b['name']); ?>
-            </a>
-          </li>
-        <?php endforeach; ?>
-      </ul>
-    </div>
-
-    <!-- Cart Link -->
-    <a href="view_cart.php?bid=<?php echo $branch_id; ?>" class="btn btn-success rounded-pill position-relative ms-auto">
-      <i class="mdi mdi-cart-outline fs-5"></i> Cart
-      <span id="cart-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
-        <?php echo $cart_badge_count; ?>
-      </span>
-    </a>
-  </div>
-</nav>
+// Output final JSON
+echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+exit;
