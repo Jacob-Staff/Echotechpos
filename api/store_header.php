@@ -234,17 +234,17 @@ if ($stmt_br) {
             <div class="d-flex align-items-center gap-2">
                 <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>api/view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
                     <i class="mdi mdi-cart-outline fs-4"></i>
-                    <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge" style="font-size: 9px;">
-                        <?php 
-                        $cart_count = 0;
-                        if(isset($_SESSION['cart'])) {
-                            foreach($_SESSION['cart'] as $item) { 
-                                $cart_count += isset($item['qty']) ? intval($item['qty']) : 1; 
-                            }
-                        }
-                        echo $cart_count; 
-                        ?>
-                    </span>
+<span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge" style="font-size: 9px;">
+    <?php 
+    $cart_count = 0;
+    if (isset($_SESSION['carts'][$branch_id]) && is_array($_SESSION['carts'][$branch_id])) {
+        foreach ($_SESSION['carts'][$branch_id] as $item) {
+            $cart_count += isset($item['qty']) ? intval($item['qty']) : 1;
+        }
+    }
+    echo $cart_count; 
+    ?>
+</span>
                 </a>
 
                 <?php if(isset($_SESSION['client_id'])): ?>
