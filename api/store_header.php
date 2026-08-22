@@ -6,10 +6,15 @@ if (session_status() === PHP_SESSION_NONE) {
 // 1. Establish connection
 require_once(__DIR__ . "/../includes/conn.php");
 
-// 2. Get Branch ID from URL, default to 10
-$branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : 10; 
+// 2. Synchronize Branch ID safely between GET and SESSION
+if (isset($_GET['bid'])) {
+    $branch_id = intval($_GET['bid']);
+    $_SESSION['branch_id'] = $branch_id;
+} else {
+    $branch_id = isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : 10;
+}
 
-// 3. The "Multi-Tenant" Query
+// 3. The Prepared "Multi-Tenant" Query
 $sql = "SELECT 
             p.id as pharmacy_id,
             p.name as tenant_name, 
@@ -19,9 +24,12 @@ $sql = "SELECT
             b.phone as branch_phone
         FROM branches b
         INNER JOIN pharmacies p ON b.pharmacy_id = p.id
-        WHERE b.id = $branch_id AND b.is_active = 1";
+        WHERE b.id = ? AND b.is_active = 1";
 
-$result = $conn->query($sql);
+$stmt = $conn->prepare($sql);
+$stmt->bind_param("i", $branch_id);
+$stmt->execute();
+$result = $stmt->get_result();
 $tenant_context = $result ? $result->fetch_assoc() : null;
 
 // Fallback logic
@@ -38,12 +46,12 @@ if (!$tenant_context) {
     $parent_pharmacy_id = $tenant_context['pharmacy_id'];
 }
 
-$cat_query = $conn->query("SELECT * FROM categories WHERE status = 1 LIMIT 8");
 $project_root = "/pharmacy_v1-master"; 
 $db_logo = $tenant_context['tenant_logo']; 
 $logo_filename = (!empty($db_logo)) ? $db_logo : 'default_logo.png';
 $logo_web_path = $project_root . "/uploads/logos/" . $logo_filename;
 
+// Unread help inquiries count
 $response_count = 0;
 if(isset($_SESSION['client_id'])) {
     $c_id = $_SESSION['client_id'];
@@ -155,7 +163,11 @@ if(isset($_SESSION['client_id'])) {
                     $current_page = $_SERVER['PHP_SELF'];
                     $existing_params = $_GET;
 
-                    $br_list = $conn->query("SELECT id, branch_name FROM branches WHERE pharmacy_id = '$parent_pharmacy_id' AND is_active = 1");
+                    $br_stmt = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1");
+                    $br_stmt->bind_param("i", $parent_pharmacy_id);
+                    $br_stmt->execute();
+                    $br_list = $br_stmt->get_result();
+
                     if($br_list):
                         while($bl = $br_list->fetch_assoc()): 
                             $existing_params['bid'] = $bl['id'];
@@ -232,7 +244,10 @@ if(isset($_SESSION['client_id'])) {
                     <div class="user-menu">
                         <?php if(isset($_SESSION['client_id'])): 
                             $uid = $_SESSION['client_id'];
-                            $user_data = $conn->query("SELECT id, full_name, phone FROM clients WHERE id = '$uid'")->fetch_assoc();
+                            $user_stmt = $conn->prepare("SELECT id, full_name, phone FROM clients WHERE id = ?");
+                            $user_stmt->bind_param("i", $uid);
+                            $user_stmt->execute();
+                            $user_data = $user_stmt->get_result()->fetch_assoc();
                         ?>
                             <h6><?php echo htmlspecialchars($user_data['full_name'] ?? ''); ?></h6>
                             <p>User ID: #<?php echo str_pad($user_data['id'] ?? 0, 5, '0', STR_PAD_LEFT); ?></p>
@@ -245,7 +260,7 @@ if(isset($_SESSION['client_id'])) {
                             <a href="login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
                         <?php endif; ?>
 
-                        <!-- Mobile Fallback Links (Only visible on screens smaller than LG) -->
+                        <!-- Mobile Fallback Links -->
                         <div class="d-lg-none">
                             <hr class="my-1">
                             <a href="api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
