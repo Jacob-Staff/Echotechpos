@@ -1,84 +1,83 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-// 1. Dynamic DB inclusion
-if (file_exists(__DIR__ . "/../includes/conn.php")) {
-    require_once __DIR__ . "/../includes/conn.php";
-} elseif (file_exists(__DIR__ . "/includes/conn.php")) {
-    require_once __DIR__ . "/includes/conn.php";
-} else {
-    echo json_encode(["status" => "error", "message" => "DB connection missing"]);
-    exit();
-}
-
 header('Content-Type: application/json');
+session_start();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['item_id'])) {
-    $item_id   = intval($_POST['item_id']);
-    
-    // Resolve branch ID from POST, or SESSION, or default fallback to first active branch
-    $branch_id = isset($_POST['branch_id']) && intval($_POST['branch_id']) > 0 
-        ? intval($_POST['branch_id']) 
-        : (isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 0);
+require_once '../config/db.php'; // Adjust path if your DB connection file is elsewhere
 
-    if ($item_id <= 0 || $branch_id <= 0) {
-        echo json_encode(["status" => "error", "message" => "Invalid Branch or Item ID."]);
-        exit();
-    }
-
-    // Set active branch session
-    $_SESSION['current_branch_id'] = $branch_id;
-
-    // Fetch product details
-    $stmt = $conn->prepare("SELECT id, item_name, price FROM store_items WHERE id = ? AND branch_id = ?");
-    if ($stmt) {
-        $stmt->bind_param("ii", $item_id, $branch_id);
-        $stmt->execute();
-        $res = $stmt->get_result();
-
-        if ($res && $res->num_rows > 0) {
-            $product = $res->fetch_assoc();
-
-            // Initialize cart session storage
-            if (!isset($_SESSION['carts'])) {
-                $_SESSION['carts'] = [];
-            }
-            if (!isset($_SESSION['carts'][$branch_id])) {
-                $_SESSION['carts'][$branch_id] = [];
-            }
-
-            // Add or increment item
-            if (isset($_SESSION['carts'][$branch_id][$item_id])) {
-                $_SESSION['carts'][$branch_id][$item_id]['qty'] += 1;
-            } else {
-                $_SESSION['carts'][$branch_id][$item_id] = [
-                    'id'    => $product['id'],
-                    'name'  => $product['item_name'],
-                    'price' => floatval($product['price']),
-                    'qty'   => 1
-                ];
-            }
-
-            // Calculate total count for active branch
-            $total_count = 0;
-            foreach ($_SESSION['carts'][$branch_id] as $item) {
-                $total_count += intval($item['qty']);
-            }
-
-            echo json_encode([
-                "status" => "success",
-                "count"  => $total_count,
-                "message" => "Item added successfully"
-            ]);
-            $stmt->close();
-            exit();
-        }
-        $stmt->close();
-    }
+// 1. Check if session cart exists
+if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])) {
+    echo json_encode([
+        "status" => "success",
+        "cart" => [],
+        "total_amount" => 0,
+        "message" => "Cart is empty."
+    ]);
+    exit;
 }
 
-echo json_encode(["status" => "error", "message" => "Item not found in this branch store."]);
-exit();
+// 2. Get active branch ID from session or request
+$branch_id = $_SESSION['branch_id'] ?? $_GET['branch_id'] ?? null;
+
+if (!$branch_id) {
+    echo json_encode([
+        "status" => "error",
+        "message" => "Active branch session not found."
+    ]);
+    exit;
+}
+
+$cart_items = [];
+$grand_total = 0;
+
+try {
+    // Prepare query to fetch item details matching both item_id and branch_id
+    $stmt = $pdo->prepare("
+        SELECT id, item_name, price, quantity AS stock_qty 
+        FROM store_items 
+        WHERE id = :item_id AND branch_id = :branch_id AND is_active = 1
+    ");
+
+    foreach ($_SESSION['cart'] as $cart_key => $cart_item) {
+        // Extract item ID from array key or object
+        $item_id = $cart_item['item_id'] ?? $cart_key;
+        $qty = $cart_item['quantity'] ?? 1;
+
+        $stmt->execute([
+            ':item_id' => $item_id,
+            ':branch_id' => $branch_id
+        ]);
+        
+        $product = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($product) {
+            $subtotal = $product['price'] * $qty;
+            $grand_total += $subtotal;
+
+            $cart_items[] = [
+                'item_id' => $product['id'],
+                'item_name' => $product['item_name'],
+                'price' => (float)$product['price'],
+                'quantity' => (int)$qty,
+                'stock_qty' => (int)$product['stock_qty'],
+                'subtotal' => (float)$subtotal
+            ];
+        } else {
+            // Optional: Remove stale items from cart session if they don't exist in this branch
+            unset($_SESSION['cart'][$cart_key]);
+        }
+    }
+
+    echo json_encode([
+        "status" => "success",
+        "branch_id" => $branch_id,
+        "cart" => $cart_items,
+        "total_amount" => $grand_total
+    ]);
+
+} catch (PDOException $e) {
+    echo json_encode([
+        "status" => "error",
+        "message" => "Database error: " . $e->getMessage()
+    ]);
+}
 ?>
