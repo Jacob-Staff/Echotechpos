@@ -1,5 +1,16 @@
 <?php 
-// 1. Let the header start the session and connection
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Ensure client is logged in before accessing the store
+if (!isset($_SESSION['client_id'])) {
+    $bid = isset($_GET['bid']) ? intval($_GET['bid']) : (isset($_SESSION['branch_id']) ? $_SESSION['branch_id'] : 1);
+    header("Location: login_client.php?bid=" . $bid);
+    exit();
+}
+
+// 1. Let the header start the connection and render site layout
 require "api/store_header.php"; 
 
 // 2. IMMEDIATELY OVERRIDE THE HEADER'S DEFAULT CHOICE
@@ -10,7 +21,7 @@ if (isset($_GET['bid'])) {
     $branch_id = isset($_SESSION['branch_id']) ? $_SESSION['branch_id'] : 1;
 }
 
-// 3. FETCH PRODUCTS ONCE (Cleaned up logic)
+// 3. FETCH PRODUCTS ONCE
 $category_filter = isset($_GET['cat']) ? $_GET['cat'] : '';
 
 $product_sql = "SELECT id, item_name, strength, category, price, image FROM store_items 
@@ -53,7 +64,7 @@ $items = $conn->query($product_sql . " LIMIT 12");
         </div>
 
         <div class="col-6 col-lg-3">
-            <a href="https://wa.me/<?php echo $phone; ?>?text=I%20need%20a%20fast%20delivery" target="_blank" class="text-decoration-none">
+            <a href="https://wa.me/<?php echo isset($phone) ? $phone : ''; ?>?text=I%20need%20a%20fast%20delivery" target="_blank" class="text-decoration-none">
                 <div class="d-flex align-items-center p-3 bg-white border rounded shadow-sm h-100 transition-hover">
                     <i class="mdi mdi-truck-fast-outline text-warning fs-2 me-3"></i>
                     <div>
@@ -65,7 +76,7 @@ $items = $conn->query($product_sql . " LIMIT 12");
         </div>
 
         <div class="col-6 col-lg-3">
-            <a href="https://wa.me/<?php echo $phone; ?>?text=Do%20you%20accept%20insurance" target="_blank" class="text-decoration-none">
+            <a href="https://wa.me/<?php echo isset($phone) ? $phone : ''; ?>?text=Do%20you%20accept%20insurance" target="_blank" class="text-decoration-none">
                 <div class="d-flex align-items-center p-3 bg-white border rounded shadow-sm h-100 transition-hover">
                     <i class="mdi mdi-shield-check-outline text-danger fs-2 me-3"></i>
                     <div>
@@ -132,7 +143,7 @@ $items = $conn->query($product_sql . " LIMIT 12");
     </div>
 </div>
 
-<a href="https://wa.me/<?php echo $phone; ?>" class="wa-sticky" target="_blank">
+<a href="https://wa.me/<?php echo isset($phone) ? $phone : ''; ?>" class="wa-sticky" target="_blank">
     <i class="mdi mdi-whatsapp"></i>
 </a>
 
@@ -146,7 +157,7 @@ $(document).ready(function() {
     // 1. ADD TO CART LOGIC
     $(document).on('click', '.add-cart-js', function(e) {
         e.preventDefault();
-        e.stopPropagation(); // Prevents clicking the button from triggering the product link
+        e.stopPropagation();
         
         var itemId = $(this).data('id');
         var branchId = $(this).data('branch');
