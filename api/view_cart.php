@@ -2,7 +2,8 @@
 header('Content-Type: application/json');
 session_start();
 
-require_once '../config/db.php'; // Adjust path if your DB connection file is elsewhere
+// Include database configuration located in the same directory (api/config.php)
+require_once __DIR__ . '/config.php';
 
 // 1. Check if session cart exists
 if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])) {
@@ -15,7 +16,7 @@ if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])) {
     exit;
 }
 
-// 2. Get active branch ID from session or request
+// 2. Get active branch ID from session or query string
 $branch_id = $_SESSION['branch_id'] ?? $_GET['branch_id'] ?? null;
 
 if (!$branch_id) {
@@ -30,7 +31,7 @@ $cart_items = [];
 $grand_total = 0;
 
 try {
-    // Prepare query to fetch item details matching both item_id and branch_id
+    // 3. Prepare statement to query store items
     $stmt = $pdo->prepare("
         SELECT id, item_name, price, quantity AS stock_qty 
         FROM store_items 
@@ -38,7 +39,6 @@ try {
     ");
 
     foreach ($_SESSION['cart'] as $cart_key => $cart_item) {
-        // Extract item ID from array key or object
         $item_id = $cart_item['item_id'] ?? $cart_key;
         $qty = $cart_item['quantity'] ?? 1;
 
@@ -61,9 +61,6 @@ try {
                 'stock_qty' => (int)$product['stock_qty'],
                 'subtotal' => (float)$subtotal
             ];
-        } else {
-            // Optional: Remove stale items from cart session if they don't exist in this branch
-            unset($_SESSION['cart'][$cart_key]);
         }
     }
 
@@ -77,7 +74,7 @@ try {
 } catch (PDOException $e) {
     echo json_encode([
         "status" => "error",
-        "message" => "Database error: " . $e->getMessage()
+        "message" => "Database query failed: " . $e->getMessage()
     ]);
 }
 ?>
