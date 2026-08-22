@@ -3,6 +3,15 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+if (isset($_GET['bid'])) {
+    $new_branch = intval($_GET['bid']);
+    if (isset($_SESSION['current_branch_id']) && $_SESSION['current_branch_id'] !== $new_branch) {
+        // Clear cart when branch changes
+        unset($_SESSION['cart']);
+    }
+    $_SESSION['current_branch_id'] = $new_branch;
+}
+
 // 1. Establish connection
 require_once(__DIR__ . "/../includes/conn.php");
 
