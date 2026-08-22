@@ -10,7 +10,8 @@ if (session_status() === PHP_SESSION_NONE) {
 if (file_exists("../includes/conn.php")) require_once "../includes/conn.php";
 if (file_exists("../includes/auth.php")) require_once "../includes/auth.php";
 
-$branch_id = isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : 1; 
+$pharmacy_id = isset($_SESSION['pharmacy_id']) ? intval($_SESSION['pharmacy_id']) : 10;
+$branch_id   = isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : 1; 
 
 function generateInvoiceNumber() {
     return 'INV-' . mt_rand(1000000, 9797977);
@@ -23,6 +24,7 @@ function safe_query($conn, $query) {
     return ($res === false) ? null : $res;
 }
 
+// Tile Counts
 $out_of_stock_res = safe_query($conn, "SELECT COUNT(*) as total FROM store_items WHERE branch_id = '{$branch_id}' AND quantity <= 0");
 $out_of_stock_data = $out_of_stock_res ? mysqli_fetch_assoc($out_of_stock_res) : ['total' => 2];
 
@@ -32,8 +34,27 @@ $expired_data = $expired_res ? mysqli_fetch_assoc($expired_res) : ['expired' => 
 $today_tx_res = safe_query($conn, "SELECT COUNT(*) AS total FROM sales WHERE DATE(sale_date) = CURDATE() AND branch_id = {$branch_id}");
 $today_tx_data = $today_tx_res ? mysqli_fetch_assoc($today_tx_res) : ['total' => 0];
 
-$patients_res = safe_query($conn, "SELECT COUNT(*) AS total FROM patients WHERE status = '0' AND branch_id = {$branch_id}");
-$patients_data = $patients_res ? mysqli_fetch_assoc($patients_res) : ['total' => 0];
+// ==============================
+// 🔔 ONLINE APP ALERTS QUERIES
+// ==============================
+function getPendingCount($conn, $table, $pharmacy_id, $branch_id) {
+    $stmt = safe_query($conn, "SELECT COUNT(*) as total FROM {$table} WHERE pharmacy_id = '{$pharmacy_id}' AND branch_id = '{$branch_id}' AND status = 'Pending'");
+    if (!$stmt) return 0;
+    $row = mysqli_fetch_assoc($stmt);
+    return (int)($row['total'] ?? 0);
+}
+
+$pending_rx   = getPendingCount($conn, "prescriptions", $pharmacy_id, $branch_id);
+$pending_labs = getPendingCount($conn, "lab_results", $pharmacy_id, $branch_id);
+$pending_help = getPendingCount($conn, "help_inquiries", $pharmacy_id, $branch_id);
+
+$total_app_alerts = $pending_rx + $pending_labs + $pending_help;
+
+// ==============================
+// 📦 PENDING PURCHASE ORDERS
+// ==============================
+$po_res = safe_query($conn, "SELECT COUNT(*) AS total FROM purchase_orders WHERE pharmacy_id = '{$pharmacy_id}' AND branch_id = '{$branch_id}' AND status IN ('draft', 'ordered', 'partial')");
+$pending_orders_count = $po_res ? (int)(mysqli_fetch_assoc($po_res)['total'] ?? 0) : 0;
 
 require_once "../includes/head.php";
 ?>
@@ -69,7 +90,7 @@ require_once "../includes/head.php";
 
         <div class="container-fluid p-0">
             <div class="row g-3">
-                <!-- Main Tiles: 3 Columns on Desktop, 2 Columns on Mobile -->
+                <!-- Main Tiles -->
                 <div class="col-lg-9">
                     <div class="mobile-tile-grid">
                         <a href="sell_now.php" class="card card-dash bg-tile-sellnow">
@@ -111,9 +132,10 @@ require_once "../includes/head.php";
                             <span class="fw-bold small" style="color: #6c5ce7;"><i class="mdi mdi-bell-ring-outline me-1"></i> Urgent Alerts</span>
                         </div>
                         <div class="list-group list-group-flush small">
-                            <a href="waiting_patients.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0">
-                                <span class="text-secondary fw-semibold">Patients Waiting</span>
-                                <span class="badge bg-danger rounded-pill"><?php echo $patients_data['total'] ?? 0; ?></span>
+                            <!-- 1. App Alerts (Online Manager: Rx, Labs & Inquiries) -->
+                            <a href="online_manager.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0" style="background-color: #f0f3ff;">
+                                <span class="text-primary fw-semibold"><i class="fas fa-mobile-alt me-1"></i> App Alerts</span>
+                                <span class="badge bg-primary rounded-pill"><?php echo $total_app_alerts; ?></span>
                             </a>
                             <a href="out_of_stock.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0" style="background-color: #fef5e7;">
                                 <span class="text-dark fw-semibold">Out of Stock</span>
@@ -123,9 +145,10 @@ require_once "../includes/head.php";
                                 <span class="text-danger fw-semibold">Expired Products</span>
                                 <span class="badge bg-danger rounded-pill"><?php echo $expired_data['expired'] ?? 2; ?></span>
                             </a>
-                            <a href="pending_orders.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0">
-                                <span class="text-secondary fw-semibold">Pending orders</span>
-                                <span class="badge bg-secondary rounded-pill">0</span>
+                            <!-- 2. Pending Purchase Orders Alert -->
+                            <a href="purchase_orders_list.php" class="list-group-item d-flex justify-content-between align-items-center py-2 border-0">
+                                <span class="text-secondary fw-semibold">Pending Orders</span>
+                                <span class="badge bg-info rounded-pill"><?php echo $pending_orders_count; ?></span>
                             </a>
                         </div>
                     </div>
