@@ -6,6 +6,9 @@ if (session_status() === PHP_SESSION_NONE) {
 // 1. Establish connection
 require_once(__DIR__ . "/../includes/conn.php");
 
+// Project Root Definition for clean paths across subfolders
+$project_root = "/pharmacy_v1-master"; 
+
 // 2. Get Branch ID from URL, default to 10
 $branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : 10; 
 
@@ -39,7 +42,6 @@ if (!$tenant_context) {
 }
 
 $cat_query = $conn->query("SELECT * FROM categories WHERE status = 1 LIMIT 8");
-$project_root = "/pharmacy_v1-master"; 
 $db_logo = $tenant_context['tenant_logo']; 
 $logo_filename = (!empty($db_logo)) ? $db_logo : 'default_logo.png';
 $logo_web_path = $project_root . "/uploads/logos/" . $logo_filename;
@@ -145,14 +147,13 @@ if(isset($_SESSION['client_id'])) {
                 <?php echo htmlspecialchars($pharmacy_name); ?>
             </h3>
             <div class="dropdown">
-                <div class="location-selector dropdown-toggle" data-bs-toggle="dropdown">
+                <button class="btn btn-link p-0 text-decoration-none location-selector dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                     <i class="mdi mdi-map-marker-outline fs-6"></i> 
                     <span class="text-primary"><?php echo htmlspecialchars($branch_name); ?></span>
-                </div>
-                <ul class="dropdown-menu shadow border-0">
+                </button>
+                <ul class="dropdown-menu shadow border-0" style="z-index: 1050;">
                     <li class="dropdown-header small text-uppercase fw-bold text-muted">Switch Branch</li>
                     <?php 
-                    // Dynamic URI handling to keep users on the current page when switching branches
                     $current_page = $_SERVER['PHP_SELF'];
                     $query_params = $_GET;
 
@@ -193,14 +194,14 @@ if(isset($_SESSION['client_id'])) {
                        <?php echo $is_subscribed ? '✓ Subscribed' : 'Subscribe'; ?>
                     </a>
                 <?php else: ?>
-                    <a href="login_client.php" class="apollo-nav-pill">Login</a>
+                    <a href="<?php echo $project_root; ?>/login_client.php" class="apollo-nav-pill">Login</a>
                 <?php endif; ?>
-                <a href="api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Pharmacists</a>
-                <a href="api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Prescriptions</a>
+                <a href="<?php echo $project_root; ?>/api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Pharmacists</a>
+                <a href="<?php echo $project_root; ?>/api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Prescriptions</a>
             </nav>
 
             <div class="d-flex align-items-center gap-2">
-                <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>api/view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
+                <a href="<?php echo $project_root; ?>/api/view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
                     <i class="mdi mdi-cart-outline fs-4"></i>
                     <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge" style="font-size: 9px;">
                         <?php 
@@ -238,19 +239,18 @@ if(isset($_SESSION['client_id'])) {
                             <h6><?php echo htmlspecialchars($user_data['full_name'] ?? ''); ?></h6>
                             <p>User ID: #<?php echo str_pad($user_data['id'] ?? 0, 5, '0', STR_PAD_LEFT); ?></p>
                             <hr class="my-1">
-                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
-                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
+                            <a href="<?php echo $project_root; ?>/profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
+                            <a href="<?php echo $project_root; ?>/client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
                         <?php else: ?>
                             <h6>Guest Menu</h6>
                             <hr class="my-1">
-                            <a href="login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
+                            <a href="<?php echo $project_root; ?>/login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
                         <?php endif; ?>
 
-                        <!-- Mobile Fallback Links (Only visible on screens smaller than LG) -->
                         <div class="d-lg-none">
                             <hr class="my-1">
-                            <a href="api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
-                            <a href="api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a>
+                            <a href="<?php echo $project_root; ?>/api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
+                            <a href="<?php echo $project_root; ?>/api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a>
                             
                             <?php if(isset($_SESSION['client_id'])): 
                                 $check_sub = $conn->prepare("SELECT id FROM customers WHERE client_id = ? AND branch_id = ?");
@@ -272,7 +272,7 @@ if(isset($_SESSION['client_id'])) {
 
                         <?php if(isset($_SESSION['client_id'])): ?>
                             <hr class="my-1">
-                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
+                            <a href="<?php echo $project_root; ?>/logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -307,7 +307,7 @@ if(isset($_SESSION['client_id'])) {
                     <img src="<?php echo $logo_web_path; ?>" 
                          alt="Logo" 
                          style="height: 38px; width: 38px; object-fit: contain;"
-                         onerror="this.src='assets/img/default_logo.png';">
+                         onerror="this.src='<?php echo $project_root; ?>/assets/img/default_logo.png';">
                     <div>
                         <h5 class="mb-0 fw-bold text-white" style="font-size: 1rem; line-height: 1.1;">
                             <?php echo htmlspecialchars($pharmacy_name); ?>
@@ -318,7 +318,7 @@ if(isset($_SESSION['client_id'])) {
             </div>
 
             <div class="col-12 col-md-5 col-lg-5">
-                <form action="api/search.php" method="GET" class="hng-search-container">
+                <form action="<?php echo $project_root; ?>/api/search.php" method="GET" class="hng-search-container">
                     <input type="hidden" name="bid" value="<?php echo $branch_id; ?>">
                     <select name="type">
                         <option value="all">All</option>
@@ -331,14 +331,14 @@ if(isset($_SESSION['client_id'])) {
 
             <div class="col-12 col-md-4 col-lg-4 mt-2 mt-md-0">
                 <div class="nav-icon-grid">
-                    <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="<?php echo $project_root; ?>/online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-home"></i>Home
                     </a>
                     <a href="#" class="hng-nav-icon"><i class="mdi mdi-view-grid"></i>Category</a>
-                    <a href="api/offers.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="<?php echo $project_root; ?>/api/offers.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-label-percent"></i>Offer
                     </a>
-                    <a href="help.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="<?php echo $project_root; ?>/help.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-help-circle"></i>Help
                     </a>
                     <a href="javascript:void(0);" onclick="openBankDetails()" class="hng-nav-icon">
@@ -350,3 +350,6 @@ if(isset($_SESSION['client_id'])) {
         </div>
     </div>
 </div>
+
+<!-- Ensure Bootstrap JS bundle is included so dropdown toggles work on ALL pages -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
