@@ -2,27 +2,23 @@
 // 1. Header handles session_start() and database connection
 require "api/store_header.php"; 
 
-// 2. Override default branch choice safely
-if (isset($_GET['bid'])) {
-    $_SESSION['branch_id'] = intval($_GET['bid']);
-    $branch_id = $_SESSION['branch_id']; 
+// 2. Fetch products using Prepared Statements
+$category_filter = isset($_GET['cat']) ? trim($_GET['cat']) : '';
+
+if ($category_filter !== '') {
+    $product_sql = "SELECT id, item_name, strength, category, price, image FROM store_items 
+                    WHERE branch_id = ? AND is_active = 1 AND is_online = 1 AND category = ? LIMIT 12";
+    $p_stmt = $conn->prepare($product_sql);
+    $p_stmt->bind_param("is", $branch_id, $category_filter);
 } else {
-    $branch_id = isset($_SESSION['branch_id']) ? $_SESSION['branch_id'] : 1;
+    $product_sql = "SELECT id, item_name, strength, category, price, image FROM store_items 
+                    WHERE branch_id = ? AND is_active = 1 AND is_online = 1 LIMIT 12";
+    $p_stmt = $conn->prepare($product_sql);
+    $p_stmt->bind_param("i", $branch_id);
 }
 
-// 3. Fetch products
-$category_filter = isset($_GET['cat']) ? $_GET['cat'] : '';
-
-$product_sql = "SELECT id, item_name, strength, category, price, image FROM store_items 
-                WHERE branch_id = '$branch_id' 
-                AND is_active = 1 
-                AND is_online = 1";
-
-if ($category_filter != '') {
-    $product_sql .= " AND category = '" . $conn->real_escape_string($category_filter) . "'";
-}
-
-$items = $conn->query($product_sql . " LIMIT 12");
+$p_stmt->execute();
+$items = $p_stmt->get_result();
 ?>
 
 <style>
@@ -42,7 +38,7 @@ $items = $conn->query($product_sql . " LIMIT 12");
     }
 </style>
 
-<!-- Action Banners (Mobile Responsive Stack) -->
+<!-- Action Banners -->
 <div class="container mt-3 mt-md-4">
     <div class="row g-2 g-md-3">
         <div class="col-6 col-md-3">
@@ -102,23 +98,23 @@ $items = $conn->query($product_sql . " LIMIT 12");
         <a href="all_products.php?bid=<?php echo $branch_id; ?>" class="text-primary fw-bold text-decoration-none small">VIEW ALL</a>
     </div>
 
-    <!-- Responsive Grid: 2 columns on phones, 3 on small tablets, 4 on medium screens, 6 on large desktop -->
     <div class="row g-2 g-md-3" id="product-grid"> 
         <?php 
         if($items && $items->num_rows > 0):
             while($row = $items->fetch_assoc()): 
                 $img_name = (!empty($row['image'])) ? $row['image'] : 'default_med.png';
-                $img_path = "uploads/products/" . $img_name;
+                $local_path = __DIR__ . "/uploads/products/" . $img_name;
+                $web_path = "uploads/products/" . $img_name;
                 
-                if(!file_exists($img_path)) {
-                    $img_path = "assets/img/default_med.png";
+                if(!file_exists($local_path)) {
+                    $web_path = "assets/img/default_med.png";
                 }
             ?>
             <div class="col-6 col-sm-4 col-md-3 col-lg-2"> 
                 <div class="product-card shadow-sm h-100 d-flex flex-column justify-content-between p-2 p-md-3">
                     <a href="api/product_details.php?id=<?php echo $row['id']; ?>&bid=<?php echo $branch_id; ?>" class="product-link">
                         <div class="text-center mb-2">
-                            <img src="<?php echo $img_path; ?>" class="img-fluid" style="height:85px; object-fit: contain;" alt="<?php echo htmlspecialchars($row['item_name']); ?>">
+                            <img src="<?php echo $web_path; ?>" class="img-fluid" style="height:85px; object-fit: contain;" alt="<?php echo htmlspecialchars($row['item_name']); ?>">
                         </div>
                         <div>
                             <div class="product-title fw-bold" style="font-size: 13px; line-height: 1.2;">
@@ -148,7 +144,7 @@ $items = $conn->query($product_sql . " LIMIT 12");
     <i class="mdi mdi-whatsapp"></i>
 </a>
 
-<?php if(file_exists("includes/footer.php")) require "includes/footer.php"; ?>
+<?php if(file_exists(__DIR__ . "/includes/footer.php")) require __DIR__ . "/includes/footer.php"; ?>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
