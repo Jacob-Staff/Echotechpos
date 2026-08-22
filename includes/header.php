@@ -43,7 +43,7 @@ $today_date = date('d M Y');
                 <span class="logo-text fw-bold text-white fs-5"><?php echo htmlspecialchars($pharmacy_name); ?></span>
             </a>
             <!-- Mobile Settings Button Trigger -->
-            <button class="btn btn-link text-white d-md-none ms-auto p-1 js-settings-trigger" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas">
+            <button class="btn btn-link text-white d-md-none ms-auto p-1" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas">
                 <i class="fas fa-cog"></i>
             </button>
         </div>
@@ -74,8 +74,8 @@ $today_date = date('d M Y');
                     <a href="sell_now.php" class="btn btn-success btn-sm px-2 py-1" title="Sell Now"><i class="fas fa-plus"></i></a>
                 </li>
                 <li class="nav-item">
-                    <!-- Correct Offcanvas Drawer Trigger -->
-                    <button class="btn btn-outline-light btn-sm px-2 py-1 js-settings-trigger" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas" title="Settings">
+                    <!-- Offcanvas Drawer Trigger -->
+                    <button class="btn btn-outline-light btn-sm px-2 py-1" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-controls="settingsOffcanvas" title="Settings">
                         <i class="fas fa-cog"></i>
                     </button>
                 </li>
@@ -85,31 +85,76 @@ $today_date = date('d M Y');
     </nav>
 </header>
 
-<!-- Global Event Handler for Nav Toggle & Settings Offcanvas -->
+<!-- Global Settings Offcanvas Drawer -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="settingsOffcanvas" aria-labelledby="settingsOffcanvasLabel" style="width: 320px;">
+    <div class="offcanvas-header border-bottom py-3">
+        <div class="w-100 text-center">
+            <h5 class="offcanvas-title fw-bold mb-0 text-dark" id="settingsOffcanvasLabel">Welcome, <?php echo htmlspecialchars($_SESSION['username'] ?? 'Jac'); ?></h5>
+            <small class="text-muted text-uppercase fw-semibold" style="font-size: 0.75rem; letter-spacing: 0.5px;"><?php echo htmlspecialchars($pharmacy_name); ?></small>
+        </div>
+        <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+
+    <div class="offcanvas-body p-3">
+        <!-- Assigned Branch Info Box -->
+        <div class="card bg-light border-primary mb-4">
+            <div class="card-body p-3">
+                <div class="d-flex align-items-center gap-2 text-primary fw-semibold mb-1 small">
+                    <i class="fas fa-lock"></i> Assigned Branch
+                </div>
+                <div class="fw-bold text-dark"><?php echo htmlspecialchars($branch_name); ?></div>
+            </div>
+        </div>
+
+        <!-- User Configuration Form -->
+        <form action="../update_settings.php" method="POST">
+            <h6 class="fw-bold text-primary mb-3 small">Configure User Details</h6>
+
+            <div class="mb-3">
+                <label class="form-label text-muted small fw-semibold mb-1">Mobile Number</label>
+                <input type="text" name="mobile" class="form-control form-control-sm bg-light" value="0974140989">
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label text-muted small fw-semibold mb-1">New Password</label>
+                <input type="password" name="password" class="form-control form-control-sm bg-light" placeholder="Leave blank to keep current">
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-sm w-100 py-2 fw-semibold mb-4" style="background-color: #6c5ce7; border: none;">Update Profile</button>
+
+            <!-- POS Configuration Section -->
+            <h6 class="fw-bold text-dark mb-3 small">POS Configuration</h6>
+
+            <div class="mb-3">
+                <label class="form-label text-muted small fw-semibold mb-1">Currency</label>
+                <input type="text" name="currency" class="form-control form-control-sm bg-light" value="ZMW">
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label text-muted small fw-semibold mb-1">Tax Rate (%)</label>
+                <input type="number" name="tax_rate" class="form-control form-control-sm bg-light" value="16">
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Global Mobile Navigation Script -->
 <script>
-document.addEventListener("DOMContentLoaded", function () {
-    // 1. Sidebar Toggle Fix across all pages
-    const sidebarToggle = document.getElementById("sidebarToggle");
+document.addEventListener('DOMContentLoaded', function() {
+    const sidebarToggle = document.getElementById('sidebarToggle');
     if (sidebarToggle) {
-        sidebarToggle.addEventListener("click", function (e) {
+        sidebarToggle.addEventListener('click', function(e) {
             e.preventDefault();
-            const sidebar = document.querySelector(".left-sidebar");
-            if (sidebar) {
-                sidebar.classList.toggle("show-sidebar");
-            }
+            document.body.classList.toggle('mobile-nav-open');
         });
     }
 
-    // 2. Settings Offcanvas Fallback Trigger
-    const settingsTriggers = document.querySelectorAll('.js-settings-trigger');
-    settingsTriggers.forEach(function (btn) {
-        btn.addEventListener('click', function (e) {
-            const targetEl = document.getElementById('settingsOffcanvas');
-            if (targetEl && typeof bootstrap !== 'undefined' && bootstrap.Offcanvas) {
-                const bsOffcanvas = bootstrap.Offcanvas.getOrCreateInstance(targetEl);
-                bsOffcanvas.toggle();
-            }
-        });
+    document.addEventListener('click', function(e) {
+        if (document.body.classList.contains('mobile-nav-open') && 
+            !e.target.closest('.left-sidebar') && 
+            !e.target.closest('#sidebarToggle')) {
+            document.body.classList.remove('mobile-nav-open');
+        }
     });
 });
 </script>
