@@ -115,7 +115,7 @@ if(isset($_SESSION['client_id'])) {
             position: absolute;
             right: 0;
             background-color: white;
-            min-width: 200px;
+            min-width: 220px;
             box-shadow: 0px 8px 16px rgba(0,0,0,0.15);
             border-radius: 8px;
             z-index: 1001;
@@ -126,6 +126,7 @@ if(isset($_SESSION['client_id'])) {
         .user-menu h6 { margin: 0; color: var(--echo-teal); font-weight: 700; }
         .user-menu p { margin: 2px 0; font-size: 11px; color: #666; }
         .menu-link { display: block; padding: 6px 0; color: #333; text-decoration: none; font-size: 12px; font-weight: 600; }
+        .menu-link:hover { color: var(--echo-green); }
         
         @media (max-width: 576px) {
             .brand-header-text { font-size: 1.1rem !important; }
@@ -166,7 +167,8 @@ if(isset($_SESSION['client_id'])) {
         </div>
 
         <div class="d-flex align-items-center gap-2">
-            <nav class="d-none d-xl-flex">
+            <!-- Desktop Header Pills -->
+            <nav class="d-none d-lg-flex">
                 <?php if(isset($_SESSION['client_id'])): 
                     $check_sub = $conn->prepare("SELECT id FROM customers WHERE client_id = ? AND branch_id = ?");
                     $check_sub->bind_param("ii", $_SESSION['client_id'], $branch_id);
@@ -221,19 +223,51 @@ if(isset($_SESSION['client_id'])) {
                         <span class="d-none d-sm-inline"><?php echo isset($_SESSION['client_name']) ? explode(' ', $_SESSION['client_name'])[0] : 'Account'; ?></span>
                     </button>
                     
-                    <?php if(isset($_SESSION['client_id'])): 
-                        $uid = $_SESSION['client_id'];
-                        $user_data = $conn->query("SELECT id, full_name, phone FROM clients WHERE id = '$uid'")->fetch_assoc();
-                    ?>
                     <div class="user-menu">
-                        <h6><?php echo htmlspecialchars($user_data['full_name'] ?? ''); ?></h6>
-                        <p>User ID: #<?php echo str_pad($user_data['id'] ?? 0, 5, '0', STR_PAD_LEFT); ?></p>
-                        <hr class="my-1">
-                        <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
-                        <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
-                        <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
+                        <?php if(isset($_SESSION['client_id'])): 
+                            $uid = $_SESSION['client_id'];
+                            $user_data = $conn->query("SELECT id, full_name, phone FROM clients WHERE id = '$uid'")->fetch_assoc();
+                        ?>
+                            <h6><?php echo htmlspecialchars($user_data['full_name'] ?? ''); ?></h6>
+                            <p>User ID: #<?php echo str_pad($user_data['id'] ?? 0, 5, '0', STR_PAD_LEFT); ?></p>
+                            <hr class="my-1">
+                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
+                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
+                        <?php else: ?>
+                            <h6>Guest Menu</h6>
+                            <hr class="my-1">
+                            <a href="login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
+                        <?php endif; ?>
+
+                        <!-- Mobile Fallback Links (Only visible on screens smaller than LG) -->
+                        <div class="d-lg-none">
+                            <hr class="my-1">
+                            <a href="api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
+                            <a href="api/upload_prescription.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a>
+                            
+                            <?php if(isset($_SESSION['client_id'])): 
+                                $check_sub = $conn->prepare("SELECT id FROM customers WHERE client_id = ? AND branch_id = ?");
+                                $check_sub->bind_param("ii", $_SESSION['client_id'], $branch_id);
+                                $check_sub->execute();
+                                $is_subscribed = $check_sub->get_result()->num_rows > 0;
+                            ?>
+                                <a href="javascript:void(0);" 
+                                   id="subscribeBtnMobile" 
+                                   class="menu-link text-success fw-bold" 
+                                   data-client="<?php echo $_SESSION['client_id']; ?>" 
+                                   data-branch="<?php echo $branch_id; ?>" 
+                                   data-pharmacy="<?php echo $parent_pharmacy_id; ?>"
+                                   data-status="<?php echo $is_subscribed ? 'subscribed' : 'unsubscribed'; ?>">
+                                   <i class="mdi mdi-bell-ring-outline"></i> <?php echo $is_subscribed ? '✓ Subscribed' : 'Subscribe'; ?>
+                                </a>
+                            <?php endif; ?>
+                        </div>
+
+                        <?php if(isset($_SESSION['client_id'])): ?>
+                            <hr class="my-1">
+                            <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
+                        <?php endif; ?>
                     </div>
-                    <?php endif; ?>
                 </div>
             </div>
         </div>
