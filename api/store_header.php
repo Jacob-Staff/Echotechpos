@@ -5,10 +5,6 @@ if (session_status() === PHP_SESSION_NONE) {
 
 if (isset($_GET['bid'])) {
     $new_branch = intval($_GET['bid']);
-    if (isset($_SESSION['current_branch_id']) && $_SESSION['current_branch_id'] !== $new_branch) {
-        // Clear cart when branch changes
-        unset($_SESSION['cart']);
-    }
     $_SESSION['current_branch_id'] = $new_branch;
 }
 
@@ -16,9 +12,9 @@ if (isset($_GET['bid'])) {
 require_once(__DIR__ . "/../includes/conn.php");
 
 // 2. Get Branch ID from URL, default to 10
-$branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : 10; 
+$branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : (isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 10); 
 
-// 3. Multi-Tenant Query (Fixes 'Unknown column name' by using explicit aliases & table references)
+// 3. Multi-Tenant Query
 $sql = "SELECT 
             p.id as pharmacy_id,
             p.name as tenant_name, 
@@ -110,18 +106,15 @@ if (isset($_SESSION['client_id'])) {
             padding: 0;
         }
         
-        /* Tier 1 Adjustments */
         .tier-1-utility { background: #fff; border-bottom: 1px solid #eee; padding: 8px 0; width: 100%; }
         .location-selector { font-size: 12px; color: var(--echo-teal); font-weight: 600; cursor: pointer; }
         .apollo-nav-pill { color: #555; text-decoration: none; font-weight: 700; font-size: 13px; margin-right: 15px; transition: 0.3s; white-space: nowrap; }
         .apollo-nav-pill:hover, .apollo-nav-pill.active { color: var(--echo-teal); border-bottom: 3px solid var(--echo-green); padding-bottom: 2px; }
         
-        /* Tier 2 Category Strip */
         .tier-2-strip { background: var(--echo-teal); padding: 8px 0; overflow-x: auto; white-space: nowrap; width: 100%; -webkit-overflow-scrolling: touch; }
         .strip-link { color: #fff !important; font-size: 11px; font-weight: 700; text-decoration: none; margin: 0 10px; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block; }
         .strip-link:hover { color: var(--echo-green) !important; }
         
-        /* Tier 3 Action Area */
         .tier-3-action { background: var(--echo-blue); padding: 12px 0; color: white; width: 100%; }
         .hng-logo-area { display: flex; align-items: center; gap: 8px; }
         .hng-search-container { background: white; border-radius: 4px; display: flex; align-items: center; overflow: hidden; width: 100%; }
@@ -129,7 +122,6 @@ if (isset($_SESSION['client_id'])) {
         .hng-search-container input { border: none; padding: 8px 12px; width: 100%; outline: none; color: #333; font-size: 13px; }
         .hng-search-btn { background: #eee; border: none; padding: 8px 15px; color: var(--echo-blue); }
         
-        /* Mobile Icon Strip */
         .nav-icon-grid { display: flex; justify-content: space-around; width: 100%; }
         .hng-nav-icon { color: white; text-decoration: none; text-align: center; font-size: 10px; font-weight: 600; flex: 1; }
         .hng-nav-icon i { background: white; color: var(--echo-blue); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; margin: 0 auto 2px; font-size: 14px; }
@@ -177,7 +169,6 @@ if (isset($_SESSION['client_id'])) {
                 <ul class="dropdown-menu shadow border-0">
                     <li class="dropdown-header small text-uppercase fw-bold text-muted">Switch Branch</li>
 <?php 
-// Always route branch switching to online_store.php
 $base_store_url = (defined('BASE_URL') ? BASE_URL : '') . 'online_store.php';
 
 $stmt_br = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1");
@@ -187,7 +178,6 @@ if ($stmt_br) {
     $br_list = $stmt_br->get_result();
 
     while ($bl = $br_list->fetch_assoc()): 
-        // Force redirect to online_store.php?bid=X
         $switch_url = htmlspecialchars($base_store_url . '?bid=' . $bl['id']);
     ?>
         <li>
@@ -234,17 +224,17 @@ if ($stmt_br) {
             <div class="d-flex align-items-center gap-2">
                 <a href="<?php echo defined('BASE_URL') ? BASE_URL : ''; ?>api/view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
                     <i class="mdi mdi-cart-outline fs-4"></i>
-<span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge" style="font-size: 9px;">
-    <?php 
-    $cart_count = 0;
-    if (isset($_SESSION['carts'][$branch_id]) && is_array($_SESSION['carts'][$branch_id])) {
-        foreach ($_SESSION['carts'][$branch_id] as $item) {
-            $cart_count += isset($item['qty']) ? intval($item['qty']) : 1;
-        }
-    }
-    echo $cart_count; 
-    ?>
-</span>
+                    <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge" style="font-size: 9px;">
+                        <?php 
+                        $cart_count = 0;
+                        if (isset($_SESSION['carts'][$branch_id]) && is_array($_SESSION['carts'][$branch_id])) {
+                            foreach ($_SESSION['carts'][$branch_id] as $item) {
+                                $cart_count += isset($item['qty']) ? intval($item['qty']) : 1;
+                            }
+                        }
+                        echo $cart_count; 
+                        ?>
+                    </span>
                 </a>
 
                 <?php if(isset($_SESSION['client_id'])): ?>
@@ -287,7 +277,6 @@ if ($stmt_br) {
                             <a href="login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
                         <?php endif; ?>
 
-                        <!-- Mobile Fallback Links (Only visible on screens smaller than LG) -->
                         <div class="d-lg-none">
                             <hr class="my-1">
                             <a href="api/pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
