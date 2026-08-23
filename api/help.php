@@ -3,42 +3,47 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// 1. Resolve Branch ID prior to header inclusion
+// 1. Context Branch ID Resolution
 if (isset($_GET['bid']) && intval($_GET['bid']) > 0) {
     $branch_id = intval($_GET['bid']);
     $_SESSION['current_branch_id'] = $branch_id;
 } elseif (isset($_SESSION['current_branch_id']) && intval($_SESSION['current_branch_id']) > 0) {
     $branch_id = intval($_SESSION['current_branch_id']);
 } else {
-    $branch_id = 10; // Default fallback branch ID
+    $branch_id = 10;
     $_SESSION['current_branch_id'] = $branch_id;
 }
 
-// 2. Include header after setting branch context
+// 2. Include Header
 require_once("store_header.php"); 
 
-// Extract context variables safely with fallbacks
-$p_id = isset($tenant_context['pharmacy_id']) ? intval($tenant_context['pharmacy_id']) : ($parent_pharmacy_id ?? 0);
-$branch_phone = !empty($tenant_context['branch_phone']) ? $tenant_context['branch_phone'] : '260974140989';
+// Context safe extraction
+$p_id            = isset($tenant_context['pharmacy_id']) ? intval($tenant_context['pharmacy_id']) : ($parent_pharmacy_id ?? 0);
+$branch_phone    = !empty($tenant_context['branch_phone']) ? $tenant_context['branch_phone'] : '260974140989';
 $branch_location = !empty($tenant_context['location']) ? $tenant_context['location'] : 'Lusaka';
 
-// Form submission handling using Prepared Statements
+// Form Handling
 $message_sent = false;
+$error_msg    = "";
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
     $name    = trim($_POST['name'] ?? '');
-    $email   = trim($_POST['email'] ?? '');
+    $email   = filter_var(trim($_POST['email'] ?? ''), FILTER_VALIDATE_EMAIL);
     $subject = trim($_POST['subject'] ?? 'General Inquiry');
     $msg     = trim($_POST['message'] ?? '');
 
-    if (!empty($name) && !empty($email) && !empty($msg)) {
-        $ins_stmt = $conn->prepare("INSERT INTO help_inquiries (pharmacy_id, branch_id, client_name, client_email, subject, message) VALUES (?, ?, ?, ?, ?, ?)");
-        if ($ins_stmt) {
+    if ($name && $email && $msg) {
+        if ($ins_stmt = $conn->prepare("INSERT INTO help_inquiries (pharmacy_id, branch_id, client_name, client_email, subject, message) VALUES (?, ?, ?, ?, ?, ?)")) {
             $ins_stmt->bind_param("iissss", $p_id, $branch_id, $name, $email, $subject, $msg);
             if ($ins_stmt->execute()) {
                 $message_sent = true;
+            } else {
+                $error_msg = "Database insert failed. Please try again.";
             }
             $ins_stmt->close();
         }
+    } else {
+        $error_msg = "Please fill in all required fields with a valid email.";
     }
 }
 ?>
@@ -125,7 +130,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
 </head>
 <body class="bg-light">
 
-<!-- Mobile-Responsive Hero Section -->
 <div class="help-hero text-center">
     <div class="container">
         <h1 class="fs-2 fs-md-1 fw-bold mb-2 animate__animated animate__fadeInDown">How can we help today?</h1>
@@ -134,12 +138,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
 </div>
 
 <div class="container mb-5">
-    <!-- Live Search Input -->
     <div class="search-container animate__animated animate__zoomIn">
         <input type="text" id="faqSearch" class="form-control search-input" placeholder="Search for answers (e.g. delivery, payments)...">
     </div>
 
-    <!-- Quick Support Cards -->
     <div class="row g-3 g-md-4 mt-3 mt-md-4">
         <div class="col-12 col-sm-6 col-md-4 text-center">
             <div class="support-card p-3 p-md-4">
@@ -167,9 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
         </div>
     </div>
 
-    <!-- FAQ + Form Section -->
     <div class="row mt-4 mt-md-5 pt-2 pt-md-3">
-        <!-- FAQ Accordion -->
         <div class="col-lg-7 mb-4 mb-lg-0">
             <h4 class="fw-bold mb-3 mb-md-4" style="color: var(--echo-teal, #003339);">Common Questions</h4>
             <div class="faq-list" id="faqList">
@@ -212,7 +212,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
             </div>
         </div>
 
-        <!-- Contact Form -->
         <div class="col-lg-5">
             <div class="card contact-form-card p-3 p-md-4">
                 <h5 class="fw-bold mb-3" style="color: var(--echo-teal, #003339);">Send a Message</h5>
@@ -248,12 +247,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
 </div>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
 
 <script>
     $(document).ready(function() {
-        // 1. Accordion Toggle Logic
-        $('.faq-question').click(function() {
+        // Accordion Toggle Logic
+        $('.faq-question').on('click', function() {
             const answer = $(this).next('.faq-answer');
             const icon = $(this).find('i');
             
@@ -266,7 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
             }
         });
 
-        // 2. Live Search Filter
+        // Live Search Filter
         $("#faqSearch").on("keyup", function() {
             var value = $(this).val().toLowerCase();
             $("#faqList .faq-item").filter(function() {
@@ -276,7 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
             });
         });
 
-        // 3. Success Notification Toast
+        // Toast Messages
         <?php if($message_sent): ?>
         Toastify({
             text: "Message sent! We will contact you shortly.",
@@ -285,6 +285,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
             gravity: "top",
             position: "center",
             style: { background: "linear-gradient(to right, #00b386, #003339)" }
+        }).showToast();
+        <?php elseif(!empty($error_msg)): ?>
+        Toastify({
+            text: "<?php echo htmlspecialchars($error_msg); ?>",
+            duration: 5000,
+            close: true,
+            gravity: "top",
+            position: "center",
+            style: { background: "linear-gradient(to right, #e63946, #b71c1c)" }
         }).showToast();
         <?php endif; ?>
     });
