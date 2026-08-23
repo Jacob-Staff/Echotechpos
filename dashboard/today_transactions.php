@@ -218,6 +218,7 @@ $display_bran =
 |--------------------------------------------------------------------------
 |
 | Every dynamic value is bound as a parameter.
+| The business date uses sales.sale_date, matching dashboard.php.
 | No user-supplied filter is concatenated into SQL.
 |--------------------------------------------------------------------------
 */
@@ -225,7 +226,7 @@ $display_bran =
 $where = [
     "s.pharmacy_id = ?",
     "s.branch_id = ?",
-    "DATE(s.created_at) = ?"
+    "DATE(s.sale_date) = ?"
 ];
 
 $params = [
@@ -1546,7 +1547,7 @@ require_once "../includes/head.php";
                                     ?: 'Cash';
 
                                 $createdAt =
-                                    $row['created_at']
+                                    $row['sale_date']
                                     ?? '';
 
                                 $timeDisplay = 'N/A';
