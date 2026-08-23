@@ -53,9 +53,9 @@ function is_active_menu($page_name, $current_page) {
         <nav class="sidebar-nav pt-2">
             <ul id="sidebarnav" class="list-unstyled mb-0">
                 <li class="sidebar-item mb-1">
-                    <a class="sidebar-link <?= is_active_menu('top_up_pharmacy.php', $current_page); ?>" href="../api/online_store.php">
+                    <a class="sidebar-link <?= is_active_menu('login_client.php', $current_page); ?>" href="../api/logine_client.php">
                         <i class="mdi mdi-plus-box-outline me-2"></i><span>Online App</span>
-                    </a>
+                    </a> 
                 </li>
                 <li class="sidebar-item mb-1">
                     <a class="sidebar-link <?= is_active_menu('dashboard.php', $current_page); ?>" href="../dashboard/dashboard.php">
