@@ -3,11 +3,22 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// 1. Resolve Branch ID prior to header inclusion
+if (isset($_GET['bid']) && intval($_GET['bid']) > 0) {
+    $branch_id = intval($_GET['bid']);
+    $_SESSION['current_branch_id'] = $branch_id;
+} elseif (isset($_SESSION['current_branch_id']) && intval($_SESSION['current_branch_id']) > 0) {
+    $branch_id = intval($_SESSION['current_branch_id']);
+} else {
+    $branch_id = 10; // Default fallback branch ID
+    $_SESSION['current_branch_id'] = $branch_id;
+}
+
+// 2. Include header after setting branch context
 require_once("store_header.php"); 
 
-// Safely extract context variables with robust fallbacks
+// Extract context variables safely with fallbacks
 $p_id = isset($tenant_context['pharmacy_id']) ? intval($tenant_context['pharmacy_id']) : ($parent_pharmacy_id ?? 0);
-$b_id = isset($branch_id) ? intval($branch_id) : 10;
 $branch_phone = !empty($tenant_context['branch_phone']) ? $tenant_context['branch_phone'] : '260974140989';
 $branch_location = !empty($tenant_context['location']) ? $tenant_context['location'] : 'Lusaka';
 
@@ -22,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
     if (!empty($name) && !empty($email) && !empty($msg)) {
         $ins_stmt = $conn->prepare("INSERT INTO help_inquiries (pharmacy_id, branch_id, client_name, client_email, subject, message) VALUES (?, ?, ?, ?, ?, ?)");
         if ($ins_stmt) {
-            $ins_stmt->bind_param("iissss", $p_id, $b_id, $name, $email, $subject, $msg);
+            $ins_stmt->bind_param("iissss", $p_id, $branch_id, $name, $email, $subject, $msg);
             if ($ins_stmt->execute()) {
                 $message_sent = true;
             }
@@ -118,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
 <div class="help-hero text-center">
     <div class="container">
         <h1 class="fs-2 fs-md-1 fw-bold mb-2 animate__animated animate__fadeInDown">How can we help today?</h1>
-        <p class="lead opacity-75 fs-6 mb-0">Support for <?php echo htmlspecialchars($pharmacy_name); ?> - <?php echo htmlspecialchars($branch_name); ?></p>
+        <p class="lead opacity-75 fs-6 mb-0">Support for <?php echo htmlspecialchars($pharmacy_name ?? 'Pharmacy'); ?> - <?php echo htmlspecialchars($branch_name ?? 'Branch'); ?></p>
     </div>
 </div>
 
@@ -143,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
                 <div class="mb-2 text-primary"><i class="mdi mdi-file-document-edit-outline" style="font-size: 40px;"></i></div>
                 <h6 class="fw-bold fs-6">Prescription Help</h6>
                 <p class="text-muted small mb-3">Need help uploading your prescription?</p>
-                <a href="upload_prescription.php?bid=<?php echo $b_id; ?>" class="btn btn-outline-primary rounded-pill px-4 btn-sm fw-bold w-100 w-sm-auto">Upload Script</a>
+                <a href="upload_prescription.php?bid=<?php echo $branch_id; ?>" class="btn btn-outline-primary rounded-pill px-4 btn-sm fw-bold w-100 w-sm-auto">Upload Script</a>
             </div>
         </div>
         <div class="col-12 col-md-4 text-center">
@@ -195,7 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
                         <i class="mdi mdi-plus fs-5 ms-2"></i>
                     </div>
                     <div class="faq-answer">
-                        Click on the location menu in the top left header next to the pharmacy name. A dropdown menu will allow you to switch to any active branch.
+                        Click on the location dropdown menu in the header. Switching branches will dynamically adjust stock availability and delivery options for your area.
                     </div>
                 </div>
             </div>
@@ -205,7 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
         <div class="col-lg-5">
             <div class="card contact-form-card p-3 p-md-4">
                 <h5 class="fw-bold mb-3" style="color: var(--echo-teal, #003339);">Send a Message</h5>
-                <form method="POST" action="help.php?bid=<?php echo $b_id; ?>">
+                <form method="POST" action="help.php?bid=<?php echo $branch_id; ?>">
                     <div class="mb-3">
                         <label class="form-label small fw-bold">Full Name</label>
                         <input type="text" name="name" class="form-control rounded-3" value="<?php echo isset($_SESSION['client_name']) ? htmlspecialchars($_SESSION['client_name']) : ''; ?>" required>
