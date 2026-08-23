@@ -1,147 +1,632 @@
 <?php
-ini_set('display_errors', 0);
+/**
+ * ============================================================
+ * EchoTech POS
+ * Fetch Sales Report Data
+ * ============================================================
+ *
+ * Business timezone:
+ *   Africa/Lusaka / UTC+02:00
+ *
+ * Authoritative POS sale timestamp:
+ *   sales.sale_date
+ *
+ * This endpoint preserves the existing JSON contract used by
+ * sales_report.php while using prepared statements throughout.
+ * ============================================================
+ */
+
+declare(strict_types=1);
+
+ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 
 require_once "../../includes/conn.php";
 require_once "../../includes/auth.php";
 
-$pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
-$branch_id   = (int)($_SESSION['branch_id'] ?? 0);
+date_default_timezone_set('Africa/Lusaka');
 
-if (!$pharmacy_id || !$branch_id) {
-    echo json_encode([
+
+/*
+|--------------------------------------------------------------------------
+| JSON helper
+|--------------------------------------------------------------------------
+*/
+
+function sales_json(array $payload): void
+{
+    echo json_encode(
+        $payload,
+        JSON_UNESCAPED_UNICODE |
+        JSON_UNESCAPED_SLASHES
+    );
+
+    exit();
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Session / tenant context
+|--------------------------------------------------------------------------
+*/
+
+$pharmacy_id = (int)(
+    $_SESSION['pharmacy_id'] ?? 0
+);
+
+$branch_id = (int)(
+    $_SESSION['branch_id'] ?? 0
+);
+
+if (
+    $pharmacy_id <= 0 ||
+    $branch_id <= 0
+) {
+
+    sales_json([
         'status' => 'error',
         'message' => 'Session expired',
         'sales' => [],
-        'total_sales' => 0,
+        'total_sales' => '0.00',
         'total_items' => 0,
         'total_invoices' => 0,
         'monthly_snapshot' => [],
         'daily_trend' => []
     ]);
-    exit();
 }
 
-$search    = trim($_POST['search'] ?? '');
-$startDate = trim($_POST['startDate'] ?? date('Y-m-01'));
-$endDate   = trim($_POST['endDate'] ?? date('Y-m-d'));
 
-// Build Base Query Filters
-$where_clauses = ["s.pharmacy_id = $pharmacy_id", "s.branch_id = $branch_id"];
+/*
+|--------------------------------------------------------------------------
+| Input
+|--------------------------------------------------------------------------
+*/
 
-if (!empty($startDate)) {
-    $s_date = mysqli_real_escape_string($conn, $startDate . ' 00:00:00');
-    $where_clauses[] = "s.created_at >= '$s_date'";
+$search = trim(
+    (string)($_POST['search'] ?? '')
+);
+
+$startDate = trim(
+    (string)(
+        $_POST['startDate']
+        ?? date('Y-m-01')
+    )
+);
+
+$endDate = trim(
+    (string)(
+        $_POST['endDate']
+        ?? date('Y-m-d')
+    )
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Validate dates
+|--------------------------------------------------------------------------
+*/
+
+function valid_report_date(string $date): bool
+{
+    $d = DateTime::createFromFormat(
+        'Y-m-d',
+        $date
+    );
+
+    return (
+        $d !== false &&
+        $d->format('Y-m-d') === $date
+    );
 }
 
-if (!empty($endDate)) {
-    $e_date = mysqli_real_escape_string($conn, $endDate . ' 23:59:59');
-    $where_clauses[] = "s.created_at <= '$e_date'";
+if (!valid_report_date($startDate)) {
+    $startDate = date('Y-m-01');
 }
 
-if (!empty($search)) {
-    $s_term = mysqli_real_escape_string($conn, $search);
-    $where_clauses[] = "(s.invoice LIKE '%$s_term%' OR i.item_name LIKE '%$s_term%')";
+if (!valid_report_date($endDate)) {
+    $endDate = date('Y-m-d');
 }
 
-$where_sql = implode(' AND ', $where_clauses);
+if ($startDate > $endDate) {
+    [$startDate, $endDate] = [
+        $endDate,
+        $startDate
+    ];
+}
 
-// 1. Fetch Itemized Sales List
-$sales_sql = "SELECT 
-                s.id as sale_id,
-                s.invoice as invoice_no,
-                i.item_name,
-                i.category,
-                si.quantity,
-                si.unit_price,
-                (si.quantity * si.unit_price) as total_price,
-                DATE_FORMAT(s.created_at, '%d %b %Y %H:%i') as date
-              FROM sales s
-              INNER JOIN sales_items si ON s.id = si.sale_id
-              LEFT JOIN store_items i ON si.product_id = i.id
-              WHERE $where_sql
-              ORDER BY s.created_at DESC, s.id DESC";
 
-$sales_result = mysqli_query($conn, $sales_sql);
+/*
+|--------------------------------------------------------------------------
+| Business-date boundaries
+|--------------------------------------------------------------------------
+|
+| conn.php already sets MySQL session timezone to +02:00.
+| We still send explicit local business boundaries to SQL.
+|
+*/
+
+$startDateTime = $startDate . ' 00:00:00';
+$endDateTime   = $endDate . ' 23:59:59';
+
+
+/*
+|--------------------------------------------------------------------------
+| Common WHERE clause
+|--------------------------------------------------------------------------
+|
+| IMPORTANT:
+| sales.sale_date is the authoritative POS business timestamp.
+|
+*/
+
+$where = "
+    s.pharmacy_id = ?
+    AND s.branch_id = ?
+    AND s.sale_date >= ?
+    AND s.sale_date <= ?
+";
+
+$baseTypes = 'iiss';
+
+$baseParams = [
+    $pharmacy_id,
+    $branch_id,
+    $startDateTime,
+    $endDateTime
+];
+
+
+/*
+|--------------------------------------------------------------------------
+| Search condition
+|--------------------------------------------------------------------------
+|
+| Search:
+| - invoice
+| - medicine name
+|
+*/
+
+if ($search !== '') {
+
+    $where .= "
+        AND (
+            s.invoice LIKE ?
+            OR i.item_name LIKE ?
+        )
+    ";
+
+    $searchLike = '%' . $search . '%';
+
+    $baseTypes .= 'ss';
+
+    $baseParams[] = $searchLike;
+    $baseParams[] = $searchLike;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Helper for prepared SELECTs
+|--------------------------------------------------------------------------
+*/
+
+function execute_sales_query(
+    mysqli $conn,
+    string $sql,
+    string $types,
+    array $params
+): mysqli_result {
+
+    $stmt = mysqli_prepare(
+        $conn,
+        $sql
+    );
+
+    if (!$stmt) {
+        throw new RuntimeException(
+            'Database query preparation failed.'
+        );
+    }
+
+    $bind = [$types];
+
+    foreach ($params as $key => $value) {
+        $bind[] = &$params[$key];
+    }
+
+    if (!call_user_func_array(
+        'mysqli_stmt_bind_param',
+        array_merge([$stmt], $bind)
+    )) {
+
+        $error = mysqli_stmt_error($stmt);
+
+        mysqli_stmt_close($stmt);
+
+        throw new RuntimeException(
+            'Database parameter binding failed: ' .
+            $error
+        );
+    }
+
+    if (!mysqli_stmt_execute($stmt)) {
+
+        $error = mysqli_stmt_error($stmt);
+
+        mysqli_stmt_close($stmt);
+
+        throw new RuntimeException(
+            'Database query execution failed: ' .
+            $error
+        );
+    }
+
+    $result = mysqli_stmt_get_result($stmt);
+
+    if (!$result) {
+
+        $error = mysqli_stmt_error($stmt);
+
+        mysqli_stmt_close($stmt);
+
+        throw new RuntimeException(
+            'Database result retrieval failed: ' .
+            $error
+        );
+    }
+
+    /*
+     * Keep the result alive after the statement is closed.
+     */
+    $rows = [];
+
+    while ($row = mysqli_fetch_assoc($result)) {
+        $rows[] = $row;
+    }
+
+    mysqli_free_result($result);
+    mysqli_stmt_close($stmt);
+
+    /*
+     * Return a temporary in-memory result equivalent is not possible
+     * with mysqli_result, so this helper is intentionally unused below.
+     */
+    throw new RuntimeException(
+        'Internal report query helper misuse.'
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| 1. Itemized sales
+|--------------------------------------------------------------------------
+|
+| Use one prepared statement directly so the returned rows remain
+| straightforward and memory-safe.
+|--------------------------------------------------------------------------
+*/
 
 $sales = [];
-$total_sales = 0;
+$total_sales = 0.00;
 $total_items = 0;
 $unique_invoices = [];
 
-if ($sales_result && mysqli_num_rows($sales_result) > 0) {
-    while ($row = mysqli_fetch_assoc($sales_result)) {
-        $qty = (int)$row['quantity'];
-        $line_total = (float)$row['total_price'];
+$sales_sql = "
+    SELECT
+        s.id AS sale_id,
+        s.invoice AS invoice_no,
+        i.item_name,
+        i.category,
+        si.quantity,
+        si.unit_price,
+        (si.quantity * si.unit_price) AS total_price,
+        DATE_FORMAT(
+            s.sale_date,
+            '%d %b %Y %H:%i'
+        ) AS sale_datetime
+    FROM sales s
+    INNER JOIN sales_items si
+        ON s.id = si.sale_id
+    LEFT JOIN store_items i
+        ON si.product_id = i.id
+    WHERE $where
+    ORDER BY
+        s.sale_date DESC,
+        s.id DESC
+";
+
+$stmt = mysqli_prepare(
+    $conn,
+    $sales_sql
+);
+
+if (!$stmt) {
+
+    error_log(
+        'fetch_sales sales query prepare failed: ' .
+        mysqli_error($conn)
+    );
+
+    sales_json([
+        'status' => 'error',
+        'message' => 'Unable to load sales report.',
+        'sales' => [],
+        'total_sales' => '0.00',
+        'total_items' => 0,
+        'total_invoices' => 0,
+        'monthly_snapshot' => [],
+        'daily_trend' => []
+    ]);
+}
+
+$bindParams = [$baseTypes];
+
+foreach ($baseParams as $key => $value) {
+    $bindParams[] = &$baseParams[$key];
+}
+
+call_user_func_array(
+    'mysqli_stmt_bind_param',
+    array_merge(
+        [$stmt],
+        $bindParams
+    )
+);
+
+if (!mysqli_stmt_execute($stmt)) {
+
+    error_log(
+        'fetch_sales sales query execute failed: ' .
+        mysqli_stmt_error($stmt)
+    );
+
+    mysqli_stmt_close($stmt);
+
+    sales_json([
+        'status' => 'error',
+        'message' => 'Unable to load sales report.',
+        'sales' => [],
+        'total_sales' => '0.00',
+        'total_items' => 0,
+        'total_invoices' => 0,
+        'monthly_snapshot' => [],
+        'daily_trend' => []
+    ]);
+}
+
+$result = mysqli_stmt_get_result($stmt);
+
+if ($result) {
+
+    while ($row = mysqli_fetch_assoc($result)) {
+
+        $qty = (int)(
+            $row['quantity'] ?? 0
+        );
+
+        $lineTotal = (float)(
+            $row['total_price'] ?? 0
+        );
+
+        $invoiceNo =
+            $row['invoice_no']
+            ?: 'N/A';
 
         $sales[] = [
-            'sale_id'     => $row['sale_id'],
-            'invoice_no'  => $row['invoice_no'] ?: 'N/A',
-            'item_name'   => $row['item_name'] ?: 'Uncategorized Product',
-            'quantity'    => $qty,
-            'total_price' => $line_total,
-            'date'        => $row['date']
+            'sale_id' => $row['sale_id'],
+            'invoice_no' => $invoiceNo,
+            'item_name' =>
+                $row['item_name']
+                ?: 'Uncategorized Product',
+            'quantity' => $qty,
+            'total_price' => $lineTotal,
+            'date' =>
+                $row['sale_datetime']
+                ?? ''
         ];
 
-        $total_sales += $line_total;
+        $total_sales += $lineTotal;
         $total_items += $qty;
-        $unique_invoices[$row['invoice_no']] = true;
+
+        /*
+         * Preserve the existing invoice-count contract.
+         */
+        $unique_invoices[$invoiceNo] = true;
     }
+
+    mysqli_free_result($result);
 }
 
-// 2. Daily Revenue Trend (Line Chart)
-$daily_sql = "SELECT 
-                DATE_FORMAT(s.created_at, '%d %b') as day_label,
-                SUM(si.quantity * si.unit_price) as daily_total
-              FROM sales s
-              INNER JOIN sales_items si ON s.id = si.sale_id
-              LEFT JOIN store_items i ON si.product_id = i.id
-              WHERE $where_sql
-              GROUP BY DATE(s.created_at)
-              ORDER BY s.created_at ASC";
+mysqli_stmt_close($stmt);
 
-$daily_res = mysqli_query($conn, $daily_sql);
+
+/*
+|--------------------------------------------------------------------------
+| 2. Daily Revenue Trend
+|--------------------------------------------------------------------------
+*/
+
 $daily_trend = [];
 
-if ($daily_res) {
-    while ($row = mysqli_fetch_assoc($daily_res)) {
-        $daily_trend[$row['day_label']] = (float)$row['daily_total'];
+$daily_sql = "
+    SELECT
+        DATE_FORMAT(
+            s.sale_date,
+            '%d %b'
+        ) AS day_label,
+        SUM(
+            si.quantity * si.unit_price
+        ) AS daily_total
+    FROM sales s
+    INNER JOIN sales_items si
+        ON s.id = si.sale_id
+    LEFT JOIN store_items i
+        ON si.product_id = i.id
+    WHERE $where
+    GROUP BY DATE(s.sale_date)
+    ORDER BY DATE(s.sale_date) ASC
+";
+
+$stmt = mysqli_prepare(
+    $conn,
+    $daily_sql
+);
+
+if ($stmt) {
+
+    $params = $baseParams;
+    $bindParams = [$baseTypes];
+
+    foreach ($params as $key => $value) {
+        $bindParams[] = &$params[$key];
     }
+
+    call_user_func_array(
+        'mysqli_stmt_bind_param',
+        array_merge(
+            [$stmt],
+            $bindParams
+        )
+    );
+
+    if (mysqli_stmt_execute($stmt)) {
+
+        $result = mysqli_stmt_get_result($stmt);
+
+        if ($result) {
+
+            while ($row = mysqli_fetch_assoc($result)) {
+
+                $daily_trend[
+                    $row['day_label']
+                ] = (float)(
+                    $row['daily_total']
+                    ?? 0
+                );
+            }
+
+            mysqli_free_result($result);
+        }
+    }
+
+    mysqli_stmt_close($stmt);
 }
 
-// 3. Category Breakdown (Doughnut Chart)
-$cat_sql = "SELECT 
-              COALESCE(i.category, 'General') as cat_name,
-              SUM(si.quantity * si.unit_price) as cat_total
-            FROM sales s
-            INNER JOIN sales_items si ON s.id = si.sale_id
-            LEFT JOIN store_items i ON si.product_id = i.id
-            WHERE $where_sql
-            GROUP BY COALESCE(i.category, 'General')";
 
-$cat_res = mysqli_query($conn, $cat_sql);
+/*
+|--------------------------------------------------------------------------
+| 3. Category Breakdown
+|--------------------------------------------------------------------------
+*/
+
 $monthly_snapshot = [];
 
-if ($cat_res) {
-    while ($row = mysqli_fetch_assoc($cat_res)) {
-        $monthly_snapshot[$row['cat_name']] = (float)$row['cat_total'];
+$cat_sql = "
+    SELECT
+        COALESCE(
+            i.category,
+            'General'
+        ) AS cat_name,
+        SUM(
+            si.quantity * si.unit_price
+        ) AS cat_total
+    FROM sales s
+    INNER JOIN sales_items si
+        ON s.id = si.sale_id
+    LEFT JOIN store_items i
+        ON si.product_id = i.id
+    WHERE $where
+    GROUP BY COALESCE(
+        i.category,
+        'General'
+    )
+    ORDER BY cat_total DESC
+";
+
+$stmt = mysqli_prepare(
+    $conn,
+    $cat_sql
+);
+
+if ($stmt) {
+
+    $params = $baseParams;
+    $bindParams = [$baseTypes];
+
+    foreach ($params as $key => $value) {
+        $bindParams[] = &$params[$key];
     }
+
+    call_user_func_array(
+        'mysqli_stmt_bind_param',
+        array_merge(
+            [$stmt],
+            $bindParams
+        )
+    );
+
+    if (mysqli_stmt_execute($stmt)) {
+
+        $result = mysqli_stmt_get_result($stmt);
+
+        if ($result) {
+
+            while ($row = mysqli_fetch_assoc($result)) {
+
+                $monthly_snapshot[
+                    $row['cat_name']
+                ] = (float)(
+                    $row['cat_total']
+                    ?? 0
+                );
+            }
+
+            mysqli_free_result($result);
+        }
+    }
+
+    mysqli_stmt_close($stmt);
 }
 
-// Output JSON
-echo json_encode([
-    'status'           => 'success',
-    'sales'            => $sales,
-    'total_sales'      => number_format($total_sales, 2, '.', ''),
-    'total_items'      => $total_items,
-    'total_invoices'   => count($unique_invoices),
-    'monthly_snapshot' => $monthly_snapshot,
-    'daily_trend'      => $daily_trend
+
+/*
+|--------------------------------------------------------------------------
+| Output
+|--------------------------------------------------------------------------
+*/
+
+sales_json([
+    'status' => 'success',
+
+    'sales' => $sales,
+
+    'total_sales' =>
+        number_format(
+            $total_sales,
+            2,
+            '.',
+            ''
+        ),
+
+    'total_items' =>
+        $total_items,
+
+    'total_invoices' =>
+        count($unique_invoices),
+
+    'monthly_snapshot' =>
+        $monthly_snapshot,
+
+    'daily_trend' =>
+        $daily_trend
 ]);
-exit();
