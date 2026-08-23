@@ -3,7 +3,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// 1. Dynamic Database Connection Inclusion
+// 1. Database Connection Inclusion
 if (file_exists(__DIR__ . "/../includes/conn.php")) {
     require_once __DIR__ . "/../includes/conn.php";
 } elseif (file_exists(__DIR__ . "/includes/conn.php")) {
@@ -12,21 +12,19 @@ if (file_exists(__DIR__ . "/../includes/conn.php")) {
     die("Database connection file (conn.php) not found.");
 }
 
-// 2. Folder Context Resolution
-$is_in_api_folder = (basename(__DIR__) === 'api');
-$path_prefix = $is_in_api_folder ? '' : 'api/';
-$root_prefix = $is_in_api_folder ? '../' : '';
-
-// 3. Resolve Branch ID
+// 2. Resolve Branch ID
 if (isset($_GET['bid'])) {
     $new_branch = intval($_GET['bid']);
     $_SESSION['current_branch_id'] = $new_branch;
 }
 
-$branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : (isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 10); 
+$branch_id = isset($_GET['bid']) 
+    ? intval($_GET['bid']) 
+    : (isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 10); 
+
 $_SESSION['current_branch_id'] = $branch_id;
 
-// 4. Multi-Tenant Context Search
+// 3. Multi-Tenant Context Search
 $sql = "SELECT 
             p.id as pharmacy_id,
             p.name as tenant_name, 
@@ -67,12 +65,12 @@ if (!$tenant_context) {
 // Fetch categories safely
 $cat_query = $conn->query("SELECT * FROM categories WHERE status = 1 LIMIT 8");
 
-// Image paths
+// Image paths (Local to api/uploads/logos/)
 $logo_filename = (!empty($db_logo)) ? $db_logo : 'default_logo.png';
-$logo_local_path = ($is_in_api_folder ? dirname(__DIR__) : __DIR__) . "/uploads/logos/" . $logo_filename;
+$logo_local_path = __DIR__ . "/uploads/logos/" . $logo_filename;
 $logo_web_path = file_exists($logo_local_path) 
-    ? $root_prefix . "uploads/logos/" . $logo_filename 
-    : $root_prefix . "assets/img/default_logo.png";
+    ? "uploads/logos/" . $logo_filename 
+    : "uploads/logos/default_logo.png";
 
 // Notifications
 $response_count = 0;
@@ -110,8 +108,10 @@ if (isset($_SESSION['client_id'])) {
     
     <style>
         :root {
-            --echo-teal: #003339;    --echo-green: #00b386;   
-            --echo-blue: #1a4a7c;    --echo-light: #f5faff;
+            --echo-teal: #003339;
+            --echo-green: #00b386;   
+            --echo-blue: #1a4a7c;
+            --echo-light: #f5faff;
         }
         html, body { 
             overflow-x: hidden !important; 
@@ -192,7 +192,7 @@ if ($stmt_br) {
     $br_list = $stmt_br->get_result();
 
     while ($bl = $br_list->fetch_assoc()): 
-        $switch_url = $root_prefix . 'online_store.php?bid=' . $bl['id'];
+        $switch_url = 'online_store.php?bid=' . $bl['id'];
     ?>
         <li>
             <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo htmlspecialchars($switch_url); ?>">
@@ -228,14 +228,14 @@ if ($stmt_br) {
                        <?php echo $is_subscribed ? '✓ Subscribed' : 'Subscribe'; ?>
                     </a>
                 <?php else: ?>
-                    <a href="<?php echo $path_prefix; ?>login_client.php" class="apollo-nav-pill">Login</a>
+                    <a href="login_client.php" class="apollo-nav-pill">Login</a>
                 <?php endif; ?>
-                <a href="<?php echo $path_prefix; ?>pharmacist.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Pharmacists</a>
-                <a href="<?php echo $path_prefix; ?>upload_prescription.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Prescriptions</a>
+                <a href="pharmacist.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Pharmacists</a>
+                <a href="upload_prescription.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Prescriptions</a>
             </nav>
 
             <div class="d-flex align-items-center gap-2">
-                <a href="<?php echo $path_prefix; ?>view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
+                <a href="view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
                     <i class="mdi mdi-cart-outline fs-4"></i>
                     <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge cart-count" style="font-size: 9px;">
                         <?php 
@@ -282,18 +282,18 @@ if ($stmt_br) {
                             <h6><?php echo htmlspecialchars($user_data['full_name'] ?? ''); ?></h6>
                             <p>User ID: #<?php echo str_pad($user_data['id'] ?? 0, 5, '0', STR_PAD_LEFT); ?></p>
                             <hr class="my-1">
-                            <a href="<?php echo $root_prefix; ?>profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
-                            <a href="<?php echo $root_prefix; ?>client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
+                            <a href="profile.php" class="menu-link"><i class="mdi mdi-cog-outline"></i> Profile</a>
+                            <a href="client_orders.php" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
                         <?php else: ?>
                             <h6>Guest Menu</h6>
                             <hr class="my-1">
-                            <a href="<?php echo $path_prefix; ?>login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
+                            <a href="login_client.php" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a>
                         <?php endif; ?>
 
                         <div class="d-lg-none">
                             <hr class="my-1">
-                            <a href="<?php echo $path_prefix; ?>pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
-                            <a href="<?php echo $path_prefix; ?>upload_prescription.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a>
+                            <a href="pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
+                            <a href="upload_prescription.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a>
                             
                             <?php if(isset($_SESSION['client_id'])): 
                                 $check_sub = $conn->prepare("SELECT id FROM customers WHERE client_id = ? AND branch_id = ?");
@@ -316,7 +316,7 @@ if ($stmt_br) {
 
                         <?php if(isset($_SESSION['client_id'])): ?>
                             <hr class="my-1">
-                            <a href="<?php echo $path_prefix; ?>logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
+                            <a href="logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -352,7 +352,7 @@ if ($stmt_br) {
                     <img src="<?php echo $logo_web_path; ?>" 
                          alt="Logo" 
                          style="height: 38px; width: 38px; object-fit: contain;"
-                         onerror="this.src='<?php echo $root_prefix; ?>assets/img/default_logo.png';">
+                         onerror="this.src='uploads/logos/default_logo.png';">
                     <div>
                         <h5 class="mb-0 fw-bold text-white" style="font-size: 1rem; line-height: 1.1;">
                             <?php echo htmlspecialchars($pharmacy_name); ?>
@@ -363,7 +363,7 @@ if ($stmt_br) {
             </div>
 
             <div class="col-12 col-md-5 col-lg-5">
-                <form action="<?php echo $root_prefix; ?>online_store.php" method="GET" class="hng-search-container">
+                <form action="online_store.php" method="GET" class="hng-search-container">
                     <input type="hidden" name="bid" value="<?php echo $branch_id; ?>">
                     <select name="type">
                         <option value="all">All</option>
@@ -376,14 +376,14 @@ if ($stmt_br) {
 
             <div class="col-12 col-md-4 col-lg-4 mt-2 mt-md-0">
                 <div class="nav-icon-grid">
-                    <a href="<?php echo $root_prefix; ?>online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-home"></i>Home
                     </a>
                     <a href="#" class="hng-nav-icon"><i class="mdi mdi-view-grid"></i>Category</a>
-                    <a href="<?php echo $root_prefix; ?>offers.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="offers.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-label-percent"></i>Offer
                     </a>
-                    <a href="<?php echo $root_prefix; ?>help.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="help.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-help-circle"></i>Help
                     </a>
                     <a href="javascript:void(0);" onclick="openBankDetails()" class="hng-nav-icon">
