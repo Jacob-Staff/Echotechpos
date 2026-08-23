@@ -44,113 +44,128 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
         .help-hero { 
             background: linear-gradient(135deg, var(--echo-teal, #003339) 0%, var(--echo-blue, #1a4a7c) 100%); 
             color: white; 
-            padding: 60px 0 80px; 
-            border-radius: 0 0 40px 40px; 
+            padding: 40px 15px 60px; 
+            border-radius: 0 0 30px 30px; 
+        }
+        @media (min-width: 768px) {
+            .help-hero {
+                padding: 60px 0 80px;
+                border-radius: 0 0 40px 40px;
+            }
         }
         .search-container { 
             max-width: 600px; 
-            margin: -35px auto 0; 
+            margin: -28px auto 0; 
             position: relative; 
             z-index: 10; 
+            padding: 0 15px;
         }
         .search-input { 
             border-radius: 30px; 
-            padding: 18px 25px; 
-            box-shadow: 0 10px 25px rgba(0,0,0,0.08); 
+            padding: 14px 20px; 
+            box-shadow: 0 8px 20px rgba(0,0,0,0.08); 
             border: 1px solid #eee; 
-            font-size: 1rem; 
+            font-size: 0.95rem; 
+        }
+        @media (min-width: 768px) {
+            .search-input {
+                padding: 18px 25px;
+                font-size: 1rem;
+            }
         }
         .support-card { 
             border: none; 
-            border-radius: 20px; 
+            border-radius: 18px; 
             transition: all 0.3s ease; 
             background: white; 
             height: 100%; 
-            box-shadow: 0 5px 15px rgba(0,0,0,0.05); 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.04); 
         }
         .support-card:hover { 
-            transform: translateY(-8px); 
-            box-shadow: 0 15px 30px rgba(0,0,0,0.1); 
+            transform: translateY(-5px); 
+            box-shadow: 0 12px 24px rgba(0,0,0,0.08); 
         }
         .faq-item { 
             border-bottom: 1px solid #eee; 
         }
         .faq-question { 
-            padding: 18px 0; 
+            padding: 16px 0; 
             cursor: pointer; 
             font-weight: 600; 
             display: flex; 
             justify-content: space-between; 
             align-items: center; 
             color: var(--echo-teal, #003339);
+            font-size: 0.98rem;
         }
         .faq-answer { 
-            padding-bottom: 18px; 
+            padding-bottom: 16px; 
             color: #555; 
             display: none; 
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             line-height: 1.5;
         }
         .contact-form-card { 
-            border-radius: 24px; 
+            border-radius: 20px; 
             border: none; 
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05); 
+            box-shadow: 0 8px 25px rgba(0,0,0,0.05); 
         }
     </style>
 </head>
 <body class="bg-light">
 
+<!-- Mobile-Responsive Hero Section -->
 <div class="help-hero text-center">
     <div class="container">
-        <h1 class="display-5 fw-bold mb-2 animate__animated animate__fadeInDown">How can we help today?</h1>
-        <p class="lead opacity-75 fs-6">Support for <?php echo htmlspecialchars($pharmacy_name); ?> - <?php echo htmlspecialchars($branch_name); ?></p>
+        <h1 class="fs-2 fs-md-1 fw-bold mb-2 animate__animated animate__fadeInDown">How can we help today?</h1>
+        <p class="lead opacity-75 fs-6 mb-0">Support for <?php echo htmlspecialchars($pharmacy_name); ?> - <?php echo htmlspecialchars($branch_name); ?></p>
     </div>
 </div>
 
 <div class="container mb-5">
-    <!-- Live Search -->
+    <!-- Live Search Input -->
     <div class="search-container animate__animated animate__zoomIn">
-        <input type="text" id="faqSearch" class="form-control search-input" placeholder="Search for answers (e.g. delivery, payments, prescriptions)...">
+        <input type="text" id="faqSearch" class="form-control search-input" placeholder="Search for answers (e.g. delivery, payments)...">
     </div>
 
     <!-- Quick Support Cards -->
-    <div class="row g-4 mt-4">
-        <div class="col-md-4 text-center">
-            <div class="support-card p-4">
-                <div class="mb-3 text-success"><i class="mdi mdi-whatsapp" style="font-size: 48px;"></i></div>
-                <h5 class="fw-bold">WhatsApp Support</h5>
-                <p class="text-muted small">Instant chat with our resident pharmacist.</p>
-                <a href="https://wa.me/<?php echo preg_replace('/[^0-9]/', '', $branch_phone); ?>" target="_blank" class="btn btn-outline-success rounded-pill px-4 btn-sm fw-bold">Chat Now</a>
+    <div class="row g-3 g-md-4 mt-3 mt-md-4">
+        <div class="col-12 col-sm-6 col-md-4 text-center">
+            <div class="support-card p-3 p-md-4">
+                <div class="mb-2 text-success"><i class="mdi mdi-whatsapp" style="font-size: 40px;"></i></div>
+                <h6 class="fw-bold fs-6">WhatsApp Support</h6>
+                <p class="text-muted small mb-3">Instant chat with our resident pharmacist.</p>
+                <a href="https://wa.me/<?php echo preg_replace('/[^0-9]/', '', $branch_phone); ?>" target="_blank" class="btn btn-outline-success rounded-pill px-4 btn-sm fw-bold w-100 w-sm-auto">Chat Now</a>
             </div>
         </div>
-        <div class="col-md-4 text-center">
-            <div class="support-card p-4">
-                <div class="mb-3 text-primary"><i class="mdi mdi-file-document-edit-outline" style="font-size: 48px;"></i></div>
-                <h5 class="fw-bold">Prescription Help</h5>
-                <p class="text-muted small">Need help uploading your prescription?</p>
-                <a href="upload_prescription.php?bid=<?php echo $b_id; ?>" class="btn btn-outline-primary rounded-pill px-4 btn-sm fw-bold">Upload Script</a>
+        <div class="col-12 col-sm-6 col-md-4 text-center">
+            <div class="support-card p-3 p-md-4">
+                <div class="mb-2 text-primary"><i class="mdi mdi-file-document-edit-outline" style="font-size: 40px;"></i></div>
+                <h6 class="fw-bold fs-6">Prescription Help</h6>
+                <p class="text-muted small mb-3">Need help uploading your prescription?</p>
+                <a href="upload_prescription.php?bid=<?php echo $b_id; ?>" class="btn btn-outline-primary rounded-pill px-4 btn-sm fw-bold w-100 w-sm-auto">Upload Script</a>
             </div>
         </div>
-        <div class="col-md-4 text-center">
-            <div class="support-card p-4">
-                <div class="mb-3 text-danger"><i class="mdi mdi-phone-in-talk" style="font-size: 48px;"></i></div>
-                <h5 class="fw-bold">Emergency Call</h5>
-                <p class="text-muted small">Available during branch business hours.</p>
-                <a href="tel:<?php echo htmlspecialchars($branch_phone); ?>" class="btn btn-outline-danger rounded-pill px-4 btn-sm fw-bold">Call <?php echo htmlspecialchars($branch_phone); ?></a>
+        <div class="col-12 col-md-4 text-center">
+            <div class="support-card p-3 p-md-4">
+                <div class="mb-2 text-danger"><i class="mdi mdi-phone-in-talk" style="font-size: 40px;"></i></div>
+                <h6 class="fw-bold fs-6">Emergency Call</h6>
+                <p class="text-muted small mb-3">Available during branch business hours.</p>
+                <a href="tel:<?php echo htmlspecialchars($branch_phone); ?>" class="btn btn-outline-danger rounded-pill px-4 btn-sm fw-bold w-100 w-sm-auto">Call <?php echo htmlspecialchars($branch_phone); ?></a>
             </div>
         </div>
     </div>
 
     <!-- FAQ + Form Section -->
-    <div class="row mt-5 pt-3">
+    <div class="row mt-4 mt-md-5 pt-2 pt-md-3">
         <!-- FAQ Accordion -->
-        <div class="col-lg-7 mb-5">
-            <h3 class="fw-bold mb-4" style="color: var(--echo-teal, #003339);">Common Questions</h3>
+        <div class="col-lg-7 mb-4 mb-lg-0">
+            <h4 class="fw-bold mb-3 mb-md-4" style="color: var(--echo-teal, #003339);">Common Questions</h4>
             <div class="faq-list" id="faqList">
                 <div class="faq-item" data-keywords="prescription upload image script order rx">
                     <div class="faq-question">
                         <span>How do I upload a prescription?</span> 
-                        <i class="mdi mdi-plus fs-5"></i>
+                        <i class="mdi mdi-plus fs-5 ms-2"></i>
                     </div>
                     <div class="faq-answer">
                         Click on the <strong>'Prescriptions'</strong> menu item at the top of the store, select <strong>'Upload New'</strong>, and attach a clear image or document. Our qualified pharmacist will review and process it within 15 minutes.
@@ -159,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
                 <div class="faq-item" data-keywords="delivery time location speed how long express">
                     <div class="faq-question">
                         <span>How long does delivery take?</span> 
-                        <i class="mdi mdi-plus fs-5"></i>
+                        <i class="mdi mdi-plus fs-5 ms-2"></i>
                     </div>
                     <div class="faq-answer">
                         For local delivery in <strong><?php echo htmlspecialchars($branch_location); ?></strong>, express fulfillment typically takes under 1 hour. Standard area delivery takes between 2 to 4 hours.
@@ -168,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
                 <div class="faq-item" data-keywords="payment airtel mtn cash momo money visa card mobile">
                     <div class="faq-question">
                         <span>What payment methods do you accept?</span> 
-                        <i class="mdi mdi-plus fs-5"></i>
+                        <i class="mdi mdi-plus fs-5 ms-2"></i>
                     </div>
                     <div class="faq-answer">
                         We accept Cash on Delivery, Mobile Money (MTN MoMo & Airtel Money), and direct bank transfers. You can view payment instructions during checkout.
@@ -177,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
                 <div class="faq-item" data-keywords="branch switch change pharmacy location">
                     <div class="faq-question">
                         <span>How do I order from a different branch?</span> 
-                        <i class="mdi mdi-plus fs-5"></i>
+                        <i class="mdi mdi-plus fs-5 ms-2"></i>
                     </div>
                     <div class="faq-answer">
                         Click on the location menu in the top left header next to the pharmacy name. A dropdown menu will allow you to switch to any active branch.
@@ -188,8 +203,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
 
         <!-- Contact Form -->
         <div class="col-lg-5">
-            <div class="card contact-form-card p-4 p-md-4">
-                <h4 class="fw-bold mb-3" style="color: var(--echo-teal, #003339);">Send a Message</h4>
+            <div class="card contact-form-card p-3 p-md-4">
+                <h5 class="fw-bold mb-3" style="color: var(--echo-teal, #003339);">Send a Message</h5>
                 <form method="POST" action="help.php?bid=<?php echo $b_id; ?>">
                     <div class="mb-3">
                         <label class="form-label small fw-bold">Full Name</label>
@@ -208,11 +223,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
                             <option value="Other">Other Inquiry</option>
                         </select>
                     </div>
-                    <div class="mb-4">
+                    <div class="mb-3 mb-md-4">
                         <label class="form-label small fw-bold">Message</label>
                         <textarea name="message" class="form-control rounded-3" rows="4" placeholder="How can we assist you?" required></textarea>
                     </div>
-                    <button type="submit" name="send_inquiry" class="btn btn-dark w-100 py-2 rounded-pill fw-bold" style="background-color: var(--echo-teal, #003339);">
+                    <button type="submit" name="send_inquiry" class="btn btn-dark w-100 py-2.5 rounded-pill fw-bold" style="background-color: var(--echo-teal, #003339);">
                         Send Inquiry
                     </button>
                 </form>
@@ -231,10 +246,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
             const answer = $(this).next('.faq-answer');
             const icon = $(this).find('i');
             
-            // Toggle open answer
             answer.slideToggle(200);
             
-            // Toggle MDI Icon
             if (icon.hasClass('mdi-plus')) {
                 icon.removeClass('mdi-plus').addClass('mdi-minus');
             } else {
@@ -242,7 +255,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_inquiry'])) {
             }
         });
 
-        // 2. Live FAQ Search Filter
+        // 2. Live Search Filter
         $("#faqSearch").on("keyup", function() {
             var value = $(this).val().toLowerCase();
             $("#faqList .faq-item").filter(function() {
