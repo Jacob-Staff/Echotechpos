@@ -226,6 +226,242 @@ if (!in_array(
 
 /*
 |--------------------------------------------------------------------------
+| Client reference / idempotency key
+|--------------------------------------------------------------------------
+|
+| The browser creates one reference per checkout attempt.
+| Retrying the same checkout must return the existing sale.
+|--------------------------------------------------------------------------
+*/
+
+$clientReference = trim(
+    (string) ($_POST['client_reference'] ?? '')
+);
+
+if (
+    $clientReference === ''
+    ||
+    !preg_match(
+        '/^[A-Za-z0-9_-]{16,64}$/',
+        $clientReference
+    )
+) {
+    sale_error(
+        'Invalid transaction reference.'
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Check for an already-created sale
+|--------------------------------------------------------------------------
+|
+| This check happens before creating a new transaction.
+| The UNIQUE index added to sales.client_reference is the
+| final database-level protection against duplicate creation.
+|--------------------------------------------------------------------------
+*/
+
+try {
+
+    $existingStmt = $conn->prepare("
+        SELECT
+            id,
+            pharmacy_id,
+            branch_id,
+            invoice,
+            total,
+            subtotal,
+            vat_amount,
+            payment_method,
+            amount_received,
+            change_due
+        FROM sales
+        WHERE client_reference = ?
+          AND pharmacy_id = ?
+          AND branch_id = ?
+        LIMIT 1
+    ");
+
+    $existingStmt->bind_param(
+        'sii',
+        $clientReference,
+        $pharmacyId,
+        $branchId
+    );
+
+    $existingStmt->execute();
+
+    $existingResult =
+        $existingStmt->get_result();
+
+    $existingSale =
+        $existingResult->fetch_assoc();
+
+    $existingStmt->close();
+
+    if ($existingSale) {
+
+        /*
+        |--------------------------------------------------------------------------
+        | Return the already-created transaction.
+        |--------------------------------------------------------------------------
+        */
+
+        $existingSaleId =
+            (int) $existingSale['id'];
+
+        $existingItemsStmt =
+            $conn->prepare("
+                SELECT
+                    si.product_id,
+                    si.quantity,
+                    si.unit_price,
+                    sitem.item_name
+                FROM sales_items si
+                INNER JOIN store_items sitem
+                    ON sitem.id = si.product_id
+                WHERE si.sale_id = ?
+                  AND si.pharmacy_id = ?
+                  AND si.branch_id = ?
+                ORDER BY si.id ASC
+            ");
+
+        $existingItemsStmt->bind_param(
+            'iii',
+            $existingSaleId,
+            $pharmacyId,
+            $branchId
+        );
+
+        $existingItemsStmt->execute();
+
+        $existingItemsResult =
+            $existingItemsStmt->get_result();
+
+        $existingItems = [];
+
+        while (
+            $existingItem =
+                $existingItemsResult->fetch_assoc()
+        ) {
+
+            $existingLineTotal = round(
+                (float) $existingItem['unit_price']
+                * (int) $existingItem['quantity'],
+                2
+            );
+
+            $existingItems[] = [
+                'id' =>
+                    (int) $existingItem['product_id'],
+
+                'name' =>
+                    $existingItem['item_name'],
+
+                'quantity' =>
+                    (int) $existingItem['quantity'],
+
+                'unit_price' =>
+                    number_format(
+                        (float) $existingItem['unit_price'],
+                        2,
+                        '.',
+                        ''
+                    ),
+
+                'line_total' =>
+                    number_format(
+                        $existingLineTotal,
+                        2,
+                        '.',
+                        ''
+                    ),
+            ];
+        }
+
+        $existingItemsStmt->close();
+
+        echo json_encode([
+            'status' =>
+                'success',
+
+            'duplicate' =>
+                true,
+
+            'sale_id' =>
+                $existingSaleId,
+
+            'invoice' =>
+                $existingSale['invoice'],
+
+            'subtotal' =>
+                number_format(
+                    (float) $existingSale['subtotal'],
+                    2,
+                    '.',
+                    ''
+                ),
+
+            'vat' =>
+                number_format(
+                    (float) $existingSale['vat_amount'],
+                    2,
+                    '.',
+                    ''
+                ),
+
+            'total' =>
+                number_format(
+                    (float) $existingSale['total'],
+                    2,
+                    '.',
+                    ''
+                ),
+
+            'payment_method' =>
+                $existingSale['payment_method'],
+
+            'amount_received' =>
+                number_format(
+                    (float) $existingSale['amount_received'],
+                    2,
+                    '.',
+                    ''
+                ),
+
+            'change_due' =>
+                number_format(
+                    (float) $existingSale['change_due'],
+                    2,
+                    '.',
+                    ''
+                ),
+
+            'items' =>
+                $existingItems,
+        ]);
+
+        exit;
+    }
+
+} catch (Throwable $e) {
+
+    error_log(
+        'POS idempotency lookup failed: ' .
+        $e->getMessage()
+    );
+
+    sale_error(
+        'Unable to verify the transaction reference.',
+        500
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | Cart
 |--------------------------------------------------------------------------
 */
@@ -871,6 +1107,7 @@ try {
             branch_id,
             issued_by,
             invoice,
+            client_reference,
             total,
             payment,
             user_id,
@@ -884,6 +1121,7 @@ try {
             created_at
         )
         VALUES (
+            ?,
             ?,
             ?,
             ?,
@@ -919,11 +1157,12 @@ try {
 
 
     $saleStmt->bind_param(
-        'iissdsidddsdd',
+        'iisssdsidddsdd',
         $pharmacyId,
         $branchId,
         $issuedBy,
         $invoiceNo,
+        $clientReference,
         $saleTotal,
         $paymentValue,
         $userId,
@@ -1054,6 +1293,9 @@ try {
 
         'sale_id' =>
             $saleId,
+
+        'client_reference' =>
+            $clientReference,
 
         'invoice' =>
             $invoiceNo,
