@@ -11,6 +11,10 @@
  * Local development:
  *   XAMPP -> MySQL
  *
+ * BUSINESS TIMEZONE:
+ *   Africa/Lusaka
+ *   UTC+02:00
+ *
  * REQUIRED ENVIRONMENT VARIABLES IN RENDER:
  *
  *   DB_HOST
@@ -31,6 +35,18 @@ mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 /*
 |--------------------------------------------------------------------------
+| EchoTech POS Business Timezone
+|--------------------------------------------------------------------------
+|
+| All POS dates/times must use Zambia time.
+|
+*/
+
+date_default_timezone_set('Africa/Lusaka');
+
+
+/*
+|--------------------------------------------------------------------------
 | Base URL
 |--------------------------------------------------------------------------
 */
@@ -40,7 +56,11 @@ if (!defined('BASE_URL')) {
     $https =
         (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         ||
-        (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443);
+        (
+            isset($_SERVER['SERVER_PORT'])
+            &&
+            (int) $_SERVER['SERVER_PORT'] === 443
+        );
 
     $protocol = $https ? 'https://' : 'http://';
 
@@ -82,25 +102,30 @@ $dbPass = getenv('DB_PASS');
 |--------------------------------------------------------------------------
 */
 
-$dbHost = ($dbHost !== false && trim($dbHost) !== '')
-    ? trim($dbHost)
-    : 'localhost';
+$dbHost =
+    ($dbHost !== false && trim($dbHost) !== '')
+        ? trim($dbHost)
+        : 'localhost';
 
-$dbPort = ($dbPort !== false && trim($dbPort) !== '')
-    ? (int) $dbPort
-    : 3306;
+$dbPort =
+    ($dbPort !== false && trim($dbPort) !== '')
+        ? (int) $dbPort
+        : 3306;
 
-$dbName = ($dbName !== false && trim($dbName) !== '')
-    ? trim($dbName)
-    : 'pharmacy_v1';
+$dbName =
+    ($dbName !== false && trim($dbName) !== '')
+        ? trim($dbName)
+        : 'pharmacy_v1';
 
-$dbUser = ($dbUser !== false && trim($dbUser) !== '')
-    ? trim($dbUser)
-    : 'root';
+$dbUser =
+    ($dbUser !== false && trim($dbUser) !== '')
+        ? trim($dbUser)
+        : 'root';
 
-$dbPass = ($dbPass !== false)
-    ? $dbPass
-    : '';
+$dbPass =
+    ($dbPass !== false)
+        ? $dbPass
+        : '';
 
 
 /*
@@ -130,6 +155,7 @@ try {
         $dbPort
     );
 
+
     /*
     |--------------------------------------------------------------------------
     | UTF-8 support
@@ -137,6 +163,28 @@ try {
     */
 
     $conn->set_charset('utf8mb4');
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | IMPORTANT: Set MySQL session timezone
+    |--------------------------------------------------------------------------
+    |
+    | Clever Cloud may run MySQL in UTC.
+    |
+    | We explicitly force every EchoTech POS database connection
+    | to use Zambia time.
+    |
+    | +02:00 is used instead of 'Africa/Lusaka' because MySQL
+    | timezone tables are not guaranteed to contain named timezone
+    | definitions.
+    |
+    */
+
+    $conn->query("
+        SET time_zone = '+02:00'
+    ");
+
 
 } catch (mysqli_sql_exception $e) {
 
@@ -150,6 +198,7 @@ try {
         'EchoTech POS database connection failed: '
         . $e->getMessage()
     );
+
 
     /*
     |--------------------------------------------------------------------------
