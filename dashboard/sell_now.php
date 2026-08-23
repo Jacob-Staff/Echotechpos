@@ -526,60 +526,192 @@ function checkReady() {
 
 function processSale() {
     if(cart.length === 0 || !selectedMethod) return;
-    const total = parseFloat($('#txt_total').text());
+
     $('#finalize_btn').prop('disabled', true).text('PROCESSING...');
 
     $.ajax({
         url: 'process_sale.php',
         method: 'POST',
-        data: { 
-            cart: JSON.stringify(cart), 
-            payment_method: selectedMethod, 
-            total_amount: total, 
-            pharmacy_id: <?= $pharmacy_id ?>, 
-            branch_id: <?= $branch_id ?> 
+        data: {
+            /*
+             * Only send product IDs and requested quantities.
+             * The server determines pharmacy, branch, prices,
+             * stock and totals from the authenticated session/database.
+             */
+            cart: JSON.stringify(
+                cart.map(i => ({
+                    id: parseInt(i.id, 10),
+                    qty: parseInt(i.qty, 10)
+                }))
+            ),
+            payment_method: selectedMethod
         },
         dataType: 'json',
-        success: function(res) {
-            if(res.status === 'success') {
-                $('#rec_invoice').text(res.invoice);
-                $('#rec_date').text(new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
-                $('#rec_method').text(selectedMethod.toUpperCase());
-                $('#rec_total').text(total.toFixed(2));
-                
-                let subTotalVal = total / 1.16;
-                let vatVal = total - subTotalVal;
-                $('#rec_subtotal').text(subTotalVal.toFixed(2));
-                $('#rec_vat').text(vatVal.toFixed(2));
 
-                let itemsHtml = '';
-                cart.forEach(i => {
-                    itemsHtml += `
-                    <tr>
-                        <td class="py-1">${i.name}</td>
-                        <td class="text-center py-1">x${i.qty}</td>
-                        <td class="text-end py-1">K${(i.price * i.qty).toFixed(2)}</td>
-                    </tr>`;
+        success: function(res) {
+
+            if(res.status === 'success') {
+
+                /*
+                 * Receipt values come from the server-confirmed sale.
+                 */
+                $('#rec_invoice').text(res.invoice || '');
+
+                $('#rec_date').text(
+                    new Date().toLocaleDateString() + ' ' +
+                    new Date().toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    })
+                );
+
+                $('#rec_method').text(
+                    String(
+                        res.payment_method ||
+                        selectedMethod ||
+                        ''
+                    ).toUpperCase()
+                );
+
+                $('#rec_total').text(
+                    Number(res.total || 0).toFixed(2)
+                );
+
+                $('#rec_subtotal').text(
+                    Number(res.subtotal || 0).toFixed(2)
+                );
+
+                $('#rec_vat').text(
+                    Number(res.vat || 0).toFixed(2)
+                );
+
+
+                /*
+                 * Build receipt lines from the authoritative server
+                 * response instead of the browser cart.
+                 *
+                 * .text() is used for product names so product data
+                 * cannot inject HTML into the receipt.
+                 */
+                const items = Array.isArray(res.items)
+                    ? res.items
+                    : [];
+
+                $('#rec_items').empty();
+
+                items.forEach(function(item) {
+
+                    const row = $('<tr></tr>');
+
+                    $('<td></td>')
+                        .addClass('py-1')
+                        .text(item.name || '')
+                        .appendTo(row);
+
+                    $('<td></td>')
+                        .addClass('text-center py-1')
+                        .text(
+                            'x' +
+                            parseInt(
+                                item.quantity || 0,
+                                10
+                            )
+                        )
+                        .appendTo(row);
+
+                    $('<td></td>')
+                        .addClass('text-end py-1')
+                        .text(
+                            'K' +
+                            Number(
+                                item.line_total || 0
+                            ).toFixed(2)
+                        )
+                        .appendTo(row);
+
+                    $('#rec_items').append(row);
                 });
-                $('#rec_items').html(itemsHtml);
-                
-                // Show thermal receipt modal
-                let receiptModal = new bootstrap.Modal(document.getElementById('receiptModal'));
+
+
+                /*
+                 * Show thermal receipt modal.
+                 */
+                const receiptElement =
+                    document.getElementById('receiptModal');
+
+                const receiptModal =
+                    bootstrap.Modal.getOrCreateInstance(
+                        receiptElement
+                    );
+
                 receiptModal.show();
 
-                // Clear POS State
-                cart = []; 
-                renderCart(); 
+
+                /*
+                 * Clear POS state ONLY after the server confirms
+                 * that the transaction was committed.
+                 */
+                cart = [];
                 selectedMethod = null;
+
+                renderCart();
+
                 $('.meth-btn').removeClass('active');
+
             } else {
-                alert('Error: ' + res.message);
+
+                alert(
+                    'Error: ' +
+                    (
+                        res.message ||
+                        'The sale could not be completed.'
+                    )
+                );
+
+                /*
+                 * Keep the cart so the cashier can retry.
+                 */
                 checkReady();
             }
         },
-        error: function() { 
-            alert('Connection error.'); 
-            checkReady(); 
+
+        error: function(xhr) {
+
+            let message =
+                'Connection error. Please try again.';
+
+            /*
+             * process_sale.php returns safe JSON error messages.
+             */
+            if (
+                xhr.responseJSON &&
+                xhr.responseJSON.message
+            ) {
+
+                message = xhr.responseJSON.message;
+
+            } else if (xhr.responseText) {
+
+                try {
+
+                    const parsed =
+                        JSON.parse(xhr.responseText);
+
+                    if (parsed.message) {
+                        message = parsed.message;
+                    }
+
+                } catch (e) {
+                    // Keep generic safe message.
+                }
+            }
+
+            alert(message);
+
+            /*
+             * Keep cart intact after a failed request.
+             */
+            checkReady();
         }
     });
 }
