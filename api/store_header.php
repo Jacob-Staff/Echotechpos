@@ -24,6 +24,7 @@ if (isset($_GET['bid'])) {
 }
 
 $branch_id = isset($_GET['bid']) ? intval($_GET['bid']) : (isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 10); 
+$_SESSION['current_branch_id'] = $branch_id;
 
 // 4. Multi-Tenant Context Search
 $sql = "SELECT 
@@ -191,7 +192,7 @@ if ($stmt_br) {
     $br_list = $stmt_br->get_result();
 
     while ($bl = $br_list->fetch_assoc()): 
-        $switch_url = 'online_store.php?bid=' . $bl['id'];
+        $switch_url = $root_prefix . 'online_store.php?bid=' . $bl['id'];
     ?>
         <li>
             <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo htmlspecialchars($switch_url); ?>">
@@ -236,7 +237,7 @@ if ($stmt_br) {
             <div class="d-flex align-items-center gap-2">
                 <a href="<?php echo $path_prefix; ?>view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none">
                     <i class="mdi mdi-cart-outline fs-4"></i>
-                    <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge" style="font-size: 9px;">
+                    <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge cart-count" style="font-size: 9px;">
                         <?php 
                         $cart_count = 0;
                         if (isset($_SESSION['carts'][$branch_id]) && is_array($_SESSION['carts'][$branch_id])) {
@@ -362,7 +363,7 @@ if ($stmt_br) {
             </div>
 
             <div class="col-12 col-md-5 col-lg-5">
-                <form action="<?php echo $path_prefix; ?>search.php" method="GET" class="hng-search-container">
+                <form action="<?php echo $root_prefix; ?>online_store.php" method="GET" class="hng-search-container">
                     <input type="hidden" name="bid" value="<?php echo $branch_id; ?>">
                     <select name="type">
                         <option value="all">All</option>
@@ -375,11 +376,11 @@ if ($stmt_br) {
 
             <div class="col-12 col-md-4 col-lg-4 mt-2 mt-md-0">
                 <div class="nav-icon-grid">
-                    <a href="online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="<?php echo $root_prefix; ?>online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-home"></i>Home
                     </a>
                     <a href="#" class="hng-nav-icon"><i class="mdi mdi-view-grid"></i>Category</a>
-                    <a href="<?php echo $path_prefix; ?>offers.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
+                    <a href="<?php echo $root_prefix; ?>offers.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-label-percent"></i>Offer
                     </a>
                     <a href="<?php echo $root_prefix; ?>help.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
