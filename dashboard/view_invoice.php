@@ -817,39 +817,130 @@ require_once "../includes/head.php";
     }
 }
 
+@page {
+    size: A4;
+    margin: 10mm;
+}
+
 @media print {
+
+    html,
+    body {
+        width: 100%;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #ffffff !important;
+    }
 
     .no-print,
     .topbar,
     .left-sidebar,
+    nav,
     footer {
         display: none !important;
     }
 
-    .page-wrapper {
-        margin-left: 0 !important;
-        padding: 0 !important;
+    #main-wrapper {
+        width: 100% !important;
         min-height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .page-wrapper {
+        width: 100% !important;
+        min-height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .container-fluid {
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .invoice-page {
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     .invoice-card {
-        max-width: 100%;
-        margin: 0;
-        padding: 0;
-        box-shadow: none;
-        border: none;
+        width: 100% !important;
+        max-width: none !important;
+
+        margin: 0 !important;
+        padding: 0 !important;
+
+        border: none !important;
+        box-shadow: none !important;
+
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
     }
 
-    .invoice-card {
-        border-top: none;
+    .invoice-card::before {
+        display: none !important;
+    }
+
+    .invoice-header {
+        margin-bottom: 18px !important;
+    }
+
+    .invoice-meta {
+        margin-bottom: 18px !important;
+        padding: 10px 0 !important;
     }
 
     .invoice-table {
-        width: 100%;
+        margin-bottom: 15px !important;
     }
 
-    body {
-        background: #ffffff !important;
+    .invoice-table th,
+    .invoice-table td {
+        padding: 8px !important;
+    }
+
+    .totals-box {
+        padding: 12px !important;
+    }
+
+    .payment-details {
+        margin-top: 8px !important;
+        padding-top: 8px !important;
+    }
+
+    .reference-box {
+        margin-top: 10px !important;
+        padding-top: 8px !important;
+    }
+
+    .invoice-footer {
+        margin-top: 18px !important;
+        padding-top: 12px !important;
+
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    .invoice-footer small {
+        display: none !important;
+    }
+
+    .invoice-footer div,
+    .invoice-footer p {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    .table-responsive {
+        overflow: visible !important;
+    }
+
+    .invoice-table {
+        width: 100% !important;
     }
 }
 
