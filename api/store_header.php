@@ -13,18 +13,16 @@ if (file_exists(__DIR__ . "/../includes/conn.php")) {
 }
 
 // 2. Resolve Branch ID
-if (isset($_GET['bid'])) {
+if (isset($_GET['bid']) && intval($_GET['bid']) > 0) {
     $new_branch = intval($_GET['bid']);
     $_SESSION['current_branch_id'] = $new_branch;
 }
 
-$branch_id = isset($_GET['bid']) 
-    ? intval($_GET['bid']) 
-    : (isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 10); 
-
+$branch_id = isset($_SESSION['current_branch_id']) ? intval($_SESSION['current_branch_id']) : 10;
 $_SESSION['current_branch_id'] = $branch_id;
 
 // 3. Multi-Tenant Context Search
+$tenant_context = null;
 $sql = "SELECT 
             p.id as pharmacy_id,
             p.name as tenant_name, 
@@ -36,39 +34,28 @@ $sql = "SELECT
         INNER JOIN pharmacies p ON b.pharmacy_id = p.id
         WHERE b.id = ? AND b.is_active = 1";
 
-$stmt = $conn->prepare($sql);
-if ($stmt) {
+if ($stmt = $conn->prepare($sql)) {
     $stmt->bind_param("i", $branch_id);
     $stmt->execute();
     $result = $stmt->get_result();
     $tenant_context = $result ? $result->fetch_assoc() : null;
     $stmt->close();
-} else {
-    $tenant_context = null;
 }
 
 // Fallbacks
-if (!$tenant_context) {
-    $pharmacy_name = "Echo Prime";
-    $branch_name = "Main Branch";
-    $phone = "260974140989";
-    $parent_pharmacy_id = 0;
-    $db_logo = 'default_logo.png';
-} else {
-    $pharmacy_name = $tenant_context['tenant_name'] ?? 'Echo Prime';
-    $branch_name = $tenant_context['branch_name'] ?? 'Main Branch';
-    $phone = $tenant_context['branch_phone'] ?? '260974140989';
-    $parent_pharmacy_id = intval($tenant_context['pharmacy_id']);
-    $db_logo = $tenant_context['tenant_logo'] ?? 'default_logo.png';
-}
+$pharmacy_name      = $tenant_context['tenant_name'] ?? 'Echo Prime';
+$branch_name        = $tenant_context['branch_name'] ?? 'Main Branch';
+$phone              = $tenant_context['branch_phone'] ?? '260974140989';
+$parent_pharmacy_id = isset($tenant_context['pharmacy_id']) ? intval($tenant_context['pharmacy_id']) : 0;
+$db_logo            = $tenant_context['tenant_logo'] ?? 'default_logo.png';
 
 // Fetch categories safely
 $cat_query = $conn->query("SELECT * FROM categories WHERE status = 1 LIMIT 8");
 
-// Image paths (Local to api/uploads/logos/)
-$logo_filename = (!empty($db_logo)) ? $db_logo : 'default_logo.png';
+// Image paths
+$logo_filename   = !empty($db_logo) ? $db_logo : 'default_logo.png';
 $logo_local_path = __DIR__ . "/uploads/logos/" . $logo_filename;
-$logo_web_path = file_exists($logo_local_path) 
+$logo_web_path   = file_exists($logo_local_path) 
     ? "uploads/logos/" . $logo_filename 
     : "uploads/logos/default_logo.png";
 
@@ -76,17 +63,15 @@ $logo_web_path = file_exists($logo_local_path)
 $response_count = 0;
 if (isset($_SESSION['client_id'])) {
     $c_id = intval($_SESSION['client_id']);
-    $email_stmt = $conn->prepare("SELECT email FROM clients WHERE id = ?");
-    if ($email_stmt) {
+    if ($email_stmt = $conn->prepare("SELECT email FROM clients WHERE id = ?")) {
         $email_stmt->bind_param("i", $c_id);
         $email_stmt->execute();
         $email_res = $email_stmt->get_result()->fetch_assoc();
-        $c_email = $email_res['email'] ?? '';
+        $c_email   = $email_res['email'] ?? '';
         $email_stmt->close();
 
         if (!empty($c_email)) {
-            $stmt_res = $conn->prepare("SELECT COUNT(*) as total FROM help_inquiries WHERE client_email = ? AND status = 'Resolved' AND pharmacy_id = ? AND is_read_by_client = 0");
-            if ($stmt_res) {
+            if ($stmt_res = $conn->prepare("SELECT COUNT(*) as total FROM help_inquiries WHERE client_email = ? AND status = 'Resolved' AND pharmacy_id = ? AND is_read_by_client = 0")) {
                 $stmt_res->bind_param("si", $c_email, $parent_pharmacy_id);
                 $stmt_res->execute();
                 $response_count = $stmt_res->get_result()->fetch_assoc()['total'] ?? 0;
@@ -184,26 +169,25 @@ if (isset($_SESSION['client_id'])) {
                 </div>
                 <ul class="dropdown-menu shadow border-0">
                     <li class="dropdown-header small text-uppercase fw-bold text-muted">Switch Branch</li>
-<?php 
-$stmt_br = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1");
-if ($stmt_br) {
-    $stmt_br->bind_param("i", $parent_pharmacy_id);
-    $stmt_br->execute();
-    $br_list = $stmt_br->get_result();
+                    <?php 
+                    if ($stmt_br = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1")) {
+                        $stmt_br->bind_param("i", $parent_pharmacy_id);
+                        $stmt_br->execute();
+                        $br_list = $stmt_br->get_result();
 
-    while ($bl = $br_list->fetch_assoc()): 
-        $switch_url = 'online_store.php?bid=' . $bl['id'];
-    ?>
-        <li>
-            <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo htmlspecialchars($switch_url); ?>">
-                <?php echo htmlspecialchars($bl['branch_name']); ?>
-            </a>
-        </li>
-    <?php 
-    endwhile;
-    $stmt_br->close();
-} 
-?>
+                        while ($bl = $br_list->fetch_assoc()): 
+                            $switch_url = 'online_store.php?bid=' . $bl['id'];
+                        ?>
+                            <li>
+                                <a class="dropdown-item <?php echo ($bl['id'] == $branch_id) ? 'active bg-success' : ''; ?>" href="<?php echo htmlspecialchars($switch_url); ?>">
+                                    <?php echo htmlspecialchars($bl['branch_name']); ?>
+                                </a>
+                            </li>
+                        <?php 
+                        endwhile;
+                        $stmt_br->close();
+                    } 
+                    ?>
                 </ul>
             </div>
         </div>
@@ -211,15 +195,17 @@ if ($stmt_br) {
         <div class="d-flex align-items-center gap-2">
             <nav class="d-none d-lg-flex">
                 <?php if(isset($_SESSION['client_id'])): 
-                    $check_sub = $conn->prepare("SELECT id FROM customers WHERE client_id = ? AND branch_id = ?");
-                    $check_sub->bind_param("ii", $_SESSION['client_id'], $branch_id);
-                    $check_sub->execute();
-                    $is_subscribed = $check_sub->get_result()->num_rows > 0;
-                    $check_sub->close();
+                    $is_subscribed = false;
+                    if ($check_sub = $conn->prepare("SELECT id FROM customers WHERE client_id = ? AND branch_id = ?")) {
+                        $check_sub->bind_param("ii", $_SESSION['client_id'], $branch_id);
+                        $check_sub->execute();
+                        $is_subscribed = $check_sub->get_result()->num_rows > 0;
+                        $check_sub->close();
+                    }
                 ?>
                     <a href="javascript:void(0);" 
                        id="subscribeBtn" 
-                       class="apollo-nav-pill <?php echo $is_subscribed ? 'is-active' : ''; ?>" 
+                       class="apollo-nav-pill toggle-subscribe <?php echo $is_subscribed ? 'is-active' : ''; ?>" 
                        data-client="<?php echo $_SESSION['client_id']; ?>" 
                        data-branch="<?php echo $branch_id; ?>" 
                        data-pharmacy="<?php echo $parent_pharmacy_id; ?>"
@@ -270,9 +256,8 @@ if ($stmt_br) {
                     <div class="user-menu">
                         <?php if(isset($_SESSION['client_id'])): 
                             $uid = intval($_SESSION['client_id']);
-                            $stmt_user = $conn->prepare("SELECT id, full_name, phone FROM clients WHERE id = ?");
                             $user_data = [];
-                            if ($stmt_user) {
+                            if ($stmt_user = $conn->prepare("SELECT id, full_name, phone FROM clients WHERE id = ?")) {
                                 $stmt_user->bind_param("i", $uid);
                                 $stmt_user->execute();
                                 $user_data = $stmt_user->get_result()->fetch_assoc() ?? [];
@@ -295,16 +280,10 @@ if ($stmt_br) {
                             <a href="pharmacist.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a>
                             <a href="upload_prescription.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a>
                             
-                            <?php if(isset($_SESSION['client_id'])): 
-                                $check_sub = $conn->prepare("SELECT id FROM customers WHERE client_id = ? AND branch_id = ?");
-                                $check_sub->bind_param("ii", $_SESSION['client_id'], $branch_id);
-                                $check_sub->execute();
-                                $is_subscribed = $check_sub->get_result()->num_rows > 0;
-                                $check_sub->close();
-                            ?>
+                            <?php if(isset($_SESSION['client_id'])): ?>
                                 <a href="javascript:void(0);" 
                                    id="subscribeBtnMobile" 
-                                   class="menu-link text-success fw-bold" 
+                                   class="menu-link text-success fw-bold toggle-subscribe" 
                                    data-client="<?php echo $_SESSION['client_id']; ?>" 
                                    data-branch="<?php echo $branch_id; ?>" 
                                    data-pharmacy="<?php echo $parent_pharmacy_id; ?>"
@@ -328,11 +307,11 @@ if ($stmt_br) {
 <!-- Tier 2 Category Bar -->
 <div class="tier-2-strip">
     <div class="container-fluid text-center px-2">
-        <a href="#" class="strip-link cat-filter active" data-category="all">All Products</a>
+        <a href="online_store.php?bid=<?php echo $branch_id; ?>" class="strip-link cat-filter active" data-category="all">All Products</a>
         <?php 
         if ($cat_query):
             while ($c = $cat_query->fetch_assoc()): ?>
-                <a href="#" class="strip-link cat-filter" data-category="<?php echo htmlspecialchars($c['name'] ?? ''); ?>">
+                <a href="online_store.php?bid=<?php echo $branch_id; ?>&cat=<?php echo urlencode($c['name']); ?>" class="strip-link cat-filter" data-category="<?php echo htmlspecialchars($c['name'] ?? ''); ?>">
                    <?php echo htmlspecialchars($c['name'] ?? ''); ?>
                 </a>
             <?php 
@@ -379,7 +358,7 @@ if ($stmt_br) {
                     <a href="online_store.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-home"></i>Home
                     </a>
-                    <a href="#" class="hng-nav-icon"><i class="mdi mdi-view-grid"></i>Category</a>
+                    <a href="categories.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon"><i class="mdi mdi-view-grid"></i>Category</a>
                     <a href="offers.php?bid=<?php echo $branch_id; ?>" class="hng-nav-icon">
                         <i class="mdi mdi-label-percent"></i>Offer
                     </a>
