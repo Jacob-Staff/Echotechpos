@@ -1,41 +1,38 @@
 <?php
 /**
  * ============================================================
- * BIGE50 / PHARMACY POS
- * VIEW INVOICE
+ * ECHOTECH POS
+ * SECURE INVOICE VIEW / REPRINT
  * Phase 3G-1
+ * ============================================================
  *
- * Features:
- * - Secure pharmacy + branch isolation
- * - Prepared statements
- * - New Phase 3 sales fields
- * - Payment method display
- * - Cash received / change
- * - Card / Mobile Money payment display
- * - Client transaction reference
- * - Printable invoice
+ * IMPORTANT:
+ * - Uses the existing includes/head.php layout.
+ * - Does NOT query branch columns that are not part of the
+ *   current production branch contract.
+ * - Restricts the sale to the logged-in pharmacy + branch.
+ * - Uses the Phase 3 payment fields.
+ * - Uses sales_items.pharmacy_id + branch_id, as created by
+ *   the current production sale processor.
  * ============================================================
  */
 
 ini_set('display_errors', 0);
+ini_set('display_startup_errors', 0);
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-/*
-|--------------------------------------------------------------------------
-| Authentication / Database
-|--------------------------------------------------------------------------
-*/
-
 require_once "../includes/conn.php";
 require_once "../includes/auth.php";
 
+date_default_timezone_set('Africa/Lusaka');
+
 /*
 |--------------------------------------------------------------------------
-| Session Tenant Context
+| Tenant / Branch Context
 |--------------------------------------------------------------------------
 */
 
@@ -43,8 +40,27 @@ $pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
 $branch_id   = (int)($_SESSION['branch_id'] ?? 0);
 
 if ($pharmacy_id <= 0 || $branch_id <= 0) {
-    header("Location: ../login.php?error=session_expired");
-    exit();
+    http_response_code(401);
+    die("
+        <div style='
+            max-width:600px;
+            margin:80px auto;
+            padding:30px;
+            font-family:Arial,sans-serif;
+            text-align:center;
+        '>
+            <div style='
+                background:#f8d7da;
+                color:#842029;
+                border:1px solid #f5c2c7;
+                border-radius:10px;
+                padding:25px;
+            '>
+                <h3>Session Expired</h3>
+                <p>Please log in again.</p>
+            </div>
+        </div>
+    ");
 }
 
 /*
@@ -84,7 +100,7 @@ if (!$invoice_id || $invoice_id <= 0) {
                        margin-top:10px;
                        padding:10px 18px;
                        background:#198754;
-                       color:white;
+                       color:#fff;
                        text-decoration:none;
                        border-radius:6px;
                    '>
@@ -97,11 +113,11 @@ if (!$invoice_id || $invoice_id <= 0) {
 
 /*
 |--------------------------------------------------------------------------
-| Helper
+| Output Escaping
 |--------------------------------------------------------------------------
 */
 
-function e($value): string
+function invoice_e($value): string
 {
     return htmlspecialchars(
         (string)$value,
@@ -112,16 +128,13 @@ function e($value): string
 
 /*
 |--------------------------------------------------------------------------
-| Fetch Invoice
+| Load Sale
 |--------------------------------------------------------------------------
 |
-| IMPORTANT:
-| The invoice is restricted by BOTH:
+| The current transaction page already establishes that sales are
+| isolated by pharmacy_id + branch_id.
 |
-|   pharmacy_id
-|   branch_id
-|
-| This prevents one tenant/branch from opening another branch's invoice.
+| We keep the same security boundary here.
 |--------------------------------------------------------------------------
 */
 
@@ -140,7 +153,6 @@ $invoiceSql = "
         s.payment_method,
         s.amount_received,
         s.change_due,
-
         s.client_reference,
 
         s.user_id,
@@ -154,13 +166,7 @@ $invoiceSql = "
         ) AS issuer,
 
         p.name AS pharmacy_name,
-
-        b.branch_name,
-
-        b.address AS branch_address,
-        b.location AS branch_location,
-        b.phone AS branch_phone,
-        b.contact AS branch_contact
+        b.branch_name
 
     FROM sales s
 
@@ -181,13 +187,57 @@ $invoiceSql = "
     LIMIT 1
 ";
 
-$invoiceStmt = $conn->prepare($invoiceSql);
+$invoiceStmt = mysqli_prepare(
+    $conn,
+    $invoiceSql
+);
 
 if (!$invoiceStmt) {
     error_log(
-        "view_invoice.php prepare invoice failed: " .
-        $conn->error
+        "view_invoice.php invoice prepare failed: " .
+        mysqli_error($conn)
     );
+
+    http_response_code(500);
+
+    die("
+        <div style='
+            max-width:600px;
+            margin:80px auto;
+            padding:30px;
+            font-family:Arial,sans-serif;
+            text-align:center;
+        '>
+            <div style='
+                background:#f8d7da;
+                color:#842029;
+                border:1px solid #f5c2c7;
+                border-radius:10px;
+                padding:25px;
+            '>
+                <h3>Unable to Load Invoice</h3>
+                <p>The invoice query could not be prepared.</p>
+            </div>
+        </div>
+    ");
+}
+
+mysqli_stmt_bind_param(
+    $invoiceStmt,
+    "iii",
+    $invoice_id,
+    $pharmacy_id,
+    $branch_id
+);
+
+if (!mysqli_stmt_execute($invoiceStmt)) {
+
+    error_log(
+        "view_invoice.php invoice execute failed: " .
+        mysqli_stmt_error($invoiceStmt)
+    );
+
+    mysqli_stmt_close($invoiceStmt);
 
     http_response_code(500);
 
@@ -213,29 +263,102 @@ if (!$invoiceStmt) {
     ");
 }
 
-$invoiceStmt->bind_param(
-    "iii",
-    $invoice_id,
-    $pharmacy_id,
-    $branch_id
+$invoiceResult = mysqli_stmt_get_result(
+    $invoiceStmt
 );
 
-$invoiceStmt->execute();
+$invoice = mysqli_fetch_assoc(
+    $invoiceResult
+);
 
-$invoiceResult = $invoiceStmt->get_result();
+mysqli_stmt_close(
+    $invoiceStmt
+);
 
-$invoice = $invoiceResult->fetch_assoc();
+if (!$invoice) {
 
-$invoiceStmt->close();
+    http_response_code(404);
+
+    die("
+        <div style='
+            max-width:600px;
+            margin:80px auto;
+            padding:30px;
+            font-family:Arial,sans-serif;
+            text-align:center;
+        '>
+            <div style='
+                background:#fff3cd;
+                color:#664d03;
+                border:1px solid #ffecb5;
+                border-radius:10px;
+                padding:25px;
+            '>
+                <h3>Invoice Not Found</h3>
+                <p>
+                    The invoice does not exist or is not available
+                    for this pharmacy and branch.
+                </p>
+
+                <a href='today_transactions.php'
+                   style='
+                       display:inline-block;
+                       margin-top:10px;
+                       padding:10px 18px;
+                       background:#198754;
+                       color:#fff;
+                       text-decoration:none;
+                       border-radius:6px;
+                   '>
+                    Back to Transactions
+                </a>
+            </div>
+        </div>
+    ");
+}
 
 /*
 |--------------------------------------------------------------------------
-| Invoice Not Found / Access Denied
+| Load Sale Items
+|--------------------------------------------------------------------------
+|
+| Current production sales_items records are tenant/branch scoped.
 |--------------------------------------------------------------------------
 */
 
-if (!$invoice) {
-    http_response_code(404);
+$itemsSql = "
+    SELECT
+        si.id,
+        si.product_id,
+        si.quantity,
+        si.unit_price,
+        st.item_name
+
+    FROM sales_items si
+
+    INNER JOIN store_items st
+        ON st.id = si.product_id
+
+    WHERE si.sale_id = ?
+      AND si.pharmacy_id = ?
+      AND si.branch_id = ?
+
+    ORDER BY si.id ASC
+";
+
+$itemsStmt = mysqli_prepare(
+    $conn,
+    $itemsSql
+);
+
+if (!$itemsStmt) {
+
+    error_log(
+        "view_invoice.php items prepare failed: " .
+        mysqli_error($conn)
+    );
+
+    http_response_code(500);
 
     die("
         <div style='
@@ -252,66 +375,31 @@ if (!$invoice) {
                 border-radius:10px;
                 padding:25px;
             '>
-                <h3>Invoice Not Found</h3>
-                <p>
-                    The invoice does not exist or you do not
-                    have permission to view it.
-                </p>
-
-                <a href='today_transactions.php'
-                   style='
-                       display:inline-block;
-                       margin-top:10px;
-                       padding:10px 18px;
-                       background:#198754;
-                       color:white;
-                       text-decoration:none;
-                       border-radius:6px;
-                   '>
-                    Back to Transactions
-                </a>
+                <h3>Unable to Load Invoice Items</h3>
+                <p>The invoice items query could not be prepared.</p>
             </div>
         </div>
     ");
 }
 
-/*
-|--------------------------------------------------------------------------
-| Fetch Invoice Items
-|--------------------------------------------------------------------------
-|
-| We verify BOTH pharmacy_id and branch_id.
-|--------------------------------------------------------------------------
-*/
+mysqli_stmt_bind_param(
+    $itemsStmt,
+    "iii",
+    $invoice_id,
+    $pharmacy_id,
+    $branch_id
+);
 
-$itemsSql = "
-    SELECT
-        si.id,
-        si.product_id,
-        si.quantity,
-        si.unit_price,
+if (!mysqli_stmt_execute($itemsStmt)) {
 
-        st.item_name
-
-    FROM sales_items si
-
-    INNER JOIN store_items st
-        ON st.id = si.product_id
-
-    WHERE si.sale_id = ?
-      AND si.pharmacy_id = ?
-      AND si.branch_id = ?
-
-    ORDER BY si.id ASC
-";
-
-$itemsStmt = $conn->prepare($itemsSql);
-
-if (!$itemsStmt) {
     error_log(
-        "view_invoice.php prepare items failed: " .
-        $conn->error
+        "view_invoice.php items execute failed: " .
+        mysqli_stmt_error($itemsStmt)
     );
+
+    mysqli_stmt_close($itemsStmt);
+
+    http_response_code(500);
 
     die("
         <div style='
@@ -335,28 +423,23 @@ if (!$itemsStmt) {
     ");
 }
 
-$itemsStmt->bind_param(
-    "iii",
-    $invoice_id,
-    $pharmacy_id,
-    $branch_id
+$itemsResult = mysqli_stmt_get_result(
+    $itemsStmt
 );
-
-$itemsStmt->execute();
-
-$itemsResult = $itemsStmt->get_result();
 
 $items = [];
 
-while ($row = $itemsResult->fetch_assoc()) {
+while ($row = mysqli_fetch_assoc($itemsResult)) {
     $items[] = $row;
 }
 
-$itemsStmt->close();
+mysqli_stmt_close(
+    $itemsStmt
+);
 
 /*
 |--------------------------------------------------------------------------
-| Payment Values
+| Payment
 |--------------------------------------------------------------------------
 */
 
@@ -368,37 +451,30 @@ if ($paymentMethod === '') {
     $paymentMethod = 'Cash';
 }
 
-/*
-|--------------------------------------------------------------------------
-| Normalize Payment Method For Display
-|--------------------------------------------------------------------------
-*/
-
 $paymentMethodLower = strtolower(
-    trim($paymentMethod)
+    $paymentMethod
 );
 
-if (
-    $paymentMethodLower === 'mobile' ||
-    $paymentMethodLower === 'momo'
-) {
-    $paymentMethodDisplay = 'MOBILE MONEY';
-} elseif (
-    $paymentMethodLower === 'mobile money'
-) {
-    $paymentMethodDisplay = 'MOBILE MONEY';
-} elseif (
-    $paymentMethodLower === 'card'
-) {
-    $paymentMethodDisplay = 'CARD';
-} elseif (
-    $paymentMethodLower === 'cash'
-) {
-    $paymentMethodDisplay = 'CASH';
-} else {
-    $paymentMethodDisplay = strtoupper(
-        $paymentMethod
-    );
+switch ($paymentMethodLower) {
+
+    case 'mobile':
+    case 'momo':
+    case 'mobile money':
+        $paymentMethodDisplay = 'MOBILE MONEY';
+        break;
+
+    case 'card':
+        $paymentMethodDisplay = 'CARD';
+        break;
+
+    case 'cash':
+        $paymentMethodDisplay = 'CASH';
+        break;
+
+    default:
+        $paymentMethodDisplay =
+            strtoupper($paymentMethod);
+        break;
 }
 
 /*
@@ -407,31 +483,36 @@ if (
 |--------------------------------------------------------------------------
 */
 
-$subtotal = (float)(
-    $invoice['subtotal'] ?? 0
+$subtotal = round(
+    (float)($invoice['subtotal'] ?? 0),
+    2
 );
 
-$vatAmount = (float)(
-    $invoice['vat_amount'] ?? 0
+$vatAmount = round(
+    (float)($invoice['vat_amount'] ?? 0),
+    2
 );
 
-$total = (float)(
-    $invoice['total'] ?? 0
+$total = round(
+    (float)($invoice['total'] ?? 0),
+    2
 );
 
-$amountReceived = (float)(
-    $invoice['amount_received'] ?? $total
+$amountReceived = round(
+    (float)(
+        $invoice['amount_received']
+        ?? $total
+    ),
+    2
 );
 
-$changeDue = (float)(
-    $invoice['change_due'] ?? 0
+$changeDue = round(
+    (float)(
+        $invoice['change_due']
+        ?? 0
+    ),
+    2
 );
-
-/*
-|--------------------------------------------------------------------------
-| Protect Against Negative Display Values
-|--------------------------------------------------------------------------
-*/
 
 if ($amountReceived < 0) {
     $amountReceived = 0;
@@ -443,41 +524,7 @@ if ($changeDue < 0) {
 
 /*
 |--------------------------------------------------------------------------
-| Branch Contact Information
-|--------------------------------------------------------------------------
-*/
-
-$displayAddress = '';
-
-if (
-    !empty($invoice['branch_address'])
-) {
-    $displayAddress =
-        $invoice['branch_address'];
-} elseif (
-    !empty($invoice['branch_location'])
-) {
-    $displayAddress =
-        $invoice['branch_location'];
-}
-
-$displayPhone = '';
-
-if (
-    !empty($invoice['branch_phone'])
-) {
-    $displayPhone =
-        $invoice['branch_phone'];
-} elseif (
-    !empty($invoice['branch_contact'])
-) {
-    $displayPhone =
-        $invoice['branch_contact'];
-}
-
-/*
-|--------------------------------------------------------------------------
-| Date / Time
+| Date
 |--------------------------------------------------------------------------
 */
 
@@ -485,22 +532,35 @@ $createdAt = $invoice['created_at'] ?? '';
 
 $displayDate = 'N/A';
 
-if (!empty($createdAt)) {
+if ($createdAt !== '') {
 
-    $timestamp = strtotime($createdAt);
+    $timestamp = strtotime(
+        $createdAt
+    );
 
     if ($timestamp !== false) {
-        $displayDate =
-            date(
-                'd M Y, h:i A',
-                $timestamp
-            );
+
+        $displayDate = date(
+            'd M Y, h:i A',
+            $timestamp
+        );
     }
 }
 
 /*
 |--------------------------------------------------------------------------
-| Load Common Head
+| Existing application layout
+|--------------------------------------------------------------------------
+|
+| IMPORTANT:
+| head.php already outputs:
+| <!DOCTYPE html>
+| <html>
+| <head>
+| ...
+| <body>
+|
+| Therefore we DO NOT create a second HTML document here.
 |--------------------------------------------------------------------------
 */
 
@@ -508,1286 +568,772 @@ require_once "../includes/head.php";
 
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-
-<meta charset="UTF-8">
-
-<meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
->
-
-<title>
-    Invoice #<?= e($invoice['invoice']) ?>
-</title>
-
-<link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-    rel="stylesheet"
->
-
-<link
-    href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
-    rel="stylesheet"
->
-
-<link
-    href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css"
-    rel="stylesheet"
->
-
 <style>
 
-/*
-|--------------------------------------------------------------------------
-| Page
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   INVOICE PAGE
+========================================================= */
 
-body {
-    font-family: 'Poppins', sans-serif;
-    background-color: #f4f6f9;
-    color: #212529;
-}
-
-.page-wrapper {
-    padding-top: 20px;
+.invoice-page {
     padding-bottom: 40px;
 }
 
-/*
-|--------------------------------------------------------------------------
-| Invoice Card
-|--------------------------------------------------------------------------
-*/
+.invoice-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 20px;
+}
 
 .invoice-card {
-
-    background: #ffffff;
-
-    border-radius: 8px;
-
-    box-shadow:
-        0 0 20px rgba(0, 0, 0, 0.05);
-
-    max-width: 850px;
-
-    margin: 0 auto;
-
-    padding: 40px;
-
-    position: relative;
-
-}
-
-.invoice-card::before {
-
-    content: "";
-
-    position: absolute;
-
-    top: 0;
-
-    left: 0;
-
-    right: 0;
-
-    height: 4px;
-
-    background: #22a7f0;
-
-    border-radius:
-        8px 8px 0 0;
-
-}
-
-/*
-|--------------------------------------------------------------------------
-| Invoice Header
-|--------------------------------------------------------------------------
-*/
-
-.invoice-title {
-
-    font-size: 2rem;
-
-    letter-spacing: 1px;
-
-    color: #6c757d;
-
-}
-
-/*
-|--------------------------------------------------------------------------
-| Items Table
-|--------------------------------------------------------------------------
-*/
-
-.table-invoice {
-
     width: 100%;
-
+    max-width: 900px;
+    margin: 0 auto;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.06);
+    padding: 40px;
+    border-top: 4px solid #198754;
 }
 
-.table-invoice thead th {
-
-    background-color: #f8f9fa;
-
-    font-size: 11px;
-
-    text-transform: uppercase;
-
-    padding: 12px;
-
-    border-bottom:
-        2px solid #dee2e6;
-
-}
-
-.table-invoice tbody td {
-
-    padding: 12px;
-
-    vertical-align: middle;
-
-    border-bottom:
-        1px solid #eeeeee;
-
-}
-
-/*
-|--------------------------------------------------------------------------
-| Payment Summary
-|--------------------------------------------------------------------------
-*/
-
-.total-section {
-
-    background: #fdfdfd;
-
-    padding: 20px;
-
-    border-radius: 6px;
-
-    border:
-        1px solid #eeeeee;
-
-}
-
-.payment-section {
-
-    margin-top: 18px;
-
-    padding-top: 15px;
-
-    border-top:
-        1px dashed #cccccc;
-
-}
-
-.payment-row {
-
+.invoice-header {
     display: flex;
-
     justify-content: space-between;
-
-    align-items: center;
-
-    margin-bottom: 8px;
-
+    gap: 30px;
+    margin-bottom: 28px;
 }
 
-.payment-row:last-child {
-
-    margin-bottom: 0;
-
+.pharmacy-name {
+    font-size: 24px;
+    font-weight: 800;
+    color: #212529;
+    margin-bottom: 4px;
 }
 
-.payment-label {
-
+.invoice-heading {
+    font-size: 28px;
+    font-weight: 800;
     color: #6c757d;
-
+    text-align: right;
 }
 
-.payment-value {
-
-    font-weight: 600;
-
-}
-
-/*
-|--------------------------------------------------------------------------
-| Total
-|--------------------------------------------------------------------------
-*/
-
-.grand-total {
-
-    color: #198754;
-
-    font-size: 1.35rem;
-
+.invoice-number {
     font-weight: 700;
-
+    color: #212529;
+    text-align: right;
 }
 
-/*
-|--------------------------------------------------------------------------
-| Transaction Reference
-|--------------------------------------------------------------------------
-*/
-
-.transaction-reference {
-
-    font-family:
-        monospace;
-
-    font-size: 11px;
-
+.invoice-date {
     color: #6c757d;
-
-    word-break: break-all;
-
+    font-size: 13px;
+    text-align: right;
 }
 
-/*
-|--------------------------------------------------------------------------
-| Payment Badge
-|--------------------------------------------------------------------------
-*/
+.invoice-meta {
+    display: grid;
+    grid-template-columns:
+        repeat(4, 1fr);
+    gap: 12px;
+    padding: 16px 0;
+    margin-bottom: 25px;
+    border-top: 1px solid #dee2e6;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.meta-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #6c757d;
+    margin-bottom: 4px;
+}
+
+.meta-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: #212529;
+}
 
 .payment-badge {
-
     display: inline-block;
-
-    padding:
-        6px 12px;
-
+    padding: 5px 10px;
     border-radius: 20px;
-
-    background: #f8f9fa;
-
-    border:
-        1px solid #dee2e6;
-
-    font-size: 12px;
-
-    font-weight: 700;
-
+    background: #e9f7ef;
+    color: #198754;
+    border: 1px solid #b7e4c7;
+    font-size: 11px;
+    font-weight: 800;
 }
 
-/*
-|--------------------------------------------------------------------------
-| Print
-|--------------------------------------------------------------------------
-*/
+.invoice-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 25px;
+}
+
+.invoice-table th {
+    padding: 12px;
+    background: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #495057;
+}
+
+.invoice-table td {
+    padding: 13px 12px;
+    border-bottom: 1px solid #eeeeee;
+    font-size: 13px;
+    color: #212529;
+}
+
+.invoice-table .item-name {
+    font-weight: 700;
+}
+
+.totals-wrapper {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.totals-box {
+    width: 100%;
+    max-width: 390px;
+    background: #fafafa;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 18px;
+}
+
+.total-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 5px 0;
+    font-size: 14px;
+}
+
+.total-row.grand {
+    border-top: 2px solid #dee2e6;
+    margin-top: 8px;
+    padding-top: 12px;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.grand-amount {
+    color: #198754;
+}
+
+.payment-details {
+    border-top: 1px dashed #ced4da;
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+.payment-details-title {
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #495057;
+    margin-bottom: 8px;
+}
+
+.change-value {
+    color: #198754;
+    font-weight: 800;
+}
+
+.reference-box {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px dashed #ced4da;
+}
+
+.reference-label {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #6c757d;
+    margin-bottom: 4px;
+}
+
+.reference-value {
+    font-family: monospace;
+    font-size: 11px;
+    color: #6c757d;
+    word-break: break-all;
+}
+
+.invoice-footer {
+    text-align: center;
+    border-top: 1px solid #dee2e6;
+    margin-top: 35px;
+    padding-top: 22px;
+    color: #6c757d;
+    font-size: 12px;
+}
+
+@media (max-width: 768px) {
+
+    .invoice-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .invoice-card {
+        padding: 20px;
+        border-radius: 8px;
+    }
+
+    .invoice-header {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .invoice-heading,
+    .invoice-number,
+    .invoice-date {
+        text-align: left;
+    }
+
+    .invoice-meta {
+        grid-template-columns:
+            repeat(2, 1fr);
+    }
+
+    .invoice-table {
+        min-width: 650px;
+    }
+
+    .totals-wrapper {
+        justify-content: stretch;
+    }
+
+    .totals-box {
+        max-width: none;
+    }
+}
 
 @media print {
 
-    body {
-
-        background:
-            #ffffff !important;
-
-    }
-
-    .no-print {
-
-        display:
-            none !important;
-
-    }
-
-    .left-sidebar,
+    .no-print,
     .topbar,
-    .header,
-    #header,
-    #aside,
-    nav,
+    .left-sidebar,
     footer {
-
-        display:
-            none !important;
-
+        display: none !important;
     }
 
     .page-wrapper {
-
-        margin: 0 !important;
-
+        margin-left: 0 !important;
         padding: 0 !important;
-
-        width: 100% !important;
-
+        min-height: auto !important;
     }
 
     .invoice-card {
-
-        box-shadow:
-            none !important;
-
-        border:
-            none !important;
-
-        padding:
-            0 !important;
-
-        margin:
-            0 !important;
-
-        max-width:
-            100% !important;
-
+        max-width: 100%;
+        margin: 0;
+        padding: 0;
+        box-shadow: none;
+        border: none;
     }
-
-    .invoice-card::before {
-
-        display:
-            none !important;
-
-    }
-
-    .table-invoice {
-
-        width: 100% !important;
-
-    }
-
-    .payment-section {
-
-        page-break-inside:
-            avoid;
-
-    }
-
-}
-
-/*
-|--------------------------------------------------------------------------
-| Mobile
-|--------------------------------------------------------------------------
-*/
-
-@media (max-width: 767px) {
 
     .invoice-card {
-
-        padding:
-            20px;
-
-        border-radius:
-            0;
-
+        border-top: none;
     }
 
-    .invoice-title {
-
-        font-size:
-            1.5rem;
-
+    .invoice-table {
+        width: 100%;
     }
 
-    .invoice-card
-    .row {
-
-        margin-left:
-            0;
-
-        margin-right:
-            0;
-
+    body {
+        background: #ffffff !important;
     }
-
 }
 
 </style>
 
-</head>
+<div id="main-wrapper">
 
-<body>
+    <?php
+    if (file_exists("../includes/header.php")) {
+        require_once "../includes/header.php";
+    }
 
-<div
-    id="main-wrapper"
-    data-layout="vertical"
-    data-sidebartype="full"
->
+    if (file_exists("../includes/aside.php")) {
+        require_once "../includes/aside.php";
+    }
+    ?>
+
+    <div class="page-wrapper invoice-page">
+
+        <div class="container-fluid">
+
+            <!-- =================================================
+                 TOOLBAR
+            ================================================== -->
+
+            <div class="invoice-toolbar no-print">
+
+                <a
+                    href="today_transactions.php"
+                    class="btn btn-outline-secondary"
+                >
+                    <i class="fas fa-arrow-left me-1"></i>
+                    Back to Transactions
+                </a>
+
+                <button
+                    type="button"
+                    class="btn btn-success px-4"
+                    onclick="window.print()"
+                >
+                    <i class="fas fa-print me-1"></i>
+                    Print / Save PDF
+                </button>
+
+            </div>
+
+
+            <!-- =================================================
+                 INVOICE
+            ================================================== -->
+
+            <div class="invoice-card">
+
+                <!-- HEADER -->
+
+                <div class="invoice-header">
+
+                    <div>
+
+                        <div class="pharmacy-name">
+                            <?= invoice_e(
+                                strtoupper(
+                                    $invoice['pharmacy_name']
+                                )
+                            ) ?>
+                        </div>
+
+                        <div class="text-muted small">
+                            <?= invoice_e(
+                                $invoice['branch_name']
+                            ) ?>
+                        </div>
+
+                    </div>
+
+                    <div>
+
+                        <div class="invoice-heading">
+                            INVOICE
+                        </div>
+
+                        <div class="invoice-number">
+                            #<?= invoice_e(
+                                $invoice['invoice']
+                            ) ?>
+                        </div>
+
+                        <div class="invoice-date">
+                            <?= invoice_e(
+                                $displayDate
+                            ) ?>
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- TRANSACTION META -->
+
+                <div class="invoice-meta">
+
+                    <div>
+
+                        <span class="meta-label">
+                            Branch
+                        </span>
+
+                        <span class="meta-value">
+                            <?= invoice_e(
+                                $invoice['branch_name']
+                            ) ?>
+                        </span>
+
+                    </div>
+
+
+                    <div>
+
+                        <span class="meta-label">
+                            Issued By
+                        </span>
+
+                        <span class="meta-value">
+                            <?= invoice_e(
+                                $invoice['issuer']
+                                ?: 'System'
+                            ) ?>
+                        </span>
+
+                    </div>
+
+
+                    <div>
+
+                        <span class="meta-label">
+                            Payment
+                        </span>
+
+                        <span class="payment-badge">
+                            <?= invoice_e(
+                                $paymentMethodDisplay
+                            ) ?>
+                        </span>
+
+                    </div>
+
+
+                    <div>
+
+                        <span class="meta-label">
+                            Status
+                        </span>
+
+                        <span
+                            class="
+                                meta-value
+                                text-success
+                            "
+                        >
+                            PAID
+                        </span>
+
+                    </div>
+
+                </div>
+
+
+                <!-- ITEMS -->
+
+                <div class="table-responsive">
+
+                    <table class="invoice-table">
+
+                        <thead>
+
+                            <tr>
+
+                                <th>
+                                    Item
+                                </th>
+
+                                <th class="text-center">
+                                    Qty
+                                </th>
+
+                                <th class="text-end">
+                                    Unit Price
+                                </th>
+
+                                <th class="text-end">
+                                    Total
+                                </th>
+
+                            </tr>
+
+                        </thead>
+
+                        <tbody>
+
+                        <?php if (!empty($items)): ?>
+
+                            <?php foreach ($items as $item): ?>
+
+                                <?php
+
+                                $quantity = (int)(
+                                    $item['quantity']
+                                    ?? 0
+                                );
+
+                                $unitPrice = (float)(
+                                    $item['unit_price']
+                                    ?? 0
+                                );
+
+                                $lineTotal = round(
+                                    $quantity *
+                                    $unitPrice,
+                                    2
+                                );
+
+                                ?>
+
+                                <tr>
+
+                                    <td class="item-name">
+                                        <?= invoice_e(
+                                            $item['item_name']
+                                        ) ?>
+                                    </td>
+
+                                    <td class="text-center">
+                                        <?= $quantity ?>
+                                    </td>
+
+                                    <td class="text-end">
+                                        K<?= number_format(
+                                            $unitPrice,
+                                            2
+                                        ) ?>
+                                    </td>
+
+                                    <td class="text-end fw-bold">
+                                        K<?= number_format(
+                                            $lineTotal,
+                                            2
+                                        ) ?>
+                                    </td>
+
+                                </tr>
+
+                            <?php endforeach; ?>
+
+                        <?php else: ?>
+
+                            <tr>
+
+                                <td
+                                    colspan="4"
+                                    class="text-center text-muted py-4"
+                                >
+                                    No items recorded.
+                                </td>
+
+                            </tr>
+
+                        <?php endif; ?>
+
+                        </tbody>
+
+                    </table>
+
+                </div>
+
+
+                <!-- TOTALS -->
+
+                <div class="totals-wrapper">
+
+                    <div class="totals-box">
+
+                        <div class="total-row">
+
+                            <span class="text-muted">
+                                Subtotal
+                            </span>
+
+                            <span>
+                                K<?= number_format(
+                                    $subtotal,
+                                    2
+                                ) ?>
+                            </span>
+
+                        </div>
+
+
+                        <div class="total-row">
+
+                            <span class="text-muted">
+                                VAT (16%)
+                            </span>
+
+                            <span>
+                                K<?= number_format(
+                                    $vatAmount,
+                                    2
+                                ) ?>
+                            </span>
+
+                        </div>
+
+
+                        <div class="total-row grand">
+
+                            <span>
+                                TOTAL
+                            </span>
+
+                            <span class="grand-amount">
+                                K<?= number_format(
+                                    $total,
+                                    2
+                                ) ?>
+                            </span>
+
+                        </div>
+
+
+                        <!-- PAYMENT DETAILS -->
+
+                        <div class="payment-details">
+
+                            <div class="payment-details-title">
+                                Payment Details
+                            </div>
+
+                            <div class="total-row">
+
+                                <span class="text-muted">
+                                    Method
+                                </span>
+
+                                <span class="fw-bold">
+                                    <?= invoice_e(
+                                        $paymentMethodDisplay
+                                    ) ?>
+                                </span>
+
+                            </div>
+
+
+                            <div class="total-row">
+
+                                <span class="text-muted">
+                                    Amount Received
+                                </span>
+
+                                <span class="fw-bold">
+                                    K<?= number_format(
+                                        $amountReceived,
+                                        2
+                                    ) ?>
+                                </span>
+
+                            </div>
+
+
+                            <div class="total-row">
+
+                                <span class="text-muted">
+                                    Change
+                                </span>
+
+                                <span class="change-value">
+                                    K<?= number_format(
+                                        $changeDue,
+                                        2
+                                    ) ?>
+                                </span>
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- CLIENT REFERENCE -->
+
+                        <?php if (
+                            !empty(
+                                $invoice['client_reference']
+                            )
+                        ): ?>
+
+                            <div class="reference-box">
+
+                                <div class="reference-label">
+                                    Transaction Reference
+                                </div>
+
+                                <div class="reference-value">
+                                    <?= invoice_e(
+                                        $invoice['client_reference']
+                                    ) ?>
+                                </div>
+
+                            </div>
+
+                        <?php endif; ?>
+
+                    </div>
+
+                </div>
+
+
+                <!-- FOOTER -->
+
+                <div class="invoice-footer">
+
+                    <div class="fw-bold text-dark mb-1">
+                        Thank you for your business!
+                    </div>
+
+                    <div>
+                        Medicines sold are non-refundable.
+                    </div>
+
+                    <div class="mt-2">
+                        <?= invoice_e(
+                            $invoice['pharmacy_name']
+                        ) ?>
+                        -
+                        <?= invoice_e(
+                            $invoice['branch_name']
+                        ) ?>
+                    </div>
+
+                    <div class="mt-3">
+                        <small>
+                            Invoice generated by EchoTech POS
+                        </small>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
 
 <?php
 
-if (
-    file_exists("../includes/header.php")
-) {
-    require "../includes/header.php";
-}
-
-if (
-    file_exists("../includes/aside.php")
-) {
-    require "../includes/aside.php";
+if (file_exists("../includes/footer.php")) {
+    require_once "../includes/footer.php";
 }
 
 ?>
 
-<div class="page-wrapper">
-
-<div class="container-fluid">
-
-<!-- ======================================================
-     ACTION BAR
-====================================================== -->
-
-<div
-    class="
-        no-print
-        d-flex
-        justify-content-between
-        align-items-center
-        mb-4
-    "
->
-
-<a
-    href="today_transactions.php"
-    class="btn btn-outline-dark btn-sm"
->
-
-<i class="mdi mdi-arrow-left"></i>
-
-Back to Transactions
-
-</a>
-
-<button
-    type="button"
-    onclick="window.print()"
-    class="
-        btn
-        btn-primary
-        btn-sm
-        px-4
-        shadow-sm
-    "
->
-
-<i class="mdi mdi-printer me-1"></i>
-
-Print / Save PDF
-
-</button>
-
-</div>
-
-
-<!-- ======================================================
-     INVOICE
-====================================================== -->
-
-<div class="invoice-card">
-
-<!-- ====================================================
-     HEADER
-===================================================== -->
-
-<div class="row mb-5">
-
-<div class="col-md-7">
-
-<h3
-    class="
-        fw-bold
-        text-dark
-        mb-1
-    "
->
-
-<?= e(
-    strtoupper(
-        $invoice['pharmacy_name']
-    )
-) ?>
-
-</h3>
-
-<?php if ($displayAddress !== ''): ?>
-
-<p
-    class="
-        text-muted
-        small
-        mb-1
-    "
->
-
-<i class="mdi mdi-map-marker"></i>
-
-<?= e($displayAddress) ?>
-
-</p>
-
-<?php endif; ?>
-
-
-<?php if ($displayPhone !== ''): ?>
-
-<p
-    class="
-        text-muted
-        small
-        mb-0
-    "
->
-
-<i class="mdi mdi-phone"></i>
-
-<?= e($displayPhone) ?>
-
-</p>
-
-<?php endif; ?>
-
-</div>
-
-
-<div class="col-md-5 text-md-end mt-3 mt-md-0">
-
-<div
-    class="
-        invoice-title
-        fw-bold
-        mb-0
-    "
->
-
-INVOICE
-
-</div>
-
-<div
-    class="
-        fw-bold
-        text-dark
-    "
->
-
-#<?= e(
-    $invoice['invoice']
-) ?>
-
-</div>
-
-<small
-    class="text-muted"
->
-
-<?= e($displayDate) ?>
-
-</small>
-
-</div>
-
-</div>
-
-
-<!-- ====================================================
-     TRANSACTION INFORMATION
-===================================================== -->
-
-<div
-    class="
-        row
-        mb-4
-        py-3
-        border-top
-        border-bottom
-        g-3
-    "
->
-
-<div class="col-6 col-md-3">
-
-<small
-    class="
-        text-muted
-        text-uppercase
-        d-block
-        fw-bold
-    "
->
-
-Branch
-
-</small>
-
-<span>
-
-<?= e(
-    $invoice['branch_name']
-) ?>
-
-</span>
-
-</div>
-
-
-<div class="col-6 col-md-3">
-
-<small
-    class="
-        text-muted
-        text-uppercase
-        d-block
-        fw-bold
-    "
->
-
-Issued By
-
-</small>
-
-<span>
-
-<?= e(
-    $invoice['issuer']
-        ?: 'Pharmacist'
-) ?>
-
-</span>
-
-</div>
-
-
-<div class="col-6 col-md-3">
-
-<small
-    class="
-        text-muted
-        text-uppercase
-        d-block
-        fw-bold
-    "
->
-
-Payment
-
-</small>
-
-<span
-    class="payment-badge"
->
-
-<?= e(
-    $paymentMethodDisplay
-) ?>
-
-</span>
-
-</div>
-
-
-<div class="col-6 col-md-3 text-md-end">
-
-<small
-    class="
-        text-muted
-        text-uppercase
-        d-block
-        fw-bold
-    "
->
-
-Status
-
-</small>
-
-<span
-    class="
-        text-success
-        fw-bold
-    "
->
-
-PAID
-
-</span>
-
-</div>
-
-</div>
-
-
-<!-- ====================================================
-     CUSTOMER
-===================================================== -->
-
-<div class="mb-4">
-
-<small
-    class="
-        text-muted
-        text-uppercase
-        d-block
-        fw-bold
-    "
->
-
-Customer
-
-</small>
-
-<span>
-
-Walk-in Client
-
-</span>
-
-</div>
-
-
-<!-- ====================================================
-     ITEMS
-===================================================== -->
-
-<div
-    class="table-responsive"
->
-
-<table
-    class="
-        table
-        table-invoice
-        mb-4
-    "
->
-
-<thead>
-
-<tr>
-
-<th>
-    Item Name
-</th>
-
-<th
-    class="text-center"
->
-
-Qty
-
-</th>
-
-<th
-    class="text-end"
->
-
-Price
-
-</th>
-
-<th
-    class="text-end"
->
-
-Total
-
-</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-<?php if (!empty($items)): ?>
-
-<?php foreach ($items as $item): ?>
-
-<?php
-
-$quantity = (int)(
-    $item['quantity'] ?? 0
+<script>
+document.addEventListener(
+    'keydown',
+    function (event) {
+
+        if (
+            event.key === 'Escape'
+        ) {
+            window.location.href =
+                'today_transactions.php';
+        }
+
+        if (
+            event.key === 'F4'
+        ) {
+            event.preventDefault();
+            window.print();
+        }
+
+    }
 );
-
-$unitPrice = (float)(
-    $item['unit_price'] ?? 0
-);
-
-$lineTotal =
-    $quantity * $unitPrice;
-
-?>
-
-<tr>
-
-<td
-    class="fw-bold"
->
-
-<?= e(
-    $item['item_name']
-) ?>
-
-</td>
-
-<td
-    class="text-center"
->
-
-<?= $quantity ?>
-
-</td>
-
-<td
-    class="text-end"
->
-
-K<?= number_format(
-    $unitPrice,
-    2
-) ?>
-
-</td>
-
-<td
-    class="
-        text-end
-        fw-bold
-    "
->
-
-K<?= number_format(
-    $lineTotal,
-    2
-) ?>
-
-</td>
-
-</tr>
-
-<?php endforeach; ?>
-
-<?php else: ?>
-
-<tr>
-
-<td
-    colspan="4"
-    class="
-        text-center
-        text-muted
-        py-4
-    "
->
-
-No items recorded for this invoice.
-
-</td>
-
-</tr>
-
-<?php endif; ?>
-
-</tbody>
-
-</table>
-
-</div>
-
-
-<!-- ====================================================
-     TOTALS + PAYMENT
-===================================================== -->
-
-<div
-    class="
-        row
-        justify-content-end
-    "
->
-
-<div class="col-12 col-md-6">
-
-<div class="total-section">
-
-<!-- Subtotal -->
-
-<div
-    class="
-        d-flex
-        justify-content-between
-        mb-2
-    "
->
-
-<span
-    class="text-muted"
->
-
-Subtotal
-
-</span>
-
-<span>
-
-K<?= number_format(
-    $subtotal,
-    2
-) ?>
-
-</span>
-
-</div>
-
-
-<!-- VAT -->
-
-<div
-    class="
-        d-flex
-        justify-content-between
-        mb-3
-    "
->
-
-<span
-    class="text-muted"
->
-
-VAT (16%)
-
-</span>
-
-<span>
-
-K<?= number_format(
-    $vatAmount,
-    2
-) ?>
-
-</span>
-
-</div>
-
-
-<!-- Total -->
-
-<div
-    class="
-        d-flex
-        justify-content-between
-        fw-bold
-        border-top
-        pt-3
-    "
->
-
-<span>
-
-TOTAL
-
-</span>
-
-<span
-    class="grand-total"
->
-
-K<?= number_format(
-    $total,
-    2
-) ?>
-
-</span>
-
-</div>
-
-
-<!-- ==================================================
-     PAYMENT DETAILS
-=================================================== -->
-
-<div class="payment-section">
-
-<div
-    class="
-        fw-bold
-        text-dark
-        mb-3
-    "
->
-
-Payment Details
-
-</div>
-
-
-<?php if (
-    $paymentMethodLower === 'cash'
-): ?>
-
-<!-- Cash Received -->
-
-<div
-    class="payment-row"
->
-
-<span
-    class="payment-label"
->
-
-Cash Received
-
-</span>
-
-<span
-    class="payment-value"
->
-
-K<?= number_format(
-    $amountReceived,
-    2
-) ?>
-
-</span>
-
-</div>
-
-
-<!-- Change -->
-
-<div
-    class="payment-row"
->
-
-<span
-    class="payment-label"
->
-
-Change
-
-</span>
-
-<span
-    class="
-        payment-value
-        text-success
-    "
->
-
-K<?= number_format(
-    $changeDue,
-    2
-) ?>
-
-</span>
-
-</div>
-
-
-<?php else: ?>
-
-<!-- Card / Mobile Money -->
-
-<div
-    class="payment-row"
->
-
-<span
-    class="payment-label"
->
-
-Amount Received
-
-</span>
-
-<span
-    class="payment-value"
->
-
-K<?= number_format(
-    $amountReceived,
-    2
-) ?>
-
-</span>
-
-</div>
-
-
-<div
-    class="payment-row"
->
-
-<span
-    class="payment-label"
->
-
-Change
-
-</span>
-
-<span
-    class="payment-value"
->
-
-K0.00
-
-</span>
-
-</div>
-
-<?php endif; ?>
-
-</div>
-
-
-<!-- ==================================================
-     TRANSACTION REFERENCE
-=================================================== -->
-
-<?php if (
-    !empty(
-        $invoice['client_reference']
-    )
-): ?>
-
-<div
-    class="
-        mt-3
-        pt-3
-        border-top
-    "
->
-
-<div
-    class="
-        small
-        text-muted
-        mb-1
-    "
->
-
-Transaction Reference
-
-</div>
-
-<div
-    class="transaction-reference"
->
-
-<?= e(
-    $invoice['client_reference']
-) ?>
-
-</div>
-
-</div>
-
-<?php endif; ?>
-
-</div>
-
-</div>
-
-</div>
-
-
-<!-- ====================================================
-     FOOTER
-===================================================== -->
-
-<div
-    class="
-        mt-5
-        pt-4
-        text-center
-        border-top
-    "
->
-
-<p
-    class="
-        mb-1
-        fw-bold
-    "
->
-
-Thank you for choosing
-
-<?= e(
-    $invoice['pharmacy_name']
-) ?>!
-
-</p>
-
-
-<p
-    class="
-        text-muted
-        small
-    "
->
-
-Please retain this receipt for your records.
-
-</p>
-
-
-<div
-    class="
-        mt-3
-        small
-        text-muted
-    "
->
-
-Issuer:
-
-<?= e(
-    $invoice['issuer']
-        ?: 'Pharmacist'
-) ?>
-
-&nbsp; | &nbsp;
-
-Branch:
-
-<?= e(
-    $invoice['branch_name']
-) ?>
-
-</div>
-
-
-<p
-    class="
-        mt-4
-        text-muted
-    "
-    style="font-size:10px;"
->
-
-NOTE: NO REFUNDS ON MEDICINES ONCE THEY LEAVE THE PREMISES.
-
-</p>
-
-</div>
-
-
-</div>
-
-</div>
-
-</div>
-
-</div>
-
-
-<script
-    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-></script>
+</script>
 
 </body>
-
 </html>
