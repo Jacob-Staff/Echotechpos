@@ -165,6 +165,61 @@ require_once "../includes/head.php";
 .meth-btn:hover { border-color: var(--neon-green); color: #fff; }
 .meth-btn.active { background: var(--neon-green) !important; color: #000 !important; border-color: #fff; }
 
+.cash-payment-panel {
+    display: none;
+    background: #1d1d1d;
+    border: 1px solid #3b3b3b;
+    border-radius: 12px;
+    padding: 14px;
+    margin-top: 14px;
+}
+
+.cash-payment-panel.visible {
+    display: block;
+}
+
+.cash-payment-panel label {
+    color: #cccccc;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.cash-payment-panel .form-control {
+    height: 48px;
+    background: #101010;
+    border: 1px solid #555;
+    color: #ffffff;
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
+.cash-payment-panel .form-control:focus {
+    background: #101010;
+    color: #ffffff;
+    border-color: var(--neon-green);
+    box-shadow: 0 0 0 0.15rem rgba(0, 255, 102, 0.15);
+}
+
+.cash-change-display {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #444;
+}
+
+.cash-change-display .change-value {
+    color: var(--neon-green);
+    font-size: 1.25rem;
+    font-weight: 800;
+}
+
+.cash-change-display.insufficient .change-value {
+    color: #ff4d4d;
+}
+
 .btn-payment-main { 
     height: 65px; border-radius: 12px; border: none; 
     font-weight: 800; font-size: 1.05rem; text-transform: uppercase;
@@ -284,6 +339,25 @@ require_once "../includes/head.php";
                                 <div class="col-4"><button type="button" class="btn w-100 meth-btn" onclick="setMethod('Card', this)"><i class="fas fa-credit-card d-block mb-1"></i>CARD</button></div>
                                 <div class="col-4"><button type="button" class="btn w-100 meth-btn" onclick="setMethod('Mobile Money', this)"><i class="fas fa-mobile-alt d-block mb-1"></i>MOBILE</button></div>
                             </div>
+
+                            <div id="cash_payment_panel" class="cash-payment-panel">
+                                <label for="amount_received">Cash Received</label>
+                                <input
+                                    type="number"
+                                    id="amount_received"
+                                    class="form-control mt-2"
+                                    min="0"
+                                    step="0.01"
+                                    inputmode="decimal"
+                                    placeholder="0.00"
+                                    autocomplete="off"
+                                >
+
+                                <div class="cash-change-display" id="cash_change_display">
+                                    <span style="color:#cccccc;font-weight:700;">CHANGE DUE</span>
+                                    <span class="change-value">K<span id="change_due">0.00</span></span>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -372,6 +446,17 @@ require_once "../includes/head.php";
                     </div>
                 </div>
 
+                <div id="receipt_payment_details" class="small mt-2" style="display:none;">
+                    <div class="d-flex justify-content-between">
+                        <span>Cash Received:</span>
+                        <span>K<span id="rec_amount_received">0.00</span></span>
+                    </div>
+                    <div class="d-flex justify-content-between fw-bold">
+                        <span>Change:</span>
+                        <span>K<span id="rec_change_due">0.00</span></span>
+                    </div>
+                </div>
+
                 <div class="receipt-divider"></div>
 
                 <!-- Receipt Footer -->
@@ -401,18 +486,28 @@ if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"
 <script>
 let cart = [];
 let selectedMethod = null;
+let amountReceived = 0;
 
 $(document).on('keydown', function(e) {
-    if(e.key === 'F2') { e.preventDefault(); $('#product_search').focus(); }
-    if(e.key === 'F8') { e.preventDefault(); processSale(); }
+    if(e.key === 'F2') {
+        e.preventDefault();
+        $('#product_search').focus();
+    }
+
+    if(e.key === 'F8') {
+        e.preventDefault();
+        processSale();
+    }
 });
 
 $('#product_search').on('input', function() {
     let q = $(this).val();
+
     if(q.length < 1) {
         $('#product_results').hide();
         return;
     }
+
     $.post('pos_search.php', { query: q }, function(data){
         $('#product_results').html(data).show();
     });
@@ -438,6 +533,7 @@ $(document).on('click', '.product-item', function() {
     }
 
     let existing = cart.find(i => i.id === item.id);
+
     if(existing) {
         if(existing.qty < item.stock) {
             existing.qty++;
@@ -454,6 +550,7 @@ $(document).on('click', '.product-item', function() {
 });
 
 function renderCart() {
+
     if(cart.length === 0) {
         $('#pos_table').hide();
         $('#empty-cart-msg').show();
@@ -462,11 +559,17 @@ function renderCart() {
         $('#empty-cart-msg').hide();
     }
 
-    let html = '', total = 0, count = 0;
+    let html = '';
+    let total = 0;
+    let count = 0;
+
     cart.forEach((i, idx) => {
-        let rowTotal = i.price * i.qty; 
+
+        let rowTotal = i.price * i.qty;
+
         total += rowTotal;
         count += i.qty;
+
         html += `<tr class="cart-row">
             <td><div class="fw-bold">${i.name}</div><small style="color:#aaaaaa;">Stock: ${i.stock}</small></td>
             <td>K${i.price.toFixed(2)}</td>
@@ -489,54 +592,241 @@ function renderCart() {
     $('#txt_total').text(total.toFixed(2));
     $('#txt_vat').text('K' + vatAmount.toFixed(2));
     $('#txt_count').text(count);
+
+    /*
+     * Keep cash/change state synchronized whenever the cart changes.
+     */
+    updateCashChange();
     checkReady();
 }
 
 function updateQty(idx, change) {
+
     if(change > 0 && cart[idx].qty >= cart[idx].stock) {
         alert('Stock limit reached.');
         return;
     }
+
     cart[idx].qty += change;
-    if(cart[idx].qty < 1) removeItem(idx);
+
+    if(cart[idx].qty < 1) {
+        removeItem(idx);
+        return;
+    }
+
     renderCart();
 }
 
-function removeItem(idx) { 
-    cart.splice(idx, 1); 
-    renderCart(); 
+function removeItem(idx) {
+    cart.splice(idx, 1);
+    renderCart();
 }
 
 function setMethod(m, btn) {
+
     selectedMethod = m;
-    $('.meth-btn').removeClass('active'); 
+
+    $('.meth-btn').removeClass('active');
     $(btn).addClass('active');
+
+    const cashPanel = $('#cash_payment_panel');
+    const amountInput = $('#amount_received');
+
+    if (m === 'Cash') {
+
+        cashPanel.addClass('visible');
+
+        /*
+         * If the cashier previously entered an amount, preserve it.
+         * Otherwise start with the exact amount due for convenience.
+         */
+        if (
+            !amountInput.val() ||
+            Number(amountInput.val()) <= 0
+        ) {
+            amountInput.val(
+                getCartTotal().toFixed(2)
+            );
+        }
+
+        amountInput.trigger('focus').select();
+
+        updateCashChange();
+
+    } else {
+
+        cashPanel.removeClass('visible');
+
+        /*
+         * Card and Mobile Money are treated as exact payments.
+         */
+        amountReceived = getCartTotal();
+
+        updateCashChange();
+    }
+
     checkReady();
 }
 
-function checkReady() {
-    const btn = $('#finalize_btn');
-    if(cart.length > 0 && selectedMethod) {
-        btn.prop('disabled', false).addClass('active-ready')
-           .html(`<i class="fas fa-check-double me-2"></i> COMPLETE ${selectedMethod.toUpperCase()}`);
+function getCartTotal() {
+
+    let total = 0;
+
+    cart.forEach(function(item) {
+        total +=
+            Number(item.price || 0) *
+            Number(item.qty || 0);
+    });
+
+    return Number(total.toFixed(2));
+}
+
+function getAmountReceived() {
+
+    if (selectedMethod === 'Cash') {
+
+        const raw = $('#amount_received').val();
+
+        if (raw === '') {
+            return 0;
+        }
+
+        const value = Number(raw);
+
+        return Number.isFinite(value)
+            ? Number(value.toFixed(2))
+            : 0;
+    }
+
+    /*
+     * Card and Mobile Money are exact payments.
+     */
+    return getCartTotal();
+}
+
+function updateCashChange() {
+
+    const total = getCartTotal();
+
+    amountReceived = getAmountReceived();
+
+    const change = Number(
+        (amountReceived - total).toFixed(2)
+    );
+
+    if (selectedMethod === 'Cash') {
+
+        $('#change_due').text(
+            Math.max(change, 0).toFixed(2)
+        );
+
+        if (change < 0) {
+            $('#cash_change_display')
+                .addClass('insufficient');
+        } else {
+            $('#cash_change_display')
+                .removeClass('insufficient');
+        }
+
     } else {
-        btn.prop('disabled', true).removeClass('active-ready').text('SELECT PAYMENT');
+
+        $('#change_due').text('0.00');
+        $('#cash_change_display')
+            .removeClass('insufficient');
     }
 }
 
-function processSale() {
-    if(cart.length === 0 || !selectedMethod) return;
+$('#amount_received').on('input', function() {
+    updateCashChange();
+    checkReady();
+});
 
-    $('#finalize_btn').prop('disabled', true).text('PROCESSING...');
+function checkReady() {
+
+    const btn = $('#finalize_btn');
+
+    if (cart.length === 0 || !selectedMethod) {
+
+        btn.prop('disabled', true)
+           .removeClass('active-ready')
+           .text('SELECT PAYMENT');
+
+        return;
+    }
+
+    if (selectedMethod === 'Cash') {
+
+        const total = getCartTotal();
+        const received = getAmountReceived();
+
+        if (
+            received <= 0 ||
+            received < total
+        ) {
+
+            btn.prop('disabled', true)
+               .removeClass('active-ready')
+               .html(
+                   '<i class="fas fa-money-bill-wave me-2"></i> ' +
+                   'ENTER CASH RECEIVED'
+               );
+
+            return;
+        }
+    }
+
+    btn.prop('disabled', false)
+       .addClass('active-ready')
+       .html(
+           '<i class="fas fa-check-double me-2"></i> COMPLETE ' +
+           selectedMethod.toUpperCase()
+       );
+}
+
+function processSale() {
+
+    if(cart.length === 0 || !selectedMethod) {
+        return;
+    }
+
+    const total = getCartTotal();
+
+    amountReceived = getAmountReceived();
+
+    /*
+     * Client-side validation is only for user experience.
+     * The server performs the authoritative validation.
+     */
+    if (selectedMethod === 'Cash') {
+
+        if (amountReceived < total) {
+
+            alert(
+                'Cash received is less than the total due.'
+            );
+
+            $('#amount_received').focus();
+
+            checkReady();
+
+            return;
+        }
+    }
+
+    $('#finalize_btn')
+        .prop('disabled', true)
+        .text('PROCESSING...');
 
     $.ajax({
+
         url: 'process_sale.php',
+
         method: 'POST',
+
         data: {
+
             /*
-             * Only send product IDs and requested quantities.
-             * The server determines pharmacy, branch, prices,
-             * stock and totals from the authenticated session/database.
+             * Only product IDs and requested quantities are sent.
              */
             cart: JSON.stringify(
                 cart.map(i => ({
@@ -544,21 +834,29 @@ function processSale() {
                     qty: parseInt(i.qty, 10)
                 }))
             ),
-            payment_method: selectedMethod
+
+            payment_method: selectedMethod,
+
+            /*
+             * The server validates this amount against its own
+             * authoritative total.
+             */
+            amount_received: amountReceived.toFixed(2)
         },
+
         dataType: 'json',
 
         success: function(res) {
 
             if(res.status === 'success') {
 
-                /*
-                 * Receipt values come from the server-confirmed sale.
-                 */
-                $('#rec_invoice').text(res.invoice || '');
+                $('#rec_invoice').text(
+                    res.invoice || ''
+                );
 
                 $('#rec_date').text(
-                    new Date().toLocaleDateString() + ' ' +
+                    new Date().toLocaleDateString() +
+                    ' ' +
                     new Date().toLocaleTimeString([], {
                         hour: '2-digit',
                         minute: '2-digit'
@@ -587,11 +885,37 @@ function processSale() {
 
 
                 /*
-                 * Build receipt lines from the authoritative server
-                 * response instead of the browser cart.
-                 *
-                 * .text() is used for product names so product data
-                 * cannot inject HTML into the receipt.
+                 * Cash payment details.
+                 */
+                if (
+                    String(res.payment_method || selectedMethod) ===
+                    'Cash'
+                ) {
+
+                    $('#rec_amount_received').text(
+                        Number(
+                            res.amount_received || 0
+                        ).toFixed(2)
+                    );
+
+                    $('#rec_change_due').text(
+                        Number(
+                            res.change_due || 0
+                        ).toFixed(2)
+                    );
+
+                    $('#receipt_payment_details')
+                        .show();
+
+                } else {
+
+                    $('#receipt_payment_details')
+                        .hide();
+                }
+
+
+                /*
+                 * Server-authoritative receipt items.
                  */
                 const items = Array.isArray(res.items)
                     ? res.items
@@ -634,10 +958,12 @@ function processSale() {
 
 
                 /*
-                 * Show thermal receipt modal.
+                 * Show receipt only after successful committed sale.
                  */
                 const receiptElement =
-                    document.getElementById('receiptModal');
+                    document.getElementById(
+                        'receiptModal'
+                    );
 
                 const receiptModal =
                     bootstrap.Modal.getOrCreateInstance(
@@ -648,15 +974,20 @@ function processSale() {
 
 
                 /*
-                 * Clear POS state ONLY after the server confirms
-                 * that the transaction was committed.
+                 * Clear POS state only after success.
                  */
                 cart = [];
                 selectedMethod = null;
+                amountReceived = 0;
+
+                $('#amount_received').val('');
+                $('#cash_payment_panel')
+                    .removeClass('visible');
+
+                $('.meth-btn')
+                    .removeClass('active');
 
                 renderCart();
-
-                $('.meth-btn').removeClass('active');
 
             } else {
 
@@ -668,9 +999,6 @@ function processSale() {
                     )
                 );
 
-                /*
-                 * Keep the cart so the cashier can retry.
-                 */
                 checkReady();
             }
         },
@@ -680,22 +1008,22 @@ function processSale() {
             let message =
                 'Connection error. Please try again.';
 
-            /*
-             * process_sale.php returns safe JSON error messages.
-             */
             if (
                 xhr.responseJSON &&
                 xhr.responseJSON.message
             ) {
 
-                message = xhr.responseJSON.message;
+                message =
+                    xhr.responseJSON.message;
 
             } else if (xhr.responseText) {
 
                 try {
 
                     const parsed =
-                        JSON.parse(xhr.responseText);
+                        JSON.parse(
+                            xhr.responseText
+                        );
 
                     if (parsed.message) {
                         message = parsed.message;
@@ -708,13 +1036,11 @@ function processSale() {
 
             alert(message);
 
-            /*
-             * Keep cart intact after a failed request.
-             */
             checkReady();
         }
     });
 }
+
 </script>
 </body>
 </html>
