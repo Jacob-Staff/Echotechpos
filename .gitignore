@@ -1,0 +1,40 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# PHP logs
+*.log
+error_log
+php_errorlog
+
+# IDE
+.vscode/
+.idea/
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+# Runtime/cache
+cache/
+tmp/
+storage/logs/
+
+# Temporary uploads
+uploads/tmp/
+uploads/temp/
+
+# Node
+node_modules/
+
+# Build output
+dist/
+build/
