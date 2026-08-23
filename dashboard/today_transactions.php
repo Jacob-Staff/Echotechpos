@@ -495,6 +495,52 @@ mysqli_stmt_close(
 
 /*
 |--------------------------------------------------------------------------
+| Payment Summary
+|--------------------------------------------------------------------------
+*/
+
+$paymentSummary = [
+    'cash' => ['count' => 0, 'amount' => 0.00],
+    'card' => ['count' => 0, 'amount' => 0.00],
+    'mobile' => ['count' => 0, 'amount' => 0.00],
+];
+
+foreach ($sales_data as $tx) {
+
+    $method = strtolower(
+        trim(
+            (string)($tx['payment_method'] ?? 'cash')
+        )
+    );
+
+    $amount = (float)(
+        $tx['total']
+        ?? $tx['total_amount']
+        ?? 0
+    );
+
+    if ($method === 'card') {
+        $paymentSummary['card']['count']++;
+        $paymentSummary['card']['amount'] += $amount;
+
+    } elseif (
+        in_array(
+            $method,
+            ['mobile', 'mobile money', 'momo'],
+            true
+        )
+    ) {
+        $paymentSummary['mobile']['count']++;
+        $paymentSummary['mobile']['amount'] += $amount;
+
+    } else {
+        $paymentSummary['cash']['count']++;
+        $paymentSummary['cash']['amount'] += $amount;
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
 | Page
 |--------------------------------------------------------------------------
 */
@@ -504,391 +550,559 @@ require_once "../includes/head.php";
 ?>
 
 <style>
+/* =========================================================
+   ECHOTECH POS â€” TODAY'S TRANSACTIONS
+   Dashboard-matched professional UI
+========================================================= */
+
 :root{
-    --pos-blue:#1769e0;
-    --pos-blue-dark:#0f56bd;
-    --pos-green:#169b62;
-    --pos-ink:#172033;
-    --pos-muted:#748096;
-    --pos-border:#e6eaf0;
-    --pos-bg:#f5f7fb;
-    --pos-white:#fff;
-    --pos-shadow:0 8px 30px rgba(22,34,55,.055);
+    --dash-navy:#2d3e4f;
+    --dash-header:#405466;
+    --dash-blue:#419bd0;
+    --dash-blue-dark:#257db5;
+    --dash-slate:#394b5d;
+    --dash-orange:#f27b0b;
+    --dash-orange-dark:#e34d12;
+    --dash-red:#c90718;
+    --dash-green:#16a064;
+    --dash-bg:#f1f4f8;
+    --dash-border:#e0e5eb;
+    --dash-text:#1f2937;
+    --dash-muted:#738096;
+    --dash-shadow:0 5px 18px rgba(31,45,61,.07);
 }
 
 .report-wrapper{
     min-height:calc(100vh - 65px);
-    padding:26px;
-    background:var(--pos-bg)!important;
-    color:var(--pos-ink);
+    padding:22px;
+    background:var(--dash-bg)!important;
+    color:var(--dash-text);
 }
 
-.tx-shell{
+.tx-page{
     max-width:1500px;
     margin:0 auto;
 }
 
-/* Header */
-.tx-hero{
+/* ---------------------------------------------------------
+   PAGE HEADING
+--------------------------------------------------------- */
+
+.tx-heading{
     display:flex;
     align-items:center;
     justify-content:space-between;
-    gap:20px;
-    margin-bottom:22px;
+    gap:18px;
+    margin-bottom:18px;
 }
-.tx-brand{
+
+.tx-heading-left{
     display:flex;
     align-items:center;
-    gap:14px;
+    gap:13px;
 }
-.tx-brand-icon{
-    width:50px;height:50px;
-    display:grid;place-items:center;
-    border-radius:14px;
-    background:linear-gradient(145deg,#eaf3ff,#dcecff);
-    color:var(--pos-blue);
-    font-size:20px;
-    box-shadow:inset 0 0 0 1px #d5e5fb;
+
+.tx-heading-icon{
+    width:48px;
+    height:48px;
+    display:grid;
+    place-items:center;
+    border-radius:10px;
+    background:var(--dash-blue);
+    color:#fff;
+    font-size:19px;
+    box-shadow:0 5px 12px rgba(65,155,208,.2);
 }
-.tx-kicker{
-    margin-bottom:3px;
-    color:var(--pos-blue);
-    font-size:10px;
-    font-weight:800;
-    letter-spacing:1px;
-    text-transform:uppercase;
-}
-.tx-title{
+
+.tx-heading h1{
     margin:0;
-    font-size:25px;
-    line-height:1.15;
+    color:var(--dash-navy);
+    font-size:24px;
+    line-height:1.1;
     font-weight:800;
-    color:var(--pos-ink);
 }
-.tx-subtitle{
+
+.tx-heading-sub{
     margin-top:5px;
-    color:var(--pos-muted);
+    color:var(--dash-muted);
     font-size:12px;
 }
-.tx-date{
+
+.tx-date-chip{
     display:flex;
     align-items:center;
     gap:8px;
     padding:10px 14px;
-    border:1px solid var(--pos-border);
-    border-radius:11px;
+    border:1px solid var(--dash-border);
+    border-radius:8px;
     background:#fff;
-    color:#566175;
+    color:#536174;
     font-size:12px;
     font-weight:700;
-    box-shadow:0 3px 12px rgba(22,34,55,.025);
+    box-shadow:var(--dash-shadow);
 }
 
-/* Filters */
-.tx-filter{
-    padding:18px;
-    margin-bottom:20px;
-    border:1px solid var(--pos-border);
-    border-radius:15px;
+/* ---------------------------------------------------------
+   FILTER PANEL
+--------------------------------------------------------- */
+
+.tx-filter-card{
+    padding:16px;
+    margin-bottom:18px;
+    border:1px solid var(--dash-border);
+    border-radius:9px;
     background:#fff;
-    box-shadow:var(--pos-shadow);
+    box-shadow:var(--dash-shadow);
 }
+
 .tx-label{
     display:block;
-    margin:0 0 7px;
-    color:#69758a;
+    margin-bottom:6px;
+    color:#667386;
     font-size:9px;
     font-weight:800;
     letter-spacing:.7px;
     text-transform:uppercase;
 }
+
 .tx-search{
     position:relative;
 }
+
 .tx-search i{
     position:absolute;
     left:13px;
     top:50%;
     transform:translateY(-50%);
-    color:#9aa5b5;
+    color:#8d99a9;
     pointer-events:none;
 }
+
 .tx-search input{
-    height:43px;
+    height:42px;
     padding-left:38px;
-    border:1px solid #dce2ea!important;
-    border-radius:10px!important;
-    background:#fbfcfe!important;
-    box-shadow:none!important;
+    border:1px solid #d9dfe7!important;
+    border-radius:6px!important;
+    background:#fff!important;
 }
-.tx-filter select,
-.tx-filter input[type=date]{
-    height:43px;
-    border:1px solid #dce2ea!important;
-    border-radius:10px!important;
-    background:#fbfcfe!important;
-    box-shadow:none!important;
+
+.tx-filter-card input[type=date],
+.tx-filter-card select{
+    height:42px;
+    border:1px solid #d9dfe7!important;
+    border-radius:6px!important;
+    background:#fff!important;
 }
-.tx-filter .btn{
-    height:43px;
-    border-radius:10px;
+
+.tx-filter-card .btn{
+    height:42px;
+    border-radius:6px;
     font-size:12px;
     font-weight:700;
 }
+
 .tx-filter-help{
-    margin-top:7px;
-    color:#9aa4b2;
+    margin-top:6px;
+    color:#99a3b1;
     font-size:10px;
 }
 
-/* KPI */
+/* ---------------------------------------------------------
+   DASHBOARD-STYLE KPI CARDS
+--------------------------------------------------------- */
+
 .tx-kpis{
     display:grid;
-    grid-template-columns:1.3fr 1fr 1fr;
-    gap:14px;
-    margin-bottom:20px;
+    grid-template-columns:repeat(4,1fr);
+    gap:15px;
+    margin-bottom:18px;
 }
+
 .tx-kpi{
     position:relative;
     overflow:hidden;
-    padding:18px;
-    border:1px solid var(--pos-border);
-    border-radius:15px;
-    background:#fff;
-    box-shadow:var(--pos-shadow);
-}
-.tx-kpi.primary{
-    background:linear-gradient(135deg,#1769e0,#135bc3);
-    border-color:#1769e0;
+    min-height:124px;
+    padding:18px 19px;
+    border-radius:8px;
     color:#fff;
+    box-shadow:var(--dash-shadow);
 }
-.tx-kpi.primary .tx-kpi-label,
-.tx-kpi.primary .tx-kpi-note{color:rgba(255,255,255,.76)}
-.tx-kpi.primary .tx-kpi-value{color:#fff}
-.tx-kpi-icon{
+
+.tx-kpi.blue{
+    background:linear-gradient(145deg,#429fd4,#318bc5);
+}
+
+.tx-kpi.slate{
+    background:linear-gradient(145deg,#435668,#344657);
+}
+
+.tx-kpi.orange{
+    background:linear-gradient(145deg,#f58a09,#ef650d);
+}
+
+.tx-kpi.red{
+    background:linear-gradient(145deg,#d30c1d,#b90012);
+}
+
+.tx-kpi::after{
+    content:"";
     position:absolute;
-    right:17px;top:17px;
-    width:38px;height:38px;
-    display:grid;place-items:center;
-    border-radius:11px;
-    background:#eef4ff;
-    color:var(--pos-blue);
+    width:100px;
+    height:100px;
+    right:-35px;
+    bottom:-45px;
+    border-radius:50%;
+    background:rgba(255,255,255,.08);
 }
-.tx-kpi.primary .tx-kpi-icon{
-    background:rgba(255,255,255,.16);
-    color:#fff;
-}
+
 .tx-kpi-label{
-    color:#7a8597;
-    font-size:9px;
+    position:relative;
+    z-index:1;
+    font-size:10px;
     font-weight:800;
-    letter-spacing:.7px;
+    letter-spacing:.45px;
     text-transform:uppercase;
 }
+
 .tx-kpi-value{
-    margin-top:8px;
-    color:var(--pos-ink);
+    position:relative;
+    z-index:1;
+    margin-top:10px;
     font-size:25px;
+    line-height:1;
     font-weight:850;
 }
+
 .tx-kpi-note{
-    margin-top:4px;
-    color:#9aa4b2;
+    position:relative;
+    z-index:1;
+    margin-top:9px;
+    color:rgba(255,255,255,.78);
     font-size:10px;
 }
 
-/* Table */
-.tx-card{
-    overflow:hidden;
-    border:1px solid var(--pos-border);
-    border-radius:16px;
-    background:#fff;
-    box-shadow:var(--pos-shadow);
+.tx-kpi-icon{
+    position:absolute;
+    z-index:1;
+    right:16px;
+    top:16px;
+    width:37px;
+    height:37px;
+    display:grid;
+    place-items:center;
+    border-radius:8px;
+    background:rgba(255,255,255,.15);
+    font-size:15px;
 }
-.tx-card-head{
+
+/* ---------------------------------------------------------
+   TRANSACTION REGISTER
+--------------------------------------------------------- */
+
+.tx-register{
+    overflow:hidden;
+    border:1px solid var(--dash-border);
+    border-radius:9px;
+    background:#fff;
+    box-shadow:var(--dash-shadow);
+}
+
+.tx-register-head{
     display:flex;
     align-items:center;
     justify-content:space-between;
     gap:15px;
-    padding:17px 19px;
-    border-bottom:1px solid var(--pos-border);
+    padding:15px 18px;
+    border-bottom:1px solid var(--dash-border);
 }
-.tx-card-title{
+
+.tx-register-title{
     display:flex;
     align-items:center;
-    gap:9px;
-    color:var(--pos-ink);
+    gap:8px;
+    color:var(--dash-navy);
     font-size:14px;
     font-weight:800;
 }
+
+.tx-register-title i{
+    color:var(--dash-blue);
+}
+
 .tx-count{
-    min-width:27px;
-    padding:4px 8px;
-    border-radius:20px;
-    background:#edf4ff;
-    color:var(--pos-blue);
+    min-width:25px;
+    padding:3px 8px;
+    border-radius:12px;
+    background:#eaf4fb;
+    color:var(--dash-blue-dark);
     text-align:center;
     font-size:10px;
     font-weight:800;
 }
-.tx-card-meta{
-    color:#8a95a5;
+
+.tx-register-date{
+    color:#8994a4;
     font-size:11px;
 }
-.tx-table-wrap{overflow-x:auto}
+
+.tx-table-wrap{
+    overflow-x:auto;
+}
+
 .report-table{
     width:100%;
     min-width:980px;
     border-collapse:collapse;
 }
+
 .report-table thead th{
-    padding:12px 16px;
-    background:#fafbfc;
-    border-bottom:1px solid var(--pos-border);
-    color:#7c8798!important;
-    font-size:9px;
+    padding:12px 15px;
+    background:#f5f7f9;
+    border-bottom:1px solid #dfe4ea;
+    color:#596678!important;
+    font-size:10px;
     font-weight:800;
-    letter-spacing:.65px;
+    letter-spacing:.45px;
     text-transform:uppercase;
     white-space:nowrap;
 }
+
 .report-table tbody td{
-    padding:14px 16px;
-    border-bottom:1px solid #edf0f4;
-    color:#414c5d;
+    padding:13px 15px;
+    color:#394657;
+    border-bottom:1px solid #edf0f3;
     font-size:12px;
     vertical-align:middle;
 }
-.report-table tbody tr{
-    transition:background .15s ease;
+
+.report-table tbody tr:hover{
+    background:#f8fbfd;
 }
-.report-table tbody tr:hover{background:#fbfdff}
-.report-table tbody tr:last-child td{border-bottom:0}
+
+.report-table tbody tr:last-child td{
+    border-bottom:0;
+}
 
 .tx-invoice{
-    color:var(--pos-blue);
-    font-size:12px;
+    color:#176dcc;
     font-weight:800;
     white-space:nowrap;
 }
+
 .tx-sale-id{
     margin-top:3px;
-    color:#a0a9b7;
+    color:#9ca6b4;
     font-size:9px;
 }
+
 .tx-items{
     max-width:390px;
-    color:#4f5a6b;
     line-height:1.45;
 }
+
 .tx-cashier{
     display:flex;
     align-items:center;
-    gap:8px;
+    gap:7px;
 }
+
 .tx-avatar{
-    width:29px;height:29px;
-    display:grid;place-items:center;
-    border-radius:9px;
-    background:#f0f3f7;
-    color:#637084;
-    font-size:11px;
+    width:28px;
+    height:28px;
+    display:grid;
+    place-items:center;
+    border-radius:50%;
+    background:#e9eef4;
+    color:#536275;
+    font-size:10px;
     font-weight:800;
 }
+
 .tx-method{
     display:inline-flex;
     align-items:center;
     gap:6px;
-    padding:6px 9px;
-    border-radius:8px;
+    padding:5px 8px;
+    border-radius:5px;
     font-size:9px;
     font-weight:800;
     white-space:nowrap;
 }
-.tx-method.cash{background:#fff5df;color:#9a6909}
-.tx-method.card{background:#edf4ff;color:#356bc8}
-.tx-method.mobile{background:#eaf8f2;color:#16865a}
+
+.tx-method.cash{
+    background:#fff2dd;
+    color:#a66700;
+}
+
+.tx-method.card{
+    background:#e8f3fc;
+    color:#176dcc;
+}
+
+.tx-method.mobile{
+    background:#e7f7ef;
+    color:#16865a;
+}
+
 .tx-total{
-    color:var(--pos-green)!important;
-    font-size:13px;
+    color:var(--dash-green)!important;
     font-weight:850!important;
     white-space:nowrap;
 }
+
 .tx-actions{
     display:flex;
     justify-content:center;
     gap:6px;
 }
+
 .tx-action{
-    width:34px;height:34px;
+    width:32px;
+    height:32px;
     display:grid;
     place-items:center;
-    border:1px solid #dfe5ec;
-    border-radius:9px;
+    border:1px solid #dce2e8;
+    border-radius:5px;
     background:#fff;
     text-decoration:none;
-    transition:all .15s ease;
+    transition:.15s ease;
 }
-.tx-action.view{color:var(--pos-blue)}
-.tx-action.print{color:var(--pos-green)}
+
+.tx-action.view{
+    color:#176dcc;
+}
+
+.tx-action.print{
+    color:#16865a;
+}
+
 .tx-action:hover{
     transform:translateY(-1px);
-    box-shadow:0 4px 11px rgba(0,0,0,.08);
+    box-shadow:0 4px 9px rgba(0,0,0,.08);
 }
+
 .tx-empty{
     padding:65px 20px!important;
     text-align:center;
 }
+
 .tx-empty-icon{
-    width:58px;height:58px;
-    margin:0 auto 13px;
-    display:grid;place-items:center;
-    border-radius:16px;
-    background:#f1f4f8;
-    color:#8d98a8;
+    width:58px;
+    height:58px;
+    margin:0 auto 12px;
+    display:grid;
+    place-items:center;
+    border-radius:50%;
+    background:#eef2f6;
+    color:#8793a3;
     font-size:20px;
 }
-.tx-empty-title{color:#4a5568;font-weight:800}
-.tx-empty-text{margin-top:4px;color:#9aa4b2;font-size:11px}
 
-/* Responsive */
-@media(max-width:1000px){
-    .tx-kpis{grid-template-columns:1fr 1fr}
-    .tx-kpi.primary{grid-column:1/-1}
+.tx-empty-title{
+    color:#4b5768;
+    font-weight:800;
 }
+
+.tx-empty-text{
+    margin-top:4px;
+    color:#9aa4b1;
+    font-size:11px;
+}
+
+/* ---------------------------------------------------------
+   RESPONSIVE
+--------------------------------------------------------- */
+
+@media(max-width:1100px){
+    .tx-kpis{
+        grid-template-columns:repeat(2,1fr);
+    }
+}
+
 @media(max-width:768px){
-    .report-wrapper{padding:16px}
-    .tx-hero{align-items:flex-start;flex-direction:column}
-    .tx-date{width:max-content}
-    .tx-kpis{grid-template-columns:1fr}
-    .tx-kpi.primary{grid-column:auto}
-}
-@media(max-width:576px){
-    .tx-filter{padding:14px}
-    .tx-filter .row{row-gap:12px!important}
+    .report-wrapper{
+        padding:15px;
+    }
+
+    .tx-heading{
+        align-items:flex-start;
+        flex-direction:column;
+    }
+
+    .tx-date-chip{
+        width:max-content;
+    }
+
+    .tx-kpis{
+        grid-template-columns:1fr 1fr;
+    }
 }
 
-/* Print */
+@media(max-width:520px){
+    .tx-kpis{
+        grid-template-columns:1fr;
+    }
+
+    .tx-heading h1{
+        font-size:21px;
+    }
+
+    .tx-filter-card{
+        padding:13px;
+    }
+}
+
+/* ---------------------------------------------------------
+   PRINT
+--------------------------------------------------------- */
+
 @media print{
-    @page{size:A4;margin:10mm}
+    @page{
+        size:A4;
+        margin:10mm;
+    }
+
     html,body{
+        background:#fff!important;
         width:100%;
         height:auto!important;
         margin:0!important;
         padding:0!important;
-        background:#fff!important;
     }
-    .no-print,.topbar,.left-sidebar,nav,footer,.tx-filter{
+
+    .no-print,
+    .topbar,
+    .left-sidebar,
+    nav,
+    footer,
+    .tx-filter-card{
         display:none!important;
     }
-    #main-wrapper,.page-wrapper,.report-wrapper{
+
+    #main-wrapper,
+    .page-wrapper,
+    .report-wrapper{
         width:100%!important;
         min-height:auto!important;
         margin:0!important;
         padding:0!important;
         background:#fff!important;
     }
-    .tx-card,.tx-kpi{
+
+    .tx-kpi{
+        color:#000!important;
+        box-shadow:none!important;
+        border:1px solid #ccc!important;
+        background:#fff!important;
+    }
+
+    .tx-kpi-value,
+    .tx-kpi-label,
+    .tx-kpi-note{
+        color:#000!important;
+    }
+
+    .tx-register{
         box-shadow:none!important;
     }
 }
@@ -897,6 +1111,7 @@ require_once "../includes/head.php";
 <div id="main-wrapper">
 
     <?php
+
     if (file_exists("../includes/header.php")) {
         require_once "../includes/header.php";
     }
@@ -904,49 +1119,57 @@ require_once "../includes/head.php";
     if (file_exists("../includes/aside.php")) {
         require_once "../includes/aside.php";
     }
+
     ?>
 
     <div class="page-wrapper report-wrapper">
 
-        <div class="tx-shell">
+        <div class="tx-page">
 
             <!-- =================================================
-                 HERO
+                 HEADER
             ================================================== -->
 
-            <div class="tx-hero">
+            <div class="tx-heading">
 
-                <div class="tx-brand">
+                <div class="tx-heading-left">
 
-                    <div class="tx-brand-icon">
+                    <div class="tx-heading-icon">
                         <i class="fas fa-receipt"></i>
                     </div>
 
                     <div>
 
-                        <div class="tx-kicker">
-                            Sales Management
-                        </div>
-
-                        <h1 class="tx-title">
+                        <h1>
                             Today's Transactions
                         </h1>
 
-                        <div class="tx-subtitle">
+                        <div class="tx-heading-sub">
                             <?= tx_e(
                                 strtoupper($display_pharm)
                             ) ?>
+
                             <span class="mx-1">â€¢</span>
+
                             <?= tx_e($display_bran) ?>
+
+                            <span class="mx-1">â€¢</span>
+
+                            <?= (int)$total_invoices ?>
+                            completed sale(s)
                         </div>
 
                     </div>
 
                 </div>
 
-                <div class="tx-date">
+
+                <div class="tx-date-chip">
+
                     <i class="far fa-calendar-alt text-primary"></i>
+
                     <?= tx_e($display_date) ?>
+
                 </div>
 
             </div>
@@ -956,7 +1179,7 @@ require_once "../includes/head.php";
                  FILTERS
             ================================================== -->
 
-            <div class="tx-filter no-print">
+            <div class="tx-filter-card no-print">
 
                 <form method="GET" autocomplete="off">
 
@@ -966,9 +1189,9 @@ require_once "../includes/head.php";
 
                             <label
                                 class="tx-label"
-                                for="txSearch"
+                                for="transactionSearch"
                             >
-                                Search
+                                Search Transactions
                             </label>
 
                             <div class="tx-search">
@@ -976,7 +1199,7 @@ require_once "../includes/head.php";
                                 <i class="fas fa-search"></i>
 
                                 <input
-                                    id="txSearch"
+                                    id="transactionSearch"
                                     type="search"
                                     name="search"
                                     class="form-control"
@@ -987,7 +1210,7 @@ require_once "../includes/head.php";
                             </div>
 
                             <div class="tx-filter-help">
-                                Find any transaction without changing the selected date.
+                                Search the selected business date.
                             </div>
 
                         </div>
@@ -997,13 +1220,13 @@ require_once "../includes/head.php";
 
                             <label
                                 class="tx-label"
-                                for="txDate"
+                                for="transactionDate"
                             >
-                                Transaction Date
+                                Business Date
                             </label>
 
                             <input
-                                id="txDate"
+                                id="transactionDate"
                                 type="date"
                                 name="filter_date"
                                 class="form-control"
@@ -1017,13 +1240,13 @@ require_once "../includes/head.php";
 
                             <label
                                 class="tx-label"
-                                for="txMethod"
+                                for="transactionMethod"
                             >
                                 Payment Method
                             </label>
 
                             <select
-                                id="txMethod"
+                                id="transactionMethod"
                                 name="filter_method"
                                 class="form-select"
                             >
@@ -1047,21 +1270,21 @@ require_once "../includes/head.php";
                                 </option>
 
                                 <option
-                                    value="Mobile"
-                                    <?= $filter_method === 'Mobile'
-                                        ? 'selected'
-                                        : '' ?>
-                                >
-                                    Mobile Money
-                                </option>
-
-                                <option
                                     value="Card"
                                     <?= $filter_method === 'Card'
                                         ? 'selected'
                                         : '' ?>
                                 >
                                     Card
+                                </option>
+
+                                <option
+                                    value="Mobile"
+                                    <?= $filter_method === 'Mobile'
+                                        ? 'selected'
+                                        : '' ?>
+                                >
+                                    Mobile Money
                                 </option>
 
                             </select>
@@ -1081,6 +1304,7 @@ require_once "../includes/head.php";
                                     Search
                                 </button>
 
+
                                 <?php if (
                                     $search !== '' ||
                                     $filter_method !== 'All' ||
@@ -1096,6 +1320,7 @@ require_once "../includes/head.php";
                                     </a>
 
                                 <?php endif; ?>
+
 
                                 <button
                                     type="button"
@@ -1118,19 +1343,19 @@ require_once "../includes/head.php";
 
 
             <!-- =================================================
-                 KPI CARDS
+                 DASHBOARD COLOR SUMMARY
             ================================================== -->
 
             <div class="tx-kpis">
 
-                <div class="tx-kpi primary">
+                <div class="tx-kpi blue">
 
                     <div class="tx-kpi-icon">
                         <i class="fas fa-wallet"></i>
                     </div>
 
                     <div class="tx-kpi-label">
-                        Today's Revenue
+                        Revenue
                     </div>
 
                     <div class="tx-kpi-value">
@@ -1146,14 +1371,12 @@ require_once "../includes/head.php";
                                 ? 'All payment methods'
                                 : $filter_method
                         ) ?>
-                        <span class="mx-1">â€¢</span>
-                        <?= (int)$total_invoices ?> invoice(s)
                     </div>
 
                 </div>
 
 
-                <div class="tx-kpi">
+                <div class="tx-kpi slate">
 
                     <div class="tx-kpi-icon">
                         <i class="fas fa-receipt"></i>
@@ -1168,28 +1391,59 @@ require_once "../includes/head.php";
                     </div>
 
                     <div class="tx-kpi-note">
-                        Completed sales matching current filters
+                        Completed sales
                     </div>
 
                 </div>
 
 
-                <div class="tx-kpi">
+                <div class="tx-kpi orange">
 
                     <div class="tx-kpi-icon">
-                        <i class="fas fa-calendar-check"></i>
+                        <i class="fas fa-money-bill-wave"></i>
                     </div>
 
                     <div class="tx-kpi-label">
-                        Business Date
+                        Cash Sales
                     </div>
 
-                    <div class="tx-kpi-value" style="font-size:20px;">
-                        <?= tx_e($display_date) ?>
+                    <div class="tx-kpi-value">
+                        <?= (int)$paymentSummary['cash']['count'] ?>
                     </div>
 
                     <div class="tx-kpi-note">
-                        Branch: <?= tx_e($display_bran) ?>
+                        K<?= number_format(
+                            $paymentSummary['cash']['amount'],
+                            2
+                        ) ?>
+                    </div>
+
+                </div>
+
+
+                <div class="tx-kpi red">
+
+                    <div class="tx-kpi-icon">
+                        <i class="fas fa-mobile-alt"></i>
+                    </div>
+
+                    <div class="tx-kpi-label">
+                        Card + Mobile
+                    </div>
+
+                    <div class="tx-kpi-value">
+                        <?= (
+                            (int)$paymentSummary['card']['count'] +
+                            (int)$paymentSummary['mobile']['count']
+                        ) ?>
+                    </div>
+
+                    <div class="tx-kpi-note">
+                        K<?= number_format(
+                            $paymentSummary['card']['amount'] +
+                            $paymentSummary['mobile']['amount'],
+                            2
+                        ) ?>
                     </div>
 
                 </div>
@@ -1198,16 +1452,16 @@ require_once "../includes/head.php";
 
 
             <!-- =================================================
-                 TRANSACTION TABLE
+                 REGISTER
             ================================================== -->
 
-            <div class="tx-card">
+            <div class="tx-register">
 
-                <div class="tx-card-head">
+                <div class="tx-register-head">
 
-                    <div class="tx-card-title">
+                    <div class="tx-register-title">
 
-                        <i class="fas fa-list-ul text-primary"></i>
+                        <i class="fas fa-list-ul"></i>
 
                         Transaction Register
 
@@ -1217,7 +1471,7 @@ require_once "../includes/head.php";
 
                     </div>
 
-                    <div class="tx-card-meta">
+                    <div class="tx-register-date">
                         <?= tx_e($display_date) ?>
                     </div>
 
@@ -1249,23 +1503,24 @@ require_once "../includes/head.php";
                                 </th>
 
                                 <th>
-                                    Cashier
+                                    Handled By
                                 </th>
 
                                 <th class="text-end">
-                                    Total
+                                    Total (ZMW)
                                 </th>
 
                                 <th
                                     class="text-center no-print"
                                     style="width:95px;"
                                 >
-                                    Actions
+                                    Action
                                 </th>
 
                             </tr>
 
                         </thead>
+
 
                         <tbody>
 
@@ -1322,7 +1577,9 @@ require_once "../includes/head.php";
 
                                 $paymentLower =
                                     strtolower(
-                                        trim($paymentMethod)
+                                        trim(
+                                            $paymentMethod
+                                        )
                                     );
 
                                 $paymentClass = 'cash';
@@ -1344,8 +1601,8 @@ require_once "../includes/head.php";
                                         $paymentLower,
                                         [
                                             'mobile',
-                                            'momo',
-                                            'mobile money'
+                                            'mobile money',
+                                            'momo'
                                         ],
                                         true
                                     )
@@ -1426,11 +1683,9 @@ require_once "../includes/head.php";
 
 
                                     <td class="text-nowrap">
-                                        <span class="fw-semibold">
-                                            <?= tx_e(
-                                                $timeDisplay
-                                            ) ?>
-                                        </span>
+                                        <?= tx_e(
+                                            $timeDisplay
+                                        ) ?>
                                     </td>
 
 
@@ -1511,12 +1766,12 @@ require_once "../includes/head.php";
                                     </div>
 
                                     <div class="tx-empty-title">
-                                        No transactions found
+                                        No transactions recorded
                                     </div>
 
                                     <div class="tx-empty-text">
-                                        Try another date, payment method,
-                                        or search term.
+                                        There are no completed sales for
+                                        <?= tx_e($display_date) ?>.
                                     </div>
 
                                 </td>
