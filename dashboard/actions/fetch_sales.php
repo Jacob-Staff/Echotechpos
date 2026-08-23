@@ -2,35 +2,41 @@
 /**
  * ============================================================
  * EchoTech POS
- * Sales Report Data Endpoint
+ * FETCH SALES REPORT DATA
  * ============================================================
  *
- * Authoritative POS date:
+ * Business timezone:
+ *     Africa/Lusaka (UTC+02:00)
+ *
+ * Authoritative sale timestamp:
  *     sales.sale_date
  *
- * Business timezone:
- *     Africa/Lusaka
+ * Supports:
+ *     - Pharmacy isolation
+ *     - Branch isolation
+ *     - Search by invoice/product
+ *     - Category filtering
+ *     - Date range filtering
+ *     - Itemized sales
+ *     - Revenue totals
+ *     - Invoice totals
+ *     - Daily revenue trend
+ *     - Category breakdown
  *
- * Features:
- * - Pharmacy isolation
- * - Branch isolation
- * - Date range filtering
- * - Invoice / medicine search
- * - Category filtering
- * - Itemized sales
- * - Revenue totals
- * - Units sold
- * - Unique invoice count
- * - Daily revenue trend
- * - Category breakdown
- * - Prepared statements
+ * JSON contract:
+ *     status
+ *     sales
+ *     total_sales
+ *     total_items
+ *     total_invoices
+ *     monthly_snapshot
+ *     daily_trend
  * ============================================================
  */
 
 declare(strict_types=1);
 
 ini_set('display_errors', '0');
-ini_set('display_startup_errors', '0');
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -42,52 +48,92 @@ header('Content-Type: application/json; charset=utf-8');
 require_once "../../includes/conn.php";
 require_once "../../includes/auth.php";
 
+/*
+|--------------------------------------------------------------------------
+| BUSINESS TIMEZONE
+|--------------------------------------------------------------------------
+*/
+
 date_default_timezone_set('Africa/Lusaka');
 
 
-/* ============================================================
-   JSON RESPONSE HELPER
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| JSON RESPONSE HELPER
+|--------------------------------------------------------------------------
+*/
 
-function sales_json(array $data): void
+function sales_json(array $payload): void
 {
     echo json_encode(
-        $data,
+        $payload,
         JSON_UNESCAPED_UNICODE |
         JSON_UNESCAPED_SLASHES
     );
 
-    exit;
+    exit();
 }
 
 
-/* ============================================================
-   SESSION / TENANT
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| ERROR RESPONSE
+|--------------------------------------------------------------------------
+*/
 
-$pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
-$branch_id   = (int)($_SESSION['branch_id'] ?? 0);
-
-if ($pharmacy_id <= 0 || $branch_id <= 0) {
-
-    http_response_code(401);
+function sales_error(string $message = 'Unable to load sales report.'): void
+{
+    error_log('EchoTech fetch_sales.php: ' . $message);
 
     sales_json([
-        'status' => 'error',
-        'message' => 'Session expired.',
-        'sales' => [],
-        'total_sales' => '0.00',
-        'total_items' => 0,
-        'total_invoices' => 0,
+        'status'           => 'error',
+        'message'          => $message,
+        'sales'            => [],
+        'total_sales'      => '0.00',
+        'total_items'      => 0,
+        'total_invoices'   => 0,
         'monthly_snapshot' => [],
-        'daily_trend' => []
+        'daily_trend'      => []
     ]);
 }
 
 
-/* ============================================================
-   INPUT
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| SESSION / TENANT CONTEXT
+|--------------------------------------------------------------------------
+*/
+
+$pharmacy_id = (int)(
+    $_SESSION['pharmacy_id'] ?? 0
+);
+
+$branch_id = (int)(
+    $_SESSION['branch_id'] ?? 0
+);
+
+if (
+    $pharmacy_id <= 0 ||
+    $branch_id <= 0
+) {
+    sales_json([
+        'status'           => 'error',
+        'message'          => 'Session expired',
+        'sales'            => [],
+        'total_sales'      => '0.00',
+        'total_items'      => 0,
+        'total_invoices'   => 0,
+        'monthly_snapshot' => [],
+        'daily_trend'      => []
+    ]);
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| INPUT
+|--------------------------------------------------------------------------
+*/
 
 $search = trim(
     (string)($_POST['search'] ?? '')
@@ -97,48 +143,63 @@ $category = trim(
     (string)($_POST['category'] ?? '')
 );
 
-$today = date('Y-m-d');
-
 $startDate = trim(
-    (string)($_POST['startDate'] ?? $today)
+    (string)(
+        $_POST['startDate']
+        ?? date('Y-m-01')
+    )
 );
 
 $endDate = trim(
-    (string)($_POST['endDate'] ?? $today)
+    (string)(
+        $_POST['endDate']
+        ?? date('Y-m-d')
+    )
 );
 
 
-/* ============================================================
-   DATE VALIDATION
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| DATE VALIDATION
+|--------------------------------------------------------------------------
+*/
 
-function valid_sales_date(string $date): bool
+function valid_report_date(string $date): bool
 {
-    $dt = DateTime::createFromFormat(
+    $parsed = DateTime::createFromFormat(
         'Y-m-d',
         $date
     );
 
     return (
-        $dt !== false &&
-        $dt->format('Y-m-d') === $date
+        $parsed !== false &&
+        $parsed->format('Y-m-d') === $date
     );
-}
-
-if (!valid_sales_date($startDate)) {
-    $startDate = $today;
-}
-
-if (!valid_sales_date($endDate)) {
-    $endDate = $today;
 }
 
 
 /*
- * If dates are reversed, correct them.
- */
-if ($startDate > $endDate) {
+|--------------------------------------------------------------------------
+| FALLBACK DATES
+|--------------------------------------------------------------------------
+*/
 
+if (!valid_report_date($startDate)) {
+    $startDate = date('Y-m-01');
+}
+
+if (!valid_report_date($endDate)) {
+    $endDate = date('Y-m-d');
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| NORMALIZE REVERSED DATE RANGE
+|--------------------------------------------------------------------------
+*/
+
+if ($startDate > $endDate) {
     [$startDate, $endDate] = [
         $endDate,
         $startDate
@@ -146,17 +207,44 @@ if ($startDate > $endDate) {
 }
 
 
-/* ============================================================
-   BUSINESS DATE RANGE
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| BUSINESS DATE BOUNDARIES
+|--------------------------------------------------------------------------
+|
+| These are LOCAL Zambia business dates.
+|
+| Example:
+|
+| 24 Aug 2026 00:55 Zambia
+|
+| remains:
+|
+| 2026-08-24 00:55:00
+|
+| and is NOT shifted back to 23 Aug.
+|
+|--------------------------------------------------------------------------
+*/
 
-$startDateTime = $startDate . ' 00:00:00';
-$endDateTime   = $endDate . ' 23:59:59';
+$startDateTime =
+    $startDate . ' 00:00:00';
+
+$endDateTime =
+    $endDate . ' 23:59:59';
 
 
-/* ============================================================
-   COMMON FILTER
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| COMMON WHERE CLAUSE
+|--------------------------------------------------------------------------
+|
+| IMPORTANT:
+|
+| sales.sale_date is the POS sale timestamp.
+|
+|--------------------------------------------------------------------------
+*/
 
 $where = "
     s.pharmacy_id = ?
@@ -165,9 +253,10 @@ $where = "
     AND s.sale_date <= ?
 ";
 
-$types = 'iiss';
 
-$params = [
+$baseTypes = 'iiss';
+
+$baseParams = [
     $pharmacy_id,
     $branch_id,
     $startDateTime,
@@ -175,9 +264,17 @@ $params = [
 ];
 
 
-/* ============================================================
-   SEARCH FILTER
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| SEARCH FILTER
+|--------------------------------------------------------------------------
+|
+| Search:
+|     invoice
+|     medicine/product name
+|
+|--------------------------------------------------------------------------
+*/
 
 if ($search !== '') {
 
@@ -188,64 +285,48 @@ if ($search !== '') {
         )
     ";
 
-    $searchLike = '%' . $search . '%';
+    $searchLike =
+        '%' . $search . '%';
 
-    $types .= 'ss';
+    $baseTypes .= 'ss';
 
-    $params[] = $searchLike;
-    $params[] = $searchLike;
+    $baseParams[] =
+        $searchLike;
+
+    $baseParams[] =
+        $searchLike;
 }
 
 
-/* ============================================================
-   CATEGORY FILTER
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| CATEGORY FILTER
+|--------------------------------------------------------------------------
+*/
 
 if ($category !== '') {
 
     $where .= "
-        AND COALESCE(i.category, '') = ?
+        AND i.category = ?
     ";
 
-    $types .= 's';
+    $baseTypes .= 's';
 
-    $params[] = $category;
+    $baseParams[] =
+        $category;
 }
 
 
-/* ============================================================
-   PREPARED STATEMENT BINDER
-============================================================ */
-
-function bind_dynamic_params(
-    mysqli_stmt $stmt,
-    string $types,
-    array &$params
-): bool {
-
-    $bind = [$types];
-
-    foreach ($params as $key => &$value) {
-        $bind[] = &$value;
-    }
-
-    return call_user_func_array(
-        'mysqli_stmt_bind_param',
-        array_merge(
-            [$stmt],
-            $bind
-        )
-    );
-}
-
-
-/* ============================================================
-   1. ITEMIZED SALES
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| 1. ITEMIZED SALES
+|--------------------------------------------------------------------------
+*/
 
 $sales = [];
 
 $total_sales = 0.00;
+
 $total_items = 0;
 
 $unique_invoices = [];
@@ -253,19 +334,14 @@ $unique_invoices = [];
 
 $sales_sql = "
     SELECT
+
         s.id AS sale_id,
 
         s.invoice AS invoice_no,
 
-        COALESCE(
-            i.item_name,
-            'Uncategorized Product'
-        ) AS item_name,
+        i.item_name,
 
-        COALESCE(
-            i.category,
-            'General'
-        ) AS category,
+        i.category,
 
         si.quantity,
 
@@ -283,17 +359,16 @@ $sales_sql = "
     FROM sales s
 
     INNER JOIN sales_items si
-        ON si.sale_id = s.id
+        ON s.id = si.sale_id
 
     LEFT JOIN store_items i
-        ON i.id = si.product_id
+        ON si.product_id = i.id
 
     WHERE $where
 
     ORDER BY
         s.sale_date DESC,
-        s.id DESC,
-        si.id ASC
+        s.id DESC
 ";
 
 
@@ -302,155 +377,144 @@ $stmt = mysqli_prepare(
     $sales_sql
 );
 
+
 if (!$stmt) {
 
-    error_log(
-        'fetch_sales.php prepare failed: ' .
-        mysqli_error($conn)
+    sales_error(
+        'Unable to prepare sales query.'
     );
-
-    http_response_code(500);
-
-    sales_json([
-        'status' => 'error',
-        'message' => 'Unable to prepare sales report.',
-        'sales' => [],
-        'total_sales' => '0.00',
-        'total_items' => 0,
-        'total_invoices' => 0,
-        'monthly_snapshot' => [],
-        'daily_trend' => []
-    ]);
 }
 
 
-if (!bind_dynamic_params(
-    $stmt,
-    $types,
-    $params
-)) {
+$bindParams = [
+    $baseTypes
+];
 
-    error_log(
-        'fetch_sales.php bind failed: ' .
-        mysqli_stmt_error($stmt)
-    );
+foreach ($baseParams as $key => $value) {
+
+    $bindParams[] =
+        &$baseParams[$key];
+}
+
+
+if (!call_user_func_array(
+    'mysqli_stmt_bind_param',
+    array_merge(
+        [$stmt],
+        $bindParams
+    )
+)) {
 
     mysqli_stmt_close($stmt);
 
-    http_response_code(500);
-
-    sales_json([
-        'status' => 'error',
-        'message' => 'Unable to prepare sales filters.',
-        'sales' => [],
-        'total_sales' => '0.00',
-        'total_items' => 0,
-        'total_invoices' => 0,
-        'monthly_snapshot' => [],
-        'daily_trend' => []
-    ]);
+    sales_error(
+        'Unable to bind sales query parameters.'
+    );
 }
 
 
 if (!mysqli_stmt_execute($stmt)) {
 
-    error_log(
-        'fetch_sales.php execute failed: ' .
-        mysqli_stmt_error($stmt)
-    );
+    $error =
+        mysqli_stmt_error($stmt);
 
     mysqli_stmt_close($stmt);
 
-    http_response_code(500);
+    error_log(
+        'fetch_sales sales query execute failed: ' .
+        $error
+    );
 
-    sales_json([
-        'status' => 'error',
-        'message' => 'Unable to load sales report.',
-        'sales' => [],
-        'total_sales' => '0.00',
-        'total_items' => 0,
-        'total_invoices' => 0,
-        'monthly_snapshot' => [],
-        'daily_trend' => []
-    ]);
+    sales_error(
+        'Unable to load sales data.'
+    );
 }
 
 
-$result = mysqli_stmt_get_result($stmt);
-
-if ($result) {
-
-    while ($row = mysqli_fetch_assoc($result)) {
-
-        $sale_id = (int)$row['sale_id'];
-
-        $invoice = trim(
-            (string)($row['invoice_no'] ?? '')
-        );
-
-        if ($invoice === '') {
-            $invoice = 'N/A';
-        }
-
-        $quantity = (int)(
-            $row['quantity'] ?? 0
-        );
-
-        $unit_price = (float)(
-            $row['unit_price'] ?? 0
-        );
-
-        $line_total = (float)(
-            $row['total_price'] ?? 0
-        );
+$result =
+    mysqli_stmt_get_result($stmt);
 
 
-        $sales[] = [
+if (!$result) {
 
-            'sale_id' => $sale_id,
+    $error =
+        mysqli_stmt_error($stmt);
 
-            'invoice_no' => $invoice,
+    mysqli_stmt_close($stmt);
 
-            'item_name' =>
-                $row['item_name']
-                ?: 'Uncategorized Product',
+    error_log(
+        'fetch_sales result failed: ' .
+        $error
+    );
 
-            'category' =>
-                $row['category']
-                ?: 'General',
-
-            'quantity' => $quantity,
-
-            'unit_price' => $unit_price,
-
-            'total_price' => $line_total,
-
-            'date' =>
-                $row['sale_datetime']
-                ?? ''
-        ];
-
-
-        $total_sales += $line_total;
-
-        $total_items += $quantity;
-
-        /*
-         * Count invoices once even when an invoice
-         * contains multiple medicines.
-         */
-        $unique_invoices[$invoice] = true;
-    }
-
-    mysqli_free_result($result);
+    sales_error(
+        'Unable to retrieve sales data.'
+    );
 }
+
+
+while ($row = mysqli_fetch_assoc($result)) {
+
+    $qty = (int)(
+        $row['quantity'] ?? 0
+    );
+
+    $lineTotal = (float)(
+        $row['total_price'] ?? 0
+    );
+
+    $invoiceNo =
+        $row['invoice_no']
+        ?: 'N/A';
+
+    $sales[] = [
+
+        'sale_id' =>
+            (int)$row['sale_id'],
+
+        'invoice_no' =>
+            $invoiceNo,
+
+        'item_name' =>
+            $row['item_name']
+            ?: 'Uncategorized Product',
+
+        'quantity' =>
+            $qty,
+
+        'total_price' =>
+            $lineTotal,
+
+        'date' =>
+            $row['sale_datetime']
+            ?? ''
+    ];
+
+
+    $total_sales +=
+        $lineTotal;
+
+
+    $total_items +=
+        $qty;
+
+
+    $unique_invoices[
+        $invoiceNo
+    ] = true;
+}
+
+
+mysqli_free_result($result);
 
 mysqli_stmt_close($stmt);
 
 
-/* ============================================================
-   2. DAILY REVENUE TREND
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| 2. DAILY REVENUE TREND
+|--------------------------------------------------------------------------
+*/
 
 $daily_trend = [];
 
@@ -464,16 +528,17 @@ $daily_sql = "
         ) AS day_label,
 
         SUM(
-            si.quantity * si.unit_price
+            si.quantity *
+            si.unit_price
         ) AS daily_total
 
     FROM sales s
 
     INNER JOIN sales_items si
-        ON si.sale_id = s.id
+        ON s.id = si.sale_id
 
     LEFT JOIN store_items i
-        ON i.id = si.product_id
+        ON si.product_id = i.id
 
     WHERE $where
 
@@ -490,28 +555,41 @@ $stmt = mysqli_prepare(
     $daily_sql
 );
 
+
 if ($stmt) {
 
-    $dailyParams = $params;
+    $params =
+        $baseParams;
 
-    if (bind_dynamic_params(
-        $stmt,
-        $types,
-        $dailyParams
+    $bindParams = [
+        $baseTypes
+    ];
+
+    foreach ($params as $key => $value) {
+
+        $bindParams[] =
+            &$params[$key];
+    }
+
+
+    if (call_user_func_array(
+        'mysqli_stmt_bind_param',
+        array_merge(
+            [$stmt],
+            $bindParams
+        )
     )) {
 
         if (mysqli_stmt_execute($stmt)) {
 
-            $dailyResult =
+            $result =
                 mysqli_stmt_get_result($stmt);
 
-            if ($dailyResult) {
+            if ($result) {
 
                 while (
                     $row =
-                    mysqli_fetch_assoc(
-                        $dailyResult
-                    )
+                    mysqli_fetch_assoc($result)
                 ) {
 
                     $daily_trend[
@@ -523,7 +601,7 @@ if ($stmt) {
                 }
 
                 mysqli_free_result(
-                    $dailyResult
+                    $result
                 );
             }
         }
@@ -533,19 +611,14 @@ if ($stmt) {
 }
 
 
-/* ============================================================
-   3. CATEGORY BREAKDOWN
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| 3. CATEGORY BREAKDOWN
+|--------------------------------------------------------------------------
+*/
 
 $monthly_snapshot = [];
 
-
-/*
- * IMPORTANT:
- *
- * Category filtering is intentionally applied here too,
- * so the chart always matches the visible report filter.
- */
 
 $category_sql = "
     SELECT
@@ -556,16 +629,17 @@ $category_sql = "
         ) AS cat_name,
 
         SUM(
-            si.quantity * si.unit_price
+            si.quantity *
+            si.unit_price
         ) AS cat_total
 
     FROM sales s
 
     INNER JOIN sales_items si
-        ON si.sale_id = s.id
+        ON s.id = si.sale_id
 
     LEFT JOIN store_items i
-        ON i.id = si.product_id
+        ON si.product_id = i.id
 
     WHERE $where
 
@@ -585,30 +659,41 @@ $stmt = mysqli_prepare(
     $category_sql
 );
 
+
 if ($stmt) {
 
-    $categoryParams = $params;
+    $params =
+        $baseParams;
 
-    if (bind_dynamic_params(
-        $stmt,
-        $types,
-        $categoryParams
+    $bindParams = [
+        $baseTypes
+    ];
+
+    foreach ($params as $key => $value) {
+
+        $bindParams[] =
+            &$params[$key];
+    }
+
+
+    if (call_user_func_array(
+        'mysqli_stmt_bind_param',
+        array_merge(
+            [$stmt],
+            $bindParams
+        )
     )) {
 
         if (mysqli_stmt_execute($stmt)) {
 
-            $categoryResult =
-                mysqli_stmt_get_result(
-                    $stmt
-                );
+            $result =
+                mysqli_stmt_get_result($stmt);
 
-            if ($categoryResult) {
+            if ($result) {
 
                 while (
                     $row =
-                    mysqli_fetch_assoc(
-                        $categoryResult
-                    )
+                    mysqli_fetch_assoc($result)
                 ) {
 
                     $monthly_snapshot[
@@ -620,7 +705,7 @@ if ($stmt) {
                 }
 
                 mysqli_free_result(
-                    $categoryResult
+                    $result
                 );
             }
         }
@@ -630,26 +715,34 @@ if ($stmt) {
 }
 
 
-/* ============================================================
-   FINAL RESPONSE
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| FINAL JSON RESPONSE
+|--------------------------------------------------------------------------
+*/
 
 sales_json([
 
-    'status' => 'success',
+    'status' =>
+        'success',
 
-    /*
-     * Debug information is useful while we are finishing
-     * Phase 4. These values can later be removed.
-     */
     'filters' => [
-        'start_date' => $startDate,
-        'end_date' => $endDate,
-        'search' => $search,
-        'category' => $category
+
+        'start_date' =>
+            $startDate,
+
+        'end_date' =>
+            $endDate,
+
+        'search' =>
+            $search,
+
+        'category' =>
+            $category
     ],
 
-    'sales' => $sales,
+    'sales' =>
+        $sales,
 
     'total_sales' =>
         number_format(
