@@ -224,7 +224,7 @@ if (!function_exists('format_price')) {
     <div class="bg-white p-5 rounded-4 shadow-sm">
         <h4 class="fw-bold text-dark">No Active Deals Right Now</h4>
         <p class="text-muted mb-4">Check back later for flash sales and daily discounts.</p>
-        <a href="../online_store.php?bid=<?php echo $current_bid; ?>" class="btn btn-success rounded-pill px-4">Browse All Store Items</a>
+        <a href="../api/online_store.php?bid=<?php echo $current_bid; ?>" class="btn btn-success rounded-pill px-4">Browse All Store Items</a>
     </div>
 </div>
 
