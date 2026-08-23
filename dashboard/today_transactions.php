@@ -504,210 +504,399 @@ require_once "../includes/head.php";
 ?>
 
 <style>
-
-.report-wrapper {
-    background-color: #ffffff !important;
-    min-height: calc(100vh - 70px);
-    padding: 1.5rem;
-    color: #212529;
+:root{
+    --pos-blue:#1769e0;
+    --pos-blue-dark:#0f56bd;
+    --pos-green:#169b62;
+    --pos-ink:#172033;
+    --pos-muted:#748096;
+    --pos-border:#e6eaf0;
+    --pos-bg:#f5f7fb;
+    --pos-white:#fff;
+    --pos-shadow:0 8px 30px rgba(22,34,55,.055);
 }
 
-.transaction-toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: 20px;
-    margin-bottom: 24px;
+.report-wrapper{
+    min-height:calc(100vh - 65px);
+    padding:26px;
+    background:var(--pos-bg)!important;
+    color:var(--pos-ink);
 }
 
-.transaction-heading h3 {
-    margin: 0;
-    font-weight: 700;
+.tx-shell{
+    max-width:1500px;
+    margin:0 auto;
 }
 
-.transaction-filters {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
+/* Header */
+.tx-hero{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:20px;
+    margin-bottom:22px;
+}
+.tx-brand{
+    display:flex;
+    align-items:center;
+    gap:14px;
+}
+.tx-brand-icon{
+    width:50px;height:50px;
+    display:grid;place-items:center;
+    border-radius:14px;
+    background:linear-gradient(145deg,#eaf3ff,#dcecff);
+    color:var(--pos-blue);
+    font-size:20px;
+    box-shadow:inset 0 0 0 1px #d5e5fb;
+}
+.tx-kicker{
+    margin-bottom:3px;
+    color:var(--pos-blue);
+    font-size:10px;
+    font-weight:800;
+    letter-spacing:1px;
+    text-transform:uppercase;
+}
+.tx-title{
+    margin:0;
+    font-size:25px;
+    line-height:1.15;
+    font-weight:800;
+    color:var(--pos-ink);
+}
+.tx-subtitle{
+    margin-top:5px;
+    color:var(--pos-muted);
+    font-size:12px;
+}
+.tx-date{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:10px 14px;
+    border:1px solid var(--pos-border);
+    border-radius:11px;
+    background:#fff;
+    color:#566175;
+    font-size:12px;
+    font-weight:700;
+    box-shadow:0 3px 12px rgba(22,34,55,.025);
 }
 
-.transaction-search {
-    min-width: 260px;
+/* Filters */
+.tx-filter{
+    padding:18px;
+    margin-bottom:20px;
+    border:1px solid var(--pos-border);
+    border-radius:15px;
+    background:#fff;
+    box-shadow:var(--pos-shadow);
+}
+.tx-label{
+    display:block;
+    margin:0 0 7px;
+    color:#69758a;
+    font-size:9px;
+    font-weight:800;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+}
+.tx-search{
+    position:relative;
+}
+.tx-search i{
+    position:absolute;
+    left:13px;
+    top:50%;
+    transform:translateY(-50%);
+    color:#9aa5b5;
+    pointer-events:none;
+}
+.tx-search input{
+    height:43px;
+    padding-left:38px;
+    border:1px solid #dce2ea!important;
+    border-radius:10px!important;
+    background:#fbfcfe!important;
+    box-shadow:none!important;
+}
+.tx-filter select,
+.tx-filter input[type=date]{
+    height:43px;
+    border:1px solid #dce2ea!important;
+    border-radius:10px!important;
+    background:#fbfcfe!important;
+    box-shadow:none!important;
+}
+.tx-filter .btn{
+    height:43px;
+    border-radius:10px;
+    font-size:12px;
+    font-weight:700;
+}
+.tx-filter-help{
+    margin-top:7px;
+    color:#9aa4b2;
+    font-size:10px;
 }
 
-.transaction-search input {
-    min-width: 260px;
+/* KPI */
+.tx-kpis{
+    display:grid;
+    grid-template-columns:1.3fr 1fr 1fr;
+    gap:14px;
+    margin-bottom:20px;
+}
+.tx-kpi{
+    position:relative;
+    overflow:hidden;
+    padding:18px;
+    border:1px solid var(--pos-border);
+    border-radius:15px;
+    background:#fff;
+    box-shadow:var(--pos-shadow);
+}
+.tx-kpi.primary{
+    background:linear-gradient(135deg,#1769e0,#135bc3);
+    border-color:#1769e0;
+    color:#fff;
+}
+.tx-kpi.primary .tx-kpi-label,
+.tx-kpi.primary .tx-kpi-note{color:rgba(255,255,255,.76)}
+.tx-kpi.primary .tx-kpi-value{color:#fff}
+.tx-kpi-icon{
+    position:absolute;
+    right:17px;top:17px;
+    width:38px;height:38px;
+    display:grid;place-items:center;
+    border-radius:11px;
+    background:#eef4ff;
+    color:var(--pos-blue);
+}
+.tx-kpi.primary .tx-kpi-icon{
+    background:rgba(255,255,255,.16);
+    color:#fff;
+}
+.tx-kpi-label{
+    color:#7a8597;
+    font-size:9px;
+    font-weight:800;
+    letter-spacing:.7px;
+    text-transform:uppercase;
+}
+.tx-kpi-value{
+    margin-top:8px;
+    color:var(--pos-ink);
+    font-size:25px;
+    font-weight:850;
+}
+.tx-kpi-note{
+    margin-top:4px;
+    color:#9aa4b2;
+    font-size:10px;
 }
 
-.search-help {
-    font-size: 11px;
-    color: #6c757d;
-    margin-top: 4px;
+/* Table */
+.tx-card{
+    overflow:hidden;
+    border:1px solid var(--pos-border);
+    border-radius:16px;
+    background:#fff;
+    box-shadow:var(--pos-shadow);
+}
+.tx-card-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:15px;
+    padding:17px 19px;
+    border-bottom:1px solid var(--pos-border);
+}
+.tx-card-title{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    color:var(--pos-ink);
+    font-size:14px;
+    font-weight:800;
+}
+.tx-count{
+    min-width:27px;
+    padding:4px 8px;
+    border-radius:20px;
+    background:#edf4ff;
+    color:var(--pos-blue);
+    text-align:center;
+    font-size:10px;
+    font-weight:800;
+}
+.tx-card-meta{
+    color:#8a95a5;
+    font-size:11px;
+}
+.tx-table-wrap{overflow-x:auto}
+.report-table{
+    width:100%;
+    min-width:980px;
+    border-collapse:collapse;
+}
+.report-table thead th{
+    padding:12px 16px;
+    background:#fafbfc;
+    border-bottom:1px solid var(--pos-border);
+    color:#7c8798!important;
+    font-size:9px;
+    font-weight:800;
+    letter-spacing:.65px;
+    text-transform:uppercase;
+    white-space:nowrap;
+}
+.report-table tbody td{
+    padding:14px 16px;
+    border-bottom:1px solid #edf0f4;
+    color:#414c5d;
+    font-size:12px;
+    vertical-align:middle;
+}
+.report-table tbody tr{
+    transition:background .15s ease;
+}
+.report-table tbody tr:hover{background:#fbfdff}
+.report-table tbody tr:last-child td{border-bottom:0}
+
+.tx-invoice{
+    color:var(--pos-blue);
+    font-size:12px;
+    font-weight:800;
+    white-space:nowrap;
+}
+.tx-sale-id{
+    margin-top:3px;
+    color:#a0a9b7;
+    font-size:9px;
+}
+.tx-items{
+    max-width:390px;
+    color:#4f5a6b;
+    line-height:1.45;
+}
+.tx-cashier{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+.tx-avatar{
+    width:29px;height:29px;
+    display:grid;place-items:center;
+    border-radius:9px;
+    background:#f0f3f7;
+    color:#637084;
+    font-size:11px;
+    font-weight:800;
+}
+.tx-method{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:6px 9px;
+    border-radius:8px;
+    font-size:9px;
+    font-weight:800;
+    white-space:nowrap;
+}
+.tx-method.cash{background:#fff5df;color:#9a6909}
+.tx-method.card{background:#edf4ff;color:#356bc8}
+.tx-method.mobile{background:#eaf8f2;color:#16865a}
+.tx-total{
+    color:var(--pos-green)!important;
+    font-size:13px;
+    font-weight:850!important;
+    white-space:nowrap;
+}
+.tx-actions{
+    display:flex;
+    justify-content:center;
+    gap:6px;
+}
+.tx-action{
+    width:34px;height:34px;
+    display:grid;
+    place-items:center;
+    border:1px solid #dfe5ec;
+    border-radius:9px;
+    background:#fff;
+    text-decoration:none;
+    transition:all .15s ease;
+}
+.tx-action.view{color:var(--pos-blue)}
+.tx-action.print{color:var(--pos-green)}
+.tx-action:hover{
+    transform:translateY(-1px);
+    box-shadow:0 4px 11px rgba(0,0,0,.08);
+}
+.tx-empty{
+    padding:65px 20px!important;
+    text-align:center;
+}
+.tx-empty-icon{
+    width:58px;height:58px;
+    margin:0 auto 13px;
+    display:grid;place-items:center;
+    border-radius:16px;
+    background:#f1f4f8;
+    color:#8d98a8;
+    font-size:20px;
+}
+.tx-empty-title{color:#4a5568;font-weight:800}
+.tx-empty-text{margin-top:4px;color:#9aa4b2;font-size:11px}
+
+/* Responsive */
+@media(max-width:1000px){
+    .tx-kpis{grid-template-columns:1fr 1fr}
+    .tx-kpi.primary{grid-column:1/-1}
+}
+@media(max-width:768px){
+    .report-wrapper{padding:16px}
+    .tx-hero{align-items:flex-start;flex-direction:column}
+    .tx-date{width:max-content}
+    .tx-kpis{grid-template-columns:1fr}
+    .tx-kpi.primary{grid-column:auto}
+}
+@media(max-width:576px){
+    .tx-filter{padding:14px}
+    .tx-filter .row{row-gap:12px!important}
 }
 
-.stat-card {
-    background: #f8f9fa;
-    border: 1px solid #e9ecef;
-    border-radius: 8px;
-    padding: 1.25rem;
-}
-
-.stat-card-cyan {
-    border-left: 4px solid #0d6efd;
-}
-
-.stat-card-orange {
-    border-left: 4px solid #ffc107;
-}
-
-.report-table-container {
-    background-color: #ffffff;
-    border-radius: 8px;
-    border: 1px solid #dee2e6;
-    overflow: hidden;
-}
-
-.report-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.report-table thead th {
-    background: #f1f3f5;
-    padding: 14px;
-    text-align: left;
-    font-size: 12px;
-    color: #495057 !important;
-    text-transform: uppercase;
-    border-bottom: 2px solid #dee2e6;
-    white-space: nowrap;
-}
-
-.report-table tbody td {
-    padding: 14px;
-    color: #212529;
-    border-bottom: 1px solid #e9ecef;
-    font-size: 14px;
-    vertical-align: middle;
-}
-
-.report-table tbody tr:hover {
-    background: #f8f9fa;
-}
-
-.invoice-number {
-    white-space: nowrap;
-}
-
-.item-summary {
-    min-width: 220px;
-    max-width: 420px;
-}
-
-.transaction-actions {
-    display: flex;
-    justify-content: center;
-    gap: 5px;
-    white-space: nowrap;
-}
-
-.transaction-actions .btn {
-    min-width: 36px;
-}
-
-@media (max-width: 900px) {
-    .transaction-toolbar {
-        align-items: stretch;
-        flex-direction: column;
+/* Print */
+@media print{
+    @page{size:A4;margin:10mm}
+    html,body{
+        width:100%;
+        height:auto!important;
+        margin:0!important;
+        padding:0!important;
+        background:#fff!important;
     }
-
-    .transaction-filters {
-        width: 100%;
+    .no-print,.topbar,.left-sidebar,nav,footer,.tx-filter{
+        display:none!important;
     }
-
-    .transaction-search {
-        flex: 1;
-        min-width: 220px;
+    #main-wrapper,.page-wrapper,.report-wrapper{
+        width:100%!important;
+        min-height:auto!important;
+        margin:0!important;
+        padding:0!important;
+        background:#fff!important;
     }
-
-    .transaction-search input {
-        width: 100%;
-        min-width: 0;
-    }
-}
-
-@media (max-width: 576px) {
-    .report-wrapper {
-        padding: 1rem;
-    }
-
-    .transaction-filters {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .transaction-search {
-        grid-column: 1 / -1;
-        min-width: 0;
-    }
-
-    .transaction-search input {
-        width: 100%;
-    }
-
-    .transaction-filters .btn {
-        width: 100%;
+    .tx-card,.tx-kpi{
+        box-shadow:none!important;
     }
 }
-
-@media print {
-    @page {
-        size: A4;
-        margin: 10mm;
-    }
-
-    html,
-    body {
-        width: 100%;
-        height: auto !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        background: #ffffff !important;
-    }
-
-    .no-print,
-    .topbar,
-    .left-sidebar,
-    nav,
-    footer {
-        display: none !important;
-    }
-
-    #main-wrapper,
-    .page-wrapper,
-    .report-wrapper {
-        width: 100% !important;
-        min-height: auto !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
-    .report-table-container {
-        border: 1px solid #ccc !important;
-    }
-
-    .stat-card {
-        border: 1px solid #ccc !important;
-    }
-}
-
 </style>
 
 <div id="main-wrapper">
 
     <?php
-
     if (file_exists("../includes/header.php")) {
         require_once "../includes/header.php";
     }
@@ -715,190 +904,292 @@ require_once "../includes/head.php";
     if (file_exists("../includes/aside.php")) {
         require_once "../includes/aside.php";
     }
-
     ?>
 
     <div class="page-wrapper report-wrapper">
 
-        <div class="container-fluid p-0">
+        <div class="tx-shell">
 
             <!-- =================================================
-                 HEADER + FILTERS
+                 HERO
             ================================================== -->
 
-            <div class="transaction-toolbar">
+            <div class="tx-hero">
 
-                <div class="transaction-heading">
+                <div class="tx-brand">
 
-                    <h3 class="fw-bold text-dark mb-0">
-                        <?= tx_e(
-                            strtoupper(
-                                $display_pharm
-                            )
-                        ) ?>
-                    </h3>
+                    <div class="tx-brand-icon">
+                        <i class="fas fa-receipt"></i>
+                    </div>
 
-                    <span class="text-muted small">
-                        Branch:
-                        <b>
+                    <div>
+
+                        <div class="tx-kicker">
+                            Sales Management
+                        </div>
+
+                        <h1 class="tx-title">
+                            Today's Transactions
+                        </h1>
+
+                        <div class="tx-subtitle">
                             <?= tx_e(
-                                $display_bran
+                                strtoupper($display_pharm)
                             ) ?>
-                        </b>
+                            <span class="mx-1">â€¢</span>
+                            <?= tx_e($display_bran) ?>
+                        </div>
 
-                        |
-
-                        Date:
-                        <b class="text-dark">
-                            <?= tx_e(
-                                $display_date
-                            ) ?>
-                        </b>
-                    </span>
+                    </div>
 
                 </div>
 
+                <div class="tx-date">
+                    <i class="far fa-calendar-alt text-primary"></i>
+                    <?= tx_e($display_date) ?>
+                </div>
 
-                <div class="no-print">
+            </div>
 
-                    <form
-                        method="GET"
-                        class="transaction-filters"
-                        autocomplete="off"
-                    >
 
-                        <!-- SEARCH -->
+            <!-- =================================================
+                 FILTERS
+            ================================================== -->
 
-                        <div class="transaction-search">
+            <div class="tx-filter no-print">
+
+                <form method="GET" autocomplete="off">
+
+                    <div class="row g-3 align-items-end">
+
+                        <div class="col-xl-5 col-lg-5 col-md-12">
+
+                            <label
+                                class="tx-label"
+                                for="txSearch"
+                            >
+                                Search
+                            </label>
+
+                            <div class="tx-search">
+
+                                <i class="fas fa-search"></i>
+
+                                <input
+                                    id="txSearch"
+                                    type="search"
+                                    name="search"
+                                    class="form-control"
+                                    value="<?= tx_e($search) ?>"
+                                    placeholder="Invoice, medicine, cashier or transaction reference..."
+                                >
+
+                            </div>
+
+                            <div class="tx-filter-help">
+                                Find any transaction without changing the selected date.
+                            </div>
+
+                        </div>
+
+
+                        <div class="col-xl-2 col-lg-2 col-md-4">
+
+                            <label
+                                class="tx-label"
+                                for="txDate"
+                            >
+                                Transaction Date
+                            </label>
 
                             <input
-                                type="search"
-                                name="search"
-                                class="form-control form-control-sm bg-light text-dark border-secondary"
-                                value="<?= tx_e($search) ?>"
-                                placeholder="Search invoice, medicine, cashier..."
-                                aria-label="Search transactions"
+                                id="txDate"
+                                type="date"
+                                name="filter_date"
+                                class="form-control"
+                                value="<?= tx_e($filter_date) ?>"
                             >
 
                         </div>
 
 
-                        <!-- DATE -->
+                        <div class="col-xl-2 col-lg-2 col-md-4">
 
-                        <input
-                            type="date"
-                            name="filter_date"
-                            class="form-control form-control-sm bg-light text-dark border-secondary"
-                            value="<?= tx_e($filter_date) ?>"
-                            aria-label="Transaction date"
-                        >
-
-
-                        <!-- PAYMENT -->
-
-                        <select
-                            name="filter_method"
-                            class="form-select form-select-sm bg-light text-dark border-secondary"
-                            aria-label="Payment method"
-                        >
-
-                            <option
-                                value="All"
-                                <?= (
-                                    $filter_method === 'All'
-                                )
-                                    ? 'selected'
-                                    : ''
-                                ?>
+                            <label
+                                class="tx-label"
+                                for="txMethod"
                             >
-                                Method: All
-                            </option>
+                                Payment Method
+                            </label>
 
-                            <option
-                                value="Cash"
-                                <?= (
-                                    $filter_method === 'Cash'
-                                )
-                                    ? 'selected'
-                                    : ''
-                                ?>
+                            <select
+                                id="txMethod"
+                                name="filter_method"
+                                class="form-select"
                             >
-                                Cash
-                            </option>
 
-                            <option
-                                value="Mobile"
-                                <?= (
-                                    $filter_method === 'Mobile'
-                                )
-                                    ? 'selected'
-                                    : ''
-                                ?>
-                            >
-                                Mobile Money
-                            </option>
+                                <option
+                                    value="All"
+                                    <?= $filter_method === 'All'
+                                        ? 'selected'
+                                        : '' ?>
+                                >
+                                    All Methods
+                                </option>
 
-                            <option
-                                value="Card"
-                                <?= (
-                                    $filter_method === 'Card'
-                                )
-                                    ? 'selected'
-                                    : ''
-                                ?>
-                            >
-                                Card
-                            </option>
+                                <option
+                                    value="Cash"
+                                    <?= $filter_method === 'Cash'
+                                        ? 'selected'
+                                        : '' ?>
+                                >
+                                    Cash
+                                </option>
 
-                        </select>
+                                <option
+                                    value="Mobile"
+                                    <?= $filter_method === 'Mobile'
+                                        ? 'selected'
+                                        : '' ?>
+                                >
+                                    Mobile Money
+                                </option>
 
+                                <option
+                                    value="Card"
+                                    <?= $filter_method === 'Card'
+                                        ? 'selected'
+                                        : '' ?>
+                                >
+                                    Card
+                                </option>
 
-                        <!-- APPLY -->
+                            </select>
 
-                        <button
-                            type="submit"
-                            class="btn btn-primary btn-sm px-3"
-                        >
-                            <i class="fas fa-search me-1"></i>
-                            Search
-                        </button>
-
-
-                        <!-- CLEAR -->
-
-                        <?php if (
-                            $search !== '' ||
-                            $filter_method !== 'All' ||
-                            $filter_date !== $today
-                        ): ?>
-
-                            <a
-                                href="today_transactions.php"
-                                class="btn btn-outline-secondary btn-sm px-3"
-                            >
-                                <i class="fas fa-times me-1"></i>
-                                Clear
-                            </a>
-
-                        <?php endif; ?>
+                        </div>
 
 
-                        <!-- PRINT -->
+                        <div class="col-xl-3 col-lg-3 col-md-4">
 
-                        <button
-                            type="button"
-                            class="btn btn-outline-dark btn-sm px-3"
-                            onclick="window.print()"
-                        >
-                            <i class="fas fa-print me-1"></i>
-                            Print
-                        </button>
+                            <div class="d-flex gap-2">
 
-                    </form>
+                                <button
+                                    type="submit"
+                                    class="btn btn-primary flex-grow-1"
+                                >
+                                    <i class="fas fa-search me-1"></i>
+                                    Search
+                                </button>
 
-                    <div class="search-help">
-                        Search by invoice, transaction reference,
-                        cashier or medicine.
+                                <?php if (
+                                    $search !== '' ||
+                                    $filter_method !== 'All' ||
+                                    $filter_date !== $today
+                                ): ?>
+
+                                    <a
+                                        href="today_transactions.php"
+                                        class="btn btn-light border"
+                                        title="Reset filters"
+                                    >
+                                        <i class="fas fa-times"></i>
+                                    </a>
+
+                                <?php endif; ?>
+
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-dark"
+                                    onclick="window.print()"
+                                    title="Print transaction report"
+                                >
+                                    <i class="fas fa-print"></i>
+                                </button>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </form>
+
+            </div>
+
+
+            <!-- =================================================
+                 KPI CARDS
+            ================================================== -->
+
+            <div class="tx-kpis">
+
+                <div class="tx-kpi primary">
+
+                    <div class="tx-kpi-icon">
+                        <i class="fas fa-wallet"></i>
+                    </div>
+
+                    <div class="tx-kpi-label">
+                        Today's Revenue
+                    </div>
+
+                    <div class="tx-kpi-value">
+                        K<?= number_format(
+                            $total_revenue,
+                            2
+                        ) ?>
+                    </div>
+
+                    <div class="tx-kpi-note">
+                        <?= tx_e(
+                            $filter_method === 'All'
+                                ? 'All payment methods'
+                                : $filter_method
+                        ) ?>
+                        <span class="mx-1">â€¢</span>
+                        <?= (int)$total_invoices ?> invoice(s)
+                    </div>
+
+                </div>
+
+
+                <div class="tx-kpi">
+
+                    <div class="tx-kpi-icon">
+                        <i class="fas fa-receipt"></i>
+                    </div>
+
+                    <div class="tx-kpi-label">
+                        Transactions
+                    </div>
+
+                    <div class="tx-kpi-value">
+                        <?= (int)$total_invoices ?>
+                    </div>
+
+                    <div class="tx-kpi-note">
+                        Completed sales matching current filters
+                    </div>
+
+                </div>
+
+
+                <div class="tx-kpi">
+
+                    <div class="tx-kpi-icon">
+                        <i class="fas fa-calendar-check"></i>
+                    </div>
+
+                    <div class="tx-kpi-label">
+                        Business Date
+                    </div>
+
+                    <div class="tx-kpi-value" style="font-size:20px;">
+                        <?= tx_e($display_date) ?>
+                    </div>
+
+                    <div class="tx-kpi-note">
+                        Branch: <?= tx_e($display_bran) ?>
                     </div>
 
                 </div>
@@ -907,58 +1198,33 @@ require_once "../includes/head.php";
 
 
             <!-- =================================================
-                 SUMMARY
+                 TRANSACTION TABLE
             ================================================== -->
 
-            <div class="row g-3 mb-4">
+            <div class="tx-card">
 
-                <div class="col-md-3">
+                <div class="tx-card-head">
 
-                    <div class="stat-card stat-card-cyan">
+                    <div class="tx-card-title">
 
-                        <div class="small fw-bold text-uppercase text-muted">
-                            Revenue
-                            (<?= tx_e($filter_method) ?>)
-                        </div>
+                        <i class="fas fa-list-ul text-primary"></i>
 
-                        <div class="h2 mb-0 fw-bold text-primary">
-                            K<?= number_format(
-                                $total_revenue,
-                                2
-                            ) ?>
-                        </div>
+                        Transaction Register
 
-                    </div>
-
-                </div>
-
-
-                <div class="col-md-3">
-
-                    <div class="stat-card stat-card-orange">
-
-                        <div class="small fw-bold text-uppercase text-muted">
-                            Total Invoices
-                        </div>
-
-                        <div class="h2 mb-0 fw-bold text-warning">
+                        <span class="tx-count">
                             <?= (int)$total_invoices ?>
-                        </div>
+                        </span>
 
+                    </div>
+
+                    <div class="tx-card-meta">
+                        <?= tx_e($display_date) ?>
                     </div>
 
                 </div>
 
-            </div>
 
-
-            <!-- =================================================
-                 TRANSACTIONS TABLE
-            ================================================== -->
-
-            <div class="report-table-container">
-
-                <div class="table-responsive">
+                <div class="tx-table-wrap">
 
                     <table class="report-table">
 
@@ -967,7 +1233,7 @@ require_once "../includes/head.php";
                             <tr>
 
                                 <th class="ps-3">
-                                    Invoice #
+                                    Invoice
                                 </th>
 
                                 <th>
@@ -975,7 +1241,7 @@ require_once "../includes/head.php";
                                 </th>
 
                                 <th>
-                                    Method
+                                    Payment
                                 </th>
 
                                 <th>
@@ -983,43 +1249,38 @@ require_once "../includes/head.php";
                                 </th>
 
                                 <th>
-                                    Handled By
+                                    Cashier
                                 </th>
 
-                                <th class="text-end pe-3">
-                                    Total (ZMW)
+                                <th class="text-end">
+                                    Total
                                 </th>
 
-                                <th class="text-center no-print">
-                                    Action
+                                <th
+                                    class="text-center no-print"
+                                    style="width:95px;"
+                                >
+                                    Actions
                                 </th>
 
                             </tr>
 
                         </thead>
 
-
                         <tbody>
 
-                        <?php if (
-                            !empty($sales_data)
-                        ): ?>
+                        <?php if (!empty($sales_data)): ?>
 
-                            <?php foreach (
-                                $sales_data
-                                as $row
-                            ): ?>
+                            <?php foreach ($sales_data as $row): ?>
 
                                 <?php
 
                                 $saleId = (int)(
-                                    $row['id']
-                                    ?? 0
+                                    $row['id'] ?? 0
                                 );
 
                                 $invoiceNumber =
-                                    $row['invoice']
-                                    ?? '';
+                                    $row['invoice'] ?? '';
 
                                 $itemsSold =
                                     $row['items_sold']
@@ -1035,19 +1296,12 @@ require_once "../includes/head.php";
 
                                 $timeDisplay = 'N/A';
 
-                                if (
-                                    $createdAt !== ''
-                                ) {
+                                if ($createdAt !== '') {
 
                                     $timestamp =
-                                        strtotime(
-                                            $createdAt
-                                        );
+                                        strtotime($createdAt);
 
-                                    if (
-                                        $timestamp !== false
-                                    ) {
-
+                                    if ($timestamp !== false) {
                                         $timeDisplay =
                                             date(
                                                 'h:i A',
@@ -1066,28 +1320,80 @@ require_once "../includes/head.php";
                                     ?? 0
                                 );
 
+                                $paymentLower =
+                                    strtolower(
+                                        trim($paymentMethod)
+                                    );
+
+                                $paymentClass = 'cash';
+                                $paymentIcon =
+                                    'fa-money-bill-wave';
+                                $paymentLabel = 'Cash';
+
+                                if (
+                                    $paymentLower === 'card'
+                                ) {
+
+                                    $paymentClass = 'card';
+                                    $paymentIcon =
+                                        'fa-credit-card';
+                                    $paymentLabel = 'Card';
+
+                                } elseif (
+                                    in_array(
+                                        $paymentLower,
+                                        [
+                                            'mobile',
+                                            'momo',
+                                            'mobile money'
+                                        ],
+                                        true
+                                    )
+                                ) {
+
+                                    $paymentClass = 'mobile';
+                                    $paymentIcon =
+                                        'fa-mobile-alt';
+                                    $paymentLabel =
+                                        'Mobile Money';
+
+                                } else {
+
+                                    $paymentLabel =
+                                        $paymentMethod;
+                                }
+
+                                $cashierInitial =
+                                    strtoupper(
+                                        substr(
+                                            trim($issuer),
+                                            0,
+                                            1
+                                        )
+                                    );
+
                                 ?>
 
                                 <tr>
 
-                                    <!-- INVOICE -->
+                                    <td class="ps-3">
 
-                                    <td class="ps-3 invoice-number">
-
-                                        <div class="fw-bold text-primary">
+                                        <div class="tx-invoice">
                                             #<?= tx_e(
                                                 $invoiceNumber
                                             ) ?>
                                         </div>
 
+                                        <div class="tx-sale-id">
+                                            Sale ID <?= $saleId ?>
+                                        </div>
+
                                     </td>
 
 
-                                    <!-- ITEMS -->
-
                                     <td>
 
-                                        <div class="item-summary">
+                                        <div class="tx-items">
                                             <?= tx_e(
                                                 $itemsSold
                                             ) ?>
@@ -1096,101 +1402,87 @@ require_once "../includes/head.php";
                                     </td>
 
 
-                                    <!-- PAYMENT -->
+                                    <td>
+
+                                        <span
+                                            class="tx-method <?= tx_e(
+                                                $paymentClass
+                                            ) ?>"
+                                        >
+
+                                            <i
+                                                class="fas <?= tx_e(
+                                                    $paymentIcon
+                                                ) ?>"
+                                            ></i>
+
+                                            <?= tx_e(
+                                                $paymentLabel
+                                            ) ?>
+
+                                        </span>
+
+                                    </td>
+
+
+                                    <td class="text-nowrap">
+                                        <span class="fw-semibold">
+                                            <?= tx_e(
+                                                $timeDisplay
+                                            ) ?>
+                                        </span>
+                                    </td>
+
 
                                     <td>
 
-                                        <?php
+                                        <div class="tx-cashier">
 
-                                        $paymentLower =
-                                            strtolower(
-                                                trim(
-                                                    $paymentMethod
-                                                )
-                                            );
+                                            <div class="tx-avatar">
+                                                <?= tx_e(
+                                                    $cashierInitial
+                                                ) ?>
+                                            </div>
 
-                                        $paymentLabel =
-                                            $paymentMethod;
+                                            <span>
+                                                <?= tx_e(
+                                                    $issuer
+                                                ) ?>
+                                            </span>
 
-                                        if (
-                                            in_array(
-                                                $paymentLower,
-                                                [
-                                                    'mobile',
-                                                    'momo',
-                                                    'mobile money'
-                                                ],
-                                                true
-                                            )
-                                        ) {
-                                            $paymentLabel =
-                                                'Mobile Money';
-                                        }
+                                        </div>
 
-                                        ?>
+                                    </td>
 
-                                        <span class="badge bg-secondary">
-                                            <?= tx_e(
-                                                $paymentLabel
+
+                                    <td class="text-end">
+
+                                        <span class="tx-total">
+                                            K<?= number_format(
+                                                $saleTotal,
+                                                2
                                             ) ?>
                                         </span>
 
                                     </td>
 
 
-                                    <!-- TIME -->
-
-                                    <td>
-                                        <?= tx_e(
-                                            $timeDisplay
-                                        ) ?>
-                                    </td>
-
-
-                                    <!-- CASHIER -->
-
-                                    <td>
-                                        <?= tx_e(
-                                            $issuer
-                                        ) ?>
-                                    </td>
-
-
-                                    <!-- TOTAL -->
-
-                                    <td class="text-end pe-3 fw-bold text-success">
-
-                                        K<?= number_format(
-                                            $saleTotal,
-                                            2
-                                        ) ?>
-
-                                    </td>
-
-
-                                    <!-- ACTIONS -->
-
                                     <td class="text-center no-print">
 
-                                        <div class="transaction-actions">
-
-                                            <!-- VIEW -->
+                                        <div class="tx-actions">
 
                                             <a
                                                 href="view_invoice.php?id=<?= $saleId ?>"
-                                                class="btn btn-sm btn-light border text-primary"
+                                                class="tx-action view"
                                                 title="View invoice"
                                                 aria-label="View invoice"
                                             >
                                                 <i class="fas fa-eye"></i>
                                             </a>
 
-
-                                            <!-- REPRINT -->
-
                                             <a
                                                 href="view_invoice.php?id=<?= $saleId ?>"
-                                                class="btn btn-sm btn-light border text-success"
+                                                class="tx-action print"
                                                 title="Reprint invoice"
                                                 aria-label="Reprint invoice"
                                             >
@@ -1211,20 +1503,18 @@ require_once "../includes/head.php";
 
                                 <td
                                     colspan="7"
-                                    class="text-center py-5 text-muted"
+                                    class="tx-empty"
                                 >
 
-                                    <div class="mb-2">
-                                        <i
-                                            class="fas fa-receipt fa-2x"
-                                        ></i>
+                                    <div class="tx-empty-icon">
+                                        <i class="fas fa-receipt"></i>
                                     </div>
 
-                                    <div class="fw-bold">
+                                    <div class="tx-empty-title">
                                         No transactions found
                                     </div>
 
-                                    <div class="small mt-1">
+                                    <div class="tx-empty-text">
                                         Try another date, payment method,
                                         or search term.
                                     </div>
@@ -1262,7 +1552,10 @@ if (
 ?>
 
 <script>
+document.title = 'Today\'s Transactions';
+
 (function () {
+
 
     const searchInput =
         document.querySelector(
