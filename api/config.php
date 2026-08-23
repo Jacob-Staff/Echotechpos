@@ -1,17 +1,115 @@
 <?php
-// Prevent PHP from printing HTML warnings before JSON output
-ini_set('display_errors', 0);
+/**
+ * ============================================================
+ * EchoTech POS API
+ * PDO Database Configuration
+ * ============================================================
+ *
+ * API database connection.
+ *
+ * Production:
+ *   Render -> Clever Cloud MySQL
+ *
+ * Configuration comes ONLY from environment variables.
+ *
+ * Supported variables:
+ *
+ *   DB_HOST
+ *   DB_PORT
+ *   DB_NAME
+ *   DB_USER
+ *   DB_PASS
+ * ============================================================
+ */
+
+
+/*
+|--------------------------------------------------------------------------
+| API error handling
+|--------------------------------------------------------------------------
+*/
+
+ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
-// Clever Cloud MySQL Credentials
-$host = getenv('MYSQL_ADDON_HOST') ?: 'bv6pzrvngmuxd9rws7r6-mysql.services.clever-cloud.com';
-$db   = getenv('MYSQL_ADDON_DB')   ?: 'bv6pzrvngmuxd9rws7r6';
-$user = getenv('MYSQL_ADDON_USER') ?: 'usvz3enxxtf2hqaq';
-$pass = getenv('MYSQL_ADDON_PASSWORD') ?: 'DUrtGfqU1C3kkRLDvyB';
-$port = getenv('MYSQL_ADDON_PORT') ?: '20719';
+
+/*
+|--------------------------------------------------------------------------
+| JSON response helper
+|--------------------------------------------------------------------------
+*/
+
+function api_database_error(string $message = 'Database connection unavailable.'): void
+{
+    http_response_code(500);
+
+    header('Content-Type: application/json; charset=utf-8');
+
+    echo json_encode([
+        'status' => 'error',
+        'message' => $message
+    ]);
+
+    exit;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Read environment variables
+|--------------------------------------------------------------------------
+*/
+
+$host = getenv('DB_HOST');
+$port = getenv('DB_PORT');
+$db   = getenv('DB_NAME');
+$user = getenv('DB_USER');
+$pass = getenv('DB_PASS');
+
+
+/*
+|--------------------------------------------------------------------------
+| Local development fallback
+|--------------------------------------------------------------------------
+*/
+
+$host = ($host !== false && trim($host) !== '')
+    ? trim($host)
+    : 'localhost';
+
+$port = ($port !== false && trim($port) !== '')
+    ? (int) $port
+    : 3306;
+
+$db = ($db !== false && trim($db) !== '')
+    ? trim($db)
+    : 'pharmacy_v1';
+
+$user = ($user !== false && trim($user) !== '')
+    ? trim($user)
+    : 'root';
+
+$pass = ($pass !== false)
+    ? $pass
+    : '';
+
+
+/*
+|--------------------------------------------------------------------------
+| PDO configuration
+|--------------------------------------------------------------------------
+*/
+
 $charset = 'utf8mb4';
 
-$dsn = "mysql:host=$host;port=$port;dbname=$db;charset=$charset";
+$dsn = sprintf(
+    'mysql:host=%s;port=%d;dbname=%s;charset=%s',
+    $host,
+    $port,
+    $db,
+    $charset
+);
+
 
 $options = [
     PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
@@ -19,14 +117,40 @@ $options = [
     PDO::ATTR_EMULATE_PREPARES   => false,
 ];
 
+
+ /*
+ |--------------------------------------------------------------------------
+ | Create PDO connection
+ |--------------------------------------------------------------------------
+ */
+
 try {
-    $pdo = new PDO($dsn, $user, $pass, $options);
-} catch (\PDOException $e) {
-    http_response_code(500);
-    echo json_encode([
-        "status" => "error",
-        "message" => "Database connection failed: " . $e->getMessage()
-    ]);
-    exit;
+
+    $pdo = new PDO(
+        $dsn,
+        $user,
+        $pass,
+        $options
+    );
+
+} catch (PDOException $e) {
+
+    /*
+    |--------------------------------------------------------------------------
+    | Log technical details privately
+    |--------------------------------------------------------------------------
+    */
+
+    error_log(
+        'EchoTech POS API database connection failed: '
+        . $e->getMessage()
+    );
+
+    /*
+    |--------------------------------------------------------------------------
+    | Return safe JSON response
+    |--------------------------------------------------------------------------
+    */
+
+    api_database_error();
 }
-?>
