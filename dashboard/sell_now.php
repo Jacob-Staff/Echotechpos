@@ -488,6 +488,41 @@ let cart = [];
 let selectedMethod = null;
 let amountReceived = 0;
 
+/*
+ * One idempotency reference belongs to one checkout.
+ *
+ * It is deliberately kept until the server confirms success.
+ * If the request times out and the cashier retries, the same
+ * reference is submitted again and the server returns the
+ * already-created sale instead of creating another one.
+ */
+let clientReference = '';
+
+function generateClientReference() {
+
+    if (
+        window.crypto &&
+        typeof window.crypto.randomUUID === 'function'
+    ) {
+        return window.crypto.randomUUID().replace(/-/g, '');
+    }
+
+    return (
+        'TX' +
+        Date.now().toString(36) +
+        Math.random().toString(36).slice(2, 12)
+    ).replace(/[^A-Za-z0-9_-]/g, '');
+}
+
+function getClientReference() {
+
+    if (!clientReference) {
+        clientReference = generateClientReference();
+    }
+
+    return clientReference;
+}
+
 $(document).on('keydown', function(e) {
     if(e.key === 'F2') {
         e.preventDefault();
@@ -838,6 +873,11 @@ function processSale() {
             payment_method: selectedMethod,
 
             /*
+             * Idempotency reference for this checkout.
+             */
+            client_reference: getClientReference(),
+
+            /*
              * The server validates this amount against its own
              * authoritative total.
              */
@@ -979,6 +1019,11 @@ function processSale() {
                 cart = [];
                 selectedMethod = null;
                 amountReceived = 0;
+
+                /*
+                 * A new checkout gets a new idempotency reference.
+                 */
+                clientReference = '';
 
                 $('#amount_received').val('');
                 $('#cash_payment_panel')
