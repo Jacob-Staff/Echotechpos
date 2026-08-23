@@ -929,6 +929,11 @@ require_once "../includes/head.php";
         display: none !important;
     }
 
+    .echotech-brand {
+        display: block !important;
+        font-weight: 600;
+    }
+
     .invoice-generated-by {
         display: none !important;
     }
@@ -1383,6 +1388,9 @@ require_once "../includes/head.php";
                         ) ?>
                     </div>
 
+                    <div class="mt-3 echotech-brand">
+                        EchoTech POS
+                    </div>
 
                 </div>
 
