@@ -5,22 +5,26 @@
  * Secure POS Sale Processor
  * ============================================================
  *
- * This endpoint is the authoritative source for:
+ * Authoritative server-side sale processing.
  *
+ * The browser may send:
+ *   - product IDs
+ *   - quantities
+ *   - payment method
+ *   - amount received
+ *
+ * The server determines:
  *   - pharmacy
  *   - branch
  *   - product
  *   - price
- *   - quantity
- *   - stock availability
+ *   - stock
  *   - subtotal
  *   - VAT
  *   - total
- *   - payment method
- *   - invoice number
+ *   - change
  *
- * NEVER trust prices, totals, pharmacy IDs or branch IDs
- * supplied by JavaScript.
+ * All financial and stock validation is performed here.
  * ============================================================
  */
 
@@ -58,7 +62,7 @@ require_once __DIR__ . '/../includes/conn.php';
 
 /*
 |--------------------------------------------------------------------------
-| Helper: JSON error response
+| Safe JSON error response
 |--------------------------------------------------------------------------
 */
 
@@ -77,7 +81,7 @@ function sale_error(string $message, int $httpCode = 400): never
 
 /*
 |--------------------------------------------------------------------------
-| Only POST requests
+| POST only
 |--------------------------------------------------------------------------
 */
 
@@ -88,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 /*
 |--------------------------------------------------------------------------
-| Authenticated tenant information
+| Authenticated tenant context
 |--------------------------------------------------------------------------
 */
 
@@ -98,29 +102,37 @@ $pharmacyId = (int) ($_SESSION['pharmacy_id'] ?? 0);
 
 $branchId = (int) ($_SESSION['branch_id'] ?? 0);
 
-$issuedBy =
-    trim(
-        (string) (
-            $_SESSION['full_name']
-            ?? $_SESSION['sessionUsername']
-            ?? $_SESSION['username']
-            ?? ''
-        )
-    );
+$issuedBy = trim(
+    (string) (
+        $_SESSION['full_name']
+        ?? $_SESSION['sessionUsername']
+        ?? $_SESSION['username']
+        ?? ''
+    )
+);
 
 
 if ($userId <= 0) {
-    sale_error('Your session has expired. Please log in again.', 401);
+    sale_error(
+        'Your session has expired. Please log in again.',
+        401
+    );
 }
 
 
 if ($pharmacyId <= 0) {
-    sale_error('Your account is not assigned to a valid pharmacy.', 403);
+    sale_error(
+        'Your account is not assigned to a valid pharmacy.',
+        403
+    );
 }
 
 
 if ($branchId <= 0) {
-    sale_error('Your account is not assigned to a valid branch.', 403);
+    sale_error(
+        'Your account is not assigned to a valid branch.',
+        403
+    );
 }
 
 
@@ -131,7 +143,7 @@ if ($issuedBy === '') {
 
 /*
 |--------------------------------------------------------------------------
-| Verify branch belongs to the current pharmacy
+| Validate branch belongs to pharmacy
 |--------------------------------------------------------------------------
 */
 
@@ -157,6 +169,7 @@ try {
     $branchResult = $branchStmt->get_result();
 
     if ($branchResult->num_rows === 0) {
+
         $branchStmt->close();
 
         sale_error(
@@ -170,8 +183,8 @@ try {
 } catch (Throwable $e) {
 
     error_log(
-        'POS branch validation failed: '
-        . $e->getMessage()
+        'POS branch validation failed: ' .
+        $e->getMessage()
     );
 
     sale_error(
@@ -199,14 +212,21 @@ $allowedPaymentMethods = [
 ];
 
 
-if (!in_array($paymentMethod, $allowedPaymentMethods, true)) {
-    sale_error('Invalid payment method.');
+if (!in_array(
+    $paymentMethod,
+    $allowedPaymentMethods,
+    true
+)) {
+
+    sale_error(
+        'Invalid payment method.'
+    );
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Decode cart
+| Cart
 |--------------------------------------------------------------------------
 */
 
@@ -233,19 +253,8 @@ if (!is_array($cart) || count($cart) === 0) {
 | Normalize cart
 |--------------------------------------------------------------------------
 |
-| We accept ONLY:
+| Only product ID and quantity are trusted as requests.
 |
-|   id
-|   qty
-|
-| The following values from JavaScript are NOT trusted:
-|
-|   name
-|   price
-|   stock
-|   total
-|
-|--------------------------------------------------------------------------
 */
 
 $items = [];
@@ -257,33 +266,39 @@ foreach ($cart as $cartItem) {
         continue;
     }
 
-    $productId = (int) ($cartItem['id'] ?? 0);
+    $productId = (int) (
+        $cartItem['id'] ?? 0
+    );
 
-    $quantity = (int) ($cartItem['qty'] ?? 0);
+    $quantity = (int) (
+        $cartItem['qty'] ?? 0
+    );
 
 
     if ($productId <= 0) {
-        sale_error('Invalid product in cart.');
+        sale_error(
+            'Invalid product in cart.'
+        );
     }
 
 
     if ($quantity <= 0) {
-        sale_error('Invalid product quantity.');
+        sale_error(
+            'Invalid product quantity.'
+        );
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Prevent duplicate product rows
+    | Combine duplicate product rows
     |--------------------------------------------------------------------------
-    |
-    | If JavaScript sends the same product twice, combine the quantities.
-    |
     */
 
     if (isset($items[$productId])) {
 
-        $items[$productId]['quantity'] += $quantity;
+        $items[$productId]['quantity'] +=
+            $quantity;
 
     } else {
 
@@ -296,26 +311,57 @@ foreach ($cart as $cartItem) {
 
 
 if (count($items) === 0) {
-    sale_error('Cart contains no valid products.');
+    sale_error(
+        'Cart contains no valid products.'
+    );
+}
+
+
+$totalQuantity = 0;
+
+foreach ($items as $item) {
+    $totalQuantity +=
+        $item['quantity'];
+}
+
+
+if ($totalQuantity > 1000) {
+    sale_error(
+        'Transaction contains too many items.'
+    );
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| Maximum transaction protection
+| Amount received
 |--------------------------------------------------------------------------
 */
 
-$totalQuantity = 0;
+$rawAmountReceived =
+    $_POST['amount_received'] ?? '';
 
-foreach ($items as $item) {
-    $totalQuantity += $item['quantity'];
+
+/*
+|--------------------------------------------------------------------------
+| Financial input validation
+|--------------------------------------------------------------------------
+*/
+
+if (
+    is_array($rawAmountReceived)
+    ||
+    is_object($rawAmountReceived)
+) {
+
+    sale_error(
+        'Invalid amount received.'
+    );
 }
 
 
-if ($totalQuantity > 1000) {
-    sale_error('Transaction contains too many items.');
-}
+$rawAmountReceived =
+    trim((string) $rawAmountReceived);
 
 
 /*
@@ -336,16 +382,12 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Authoritative product lookup
+    | Product lookup
     |--------------------------------------------------------------------------
     |
-    | IMPORTANT:
-    |
-    | Prices come from the database.
-    | Stock comes from the database.
-    | Pharmacy comes from the database.
-    | Branch comes from the database.
-    |
+    | FOR UPDATE locks each product row while the sale is being
+    | calculated and stock is being deducted.
+    |--------------------------------------------------------------------------
     */
 
     $productStmt = $conn->prepare("
@@ -369,7 +411,7 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Stock update statement
+    | Atomic stock deduction
     |--------------------------------------------------------------------------
     */
 
@@ -385,7 +427,7 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Sales calculations
+    | Financial totals
     |--------------------------------------------------------------------------
     */
 
@@ -400,20 +442,22 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Validate every product and calculate authoritative totals
+    | Validate products and calculate authoritative totals
     |--------------------------------------------------------------------------
     */
 
     foreach ($items as $item) {
 
-        $productId = $item['product_id'];
+        $productId =
+            $item['product_id'];
 
-        $quantity = $item['quantity'];
+        $quantity =
+            $item['quantity'];
 
 
         /*
         |--------------------------------------------------------------------------
-        | Lock product row
+        | Lock product
         |--------------------------------------------------------------------------
         */
 
@@ -426,15 +470,19 @@ try {
 
         $productStmt->execute();
 
-        $productResult = $productStmt->get_result();
+        $productResult =
+            $productStmt->get_result();
 
-        $product = $productResult->fetch_assoc();
+        $product =
+            $productResult->fetch_assoc();
 
 
         if (!$product) {
 
             throw new RuntimeException(
-                'Product #' . $productId . ' is not available in this branch.'
+                'Product #' .
+                $productId .
+                ' is not available in this branch.'
             );
         }
 
@@ -445,23 +493,30 @@ try {
         |--------------------------------------------------------------------------
         */
 
-        if ((int) $product['is_active'] !== 1) {
+        if (
+            (int) $product['is_active'] !== 1
+        ) {
 
             throw new RuntimeException(
-                'Product "' . $product['item_name'] . '" is inactive.'
+                'Product "' .
+                $product['item_name'] .
+                '" is inactive.'
             );
         }
 
 
         /*
         |--------------------------------------------------------------------------
-        | Expiry validation
+        | Expiry
         |--------------------------------------------------------------------------
         */
 
-        if (!empty($product['expiry_date'])) {
+        if (
+            !empty($product['expiry_date'])
+        ) {
 
-            $expiryDate = $product['expiry_date'];
+            $expiryDate =
+                $product['expiry_date'];
 
             if (
                 $expiryDate !== '0000-00-00'
@@ -470,7 +525,9 @@ try {
             ) {
 
                 throw new RuntimeException(
-                    'Product "' . $product['item_name'] . '" has expired.'
+                    'Product "' .
+                    $product['item_name'] .
+                    '" has expired.'
                 );
             }
         }
@@ -478,14 +535,17 @@ try {
 
         /*
         |--------------------------------------------------------------------------
-        | Stock validation
+        | Stock
         |--------------------------------------------------------------------------
         */
 
-        $availableStock = (int) $product['quantity'];
+        $availableStock =
+            (int) $product['quantity'];
 
 
-        if ($availableStock < $quantity) {
+        if (
+            $availableStock < $quantity
+        ) {
 
             throw new RuntimeException(
                 'Insufficient stock for "' .
@@ -501,11 +561,12 @@ try {
 
         /*
         |--------------------------------------------------------------------------
-        | AUTHORITATIVE PRICE
+        | Authoritative price
         |--------------------------------------------------------------------------
         */
 
-        $unitPrice = (float) $product['price'];
+        $unitPrice =
+            (float) $product['price'];
 
 
         if ($unitPrice < 0) {
@@ -532,12 +593,7 @@ try {
 
         /*
         |--------------------------------------------------------------------------
-        | Current POS uses VAT-inclusive prices.
-        |
-        | 16% VAT:
-        |
-        | subtotal = total / 1.16
-        | VAT      = total - subtotal
+        | Current POS pricing is VAT-inclusive at 16%.
         |--------------------------------------------------------------------------
         */
 
@@ -553,43 +609,53 @@ try {
         );
 
 
-        $saleTotal += $lineTotal;
+        $saleTotal +=
+            $lineTotal;
 
-        $saleSubtotal += $lineSubtotal;
+        $saleSubtotal +=
+            $lineSubtotal;
 
-        $saleVat += $lineVat;
+        $saleVat +=
+            $lineVat;
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | Keep authoritative item information for sales_items
-        |--------------------------------------------------------------------------
-        */
 
         $saleItems[] = [
-            'product_id' => $productId,
-            'item_name'  => $product['item_name'],
-            'quantity'   => $quantity,
-            'unit_price' => $unitPrice,
-            'line_total' => $lineTotal,
+            'product_id' =>
+                $productId,
+
+            'item_name' =>
+                $product['item_name'],
+
+            'quantity' =>
+                $quantity,
+
+            'unit_price' =>
+                $unitPrice,
+
+            'line_total' =>
+                $lineTotal,
         ];
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Round final financial values
+    | Final rounding
     |--------------------------------------------------------------------------
     */
 
-    $saleTotal = round($saleTotal, 2);
+    $saleTotal =
+        round($saleTotal, 2);
 
-    $saleSubtotal = round($saleSubtotal, 2);
+    $saleSubtotal =
+        round($saleSubtotal, 2);
 
-    $saleVat = round($saleVat, 2);
+    $saleVat =
+        round($saleVat, 2);
 
 
     if ($saleTotal <= 0) {
+
         throw new RuntimeException(
             'Sale total must be greater than zero.'
         );
@@ -598,13 +664,129 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Generate invoice number
+    | Validate payment amount
+    |--------------------------------------------------------------------------
+    */
+
+    if ($paymentMethod === 'Cash') {
+
+        if (
+            $rawAmountReceived === ''
+            ||
+            !is_numeric($rawAmountReceived)
+        ) {
+
+            throw new RuntimeException(
+                'Please enter the amount of cash received.'
+            );
+        }
+
+        $amountReceived =
+            round(
+                (float) $rawAmountReceived,
+                2
+            );
+
+    } else {
+
+        /*
+        |--------------------------------------------------------------------------
+        | Card and Mobile Money are exact payments.
+        |--------------------------------------------------------------------------
+        */
+
+        $amountReceived =
+            $saleTotal;
+
+        /*
+        |--------------------------------------------------------------------------
+        | If a value was submitted for non-cash, it must still agree
+        | with the authoritative total.
+        |--------------------------------------------------------------------------
+        */
+
+        if ($rawAmountReceived !== '') {
+
+            if (
+                !is_numeric($rawAmountReceived)
+                ||
+                round(
+                    (float) $rawAmountReceived,
+                    2
+                ) !== $saleTotal
+            ) {
+
+                throw new RuntimeException(
+                    'Payment amount does not match the sale total.'
+                );
+            }
+        }
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | No negative payment
+    |--------------------------------------------------------------------------
+    */
+
+    if ($amountReceived < 0) {
+
+        throw new RuntimeException(
+            'Amount received cannot be negative.'
+        );
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cash cannot be less than total
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+        $paymentMethod === 'Cash'
+        &&
+        $amountReceived < $saleTotal
+    ) {
+
+        throw new RuntimeException(
+            'Cash received is less than the total due.'
+        );
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Change
+    |--------------------------------------------------------------------------
+    */
+
+    $changeDue = round(
+        $amountReceived - $saleTotal,
+        2
+    );
+
+
+    if ($changeDue < 0) {
+        $changeDue = 0.00;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Generate unique invoice
     |--------------------------------------------------------------------------
     */
 
     $invoiceNo = '';
 
-    for ($attempt = 0; $attempt < 5; $attempt++) {
+
+    for (
+        $attempt = 0;
+        $attempt < 5;
+        $attempt++
+    ) {
 
         $invoiceNo =
             'PH-'
@@ -617,12 +799,13 @@ try {
             );
 
 
-        $invoiceCheck = $conn->prepare("
-            SELECT id
-            FROM sales
-            WHERE invoice = ?
-            LIMIT 1
-        ");
+        $invoiceCheck =
+            $conn->prepare("
+                SELECT id
+                FROM sales
+                WHERE invoice = ?
+                LIMIT 1
+            ");
 
 
         $invoiceCheck->bind_param(
@@ -630,14 +813,13 @@ try {
             $invoiceNo
         );
 
-
         $invoiceCheck->execute();
 
-        $invoiceResult = $invoiceCheck->get_result();
+        $invoiceResult =
+            $invoiceCheck->get_result();
 
         $invoiceExists =
             $invoiceResult->num_rows > 0;
-
 
         $invoiceCheck->close();
 
@@ -645,7 +827,6 @@ try {
         if (!$invoiceExists) {
             break;
         }
-
 
         $invoiceNo = '';
     }
@@ -664,7 +845,7 @@ try {
     | Insert sale header
     |--------------------------------------------------------------------------
     |
-    | The existing schema has:
+    | The production sales table contains:
     |
     |   pharmacy_id
     |   branch_id
@@ -677,6 +858,8 @@ try {
     |   subtotal
     |   vat_amount
     |   payment_method
+    |   amount_received
+    |   change_due
     |   sale_date
     |   created_at
     |
@@ -695,10 +878,14 @@ try {
             subtotal,
             vat_amount,
             payment_method,
+            amount_received,
+            change_due,
             sale_date,
             created_at
         )
         VALUES (
+            ?,
+            ?,
             ?,
             ?,
             ?,
@@ -718,37 +905,41 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | For the current POS, payment equals the sale total.
-    |
-    | Cash change/tender handling can be added in the next
-    | checkout enhancement without changing the core sale
-    | security.
+    | Preserve the existing payment column as the received amount.
     |--------------------------------------------------------------------------
     */
 
-    $paymentAmount = $saleTotal;
+    $paymentValue =
+        number_format(
+            $amountReceived,
+            2,
+            '.',
+            ''
+        );
 
 
     $saleStmt->bind_param(
-        'iissddiddds',
+        'iissdsidddsdd',
         $pharmacyId,
         $branchId,
         $issuedBy,
         $invoiceNo,
         $saleTotal,
-        $paymentAmount,
+        $paymentValue,
         $userId,
         $saleTotal,
         $saleSubtotal,
         $saleVat,
-        $paymentMethod
+        $paymentMethod,
+        $amountReceived,
+        $changeDue
     );
 
 
     $saleStmt->execute();
 
-
-    $saleId = (int) $conn->insert_id;
+    $saleId =
+        (int) $conn->insert_id;
 
 
     if ($saleId <= 0) {
@@ -761,7 +952,7 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Insert sale items + deduct stock
+    | Insert sale items
     |--------------------------------------------------------------------------
     */
 
@@ -780,16 +971,19 @@ try {
 
     foreach ($saleItems as $saleItem) {
 
-        $productId = $saleItem['product_id'];
+        $productId =
+            $saleItem['product_id'];
 
-        $quantity = $saleItem['quantity'];
+        $quantity =
+            $saleItem['quantity'];
 
-        $unitPrice = $saleItem['unit_price'];
+        $unitPrice =
+            $saleItem['unit_price'];
 
 
         /*
         |--------------------------------------------------------------------------
-        | Deduct stock atomically
+        | Deduct stock atomically.
         |--------------------------------------------------------------------------
         */
 
@@ -802,11 +996,12 @@ try {
             $quantity
         );
 
-
         $stockStmt->execute();
 
 
-        if ($stockStmt->affected_rows !== 1) {
+        if (
+            $stockStmt->affected_rows !== 1
+        ) {
 
             throw new RuntimeException(
                 'Stock changed while processing "' .
@@ -818,7 +1013,7 @@ try {
 
         /*
         |--------------------------------------------------------------------------
-        | Record sale line
+        | Record sale item
         |--------------------------------------------------------------------------
         */
 
@@ -832,14 +1027,13 @@ try {
             $unitPrice
         );
 
-
         $itemStmt->execute();
     }
 
 
     /*
     |--------------------------------------------------------------------------
-    | Commit
+    | Commit everything atomically
     |--------------------------------------------------------------------------
     */
 
@@ -850,58 +1044,119 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Response
+    | Return authoritative sale result
     |--------------------------------------------------------------------------
     */
 
     echo json_encode([
-        'status'       => 'success',
-        'sale_id'      => $saleId,
-        'invoice'      => $invoiceNo,
-        'subtotal'     => number_format($saleSubtotal, 2, '.', ''),
-        'vat'          => number_format($saleVat, 2, '.', ''),
-        'total'        => number_format($saleTotal, 2, '.', ''),
-        'payment_method' => $paymentMethod,
-        'items'        => array_map(
-            static function (array $item): array {
-                return [
-                    'id'         => $item['product_id'],
-                    'name'       => $item['item_name'],
-                    'quantity'   => $item['quantity'],
-                    'unit_price' => number_format(
-                        $item['unit_price'],
-                        2,
-                        '.',
-                        ''
-                    ),
-                    'line_total' => number_format(
-                        $item['line_total'],
-                        2,
-                        '.',
-                        ''
-                    ),
-                ];
-            },
-            $saleItems
-        ),
+        'status' =>
+            'success',
+
+        'sale_id' =>
+            $saleId,
+
+        'invoice' =>
+            $invoiceNo,
+
+        'subtotal' =>
+            number_format(
+                $saleSubtotal,
+                2,
+                '.',
+                ''
+            ),
+
+        'vat' =>
+            number_format(
+                $saleVat,
+                2,
+                '.',
+                ''
+            ),
+
+        'total' =>
+            number_format(
+                $saleTotal,
+                2,
+                '.',
+                ''
+            ),
+
+        'payment_method' =>
+            $paymentMethod,
+
+        'amount_received' =>
+            number_format(
+                $amountReceived,
+                2,
+                '.',
+                ''
+            ),
+
+        'change_due' =>
+            number_format(
+                $changeDue,
+                2,
+                '.',
+                ''
+            ),
+
+        'items' =>
+            array_map(
+                static function (
+                    array $item
+                ): array {
+
+                    return [
+                        'id' =>
+                            $item['product_id'],
+
+                        'name' =>
+                            $item['item_name'],
+
+                        'quantity' =>
+                            $item['quantity'],
+
+                        'unit_price' =>
+                            number_format(
+                                $item['unit_price'],
+                                2,
+                                '.',
+                                ''
+                            ),
+
+                        'line_total' =>
+                            number_format(
+                                $item['line_total'],
+                                2,
+                                '.',
+                                ''
+                            ),
+                    ];
+                },
+                $saleItems
+            ),
     ]);
 
 } catch (Throwable $e) {
 
     /*
     |--------------------------------------------------------------------------
-    | Rollback everything
+    | Rollback on ANY failure
     |--------------------------------------------------------------------------
     */
 
     if ($transactionStarted) {
 
         try {
+
             $conn->rollback();
+
         } catch (Throwable $rollbackError) {
+
             error_log(
-                'POS rollback failed: '
-                . $rollbackError->getMessage()
+                'POS rollback failed: ' .
+                $rollbackError->getMessage()
             );
         }
     }
@@ -909,28 +1164,29 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Log technical details
+    | Log technical error privately
     |--------------------------------------------------------------------------
     */
 
     error_log(
-        'POS sale failed: '
-        . $e->getMessage()
+        'POS sale failed: ' .
+        $e->getMessage()
     );
 
 
     /*
     |--------------------------------------------------------------------------
-    | Safe customer-facing message
+    | Safe customer-facing error
     |--------------------------------------------------------------------------
     */
 
-    $message = $e->getMessage();
+    $message =
+        $e->getMessage();
 
 
     /*
     |--------------------------------------------------------------------------
-    | Avoid exposing SQL/internal errors
+    | Do not expose internal database errors.
     |--------------------------------------------------------------------------
     */
 
@@ -942,6 +1198,10 @@ try {
         stripos($message, 'database') !== false
         ||
         stripos($message, 'prepare') !== false
+        ||
+        stripos($message, 'column') !== false
+        ||
+        stripos($message, 'constraint') !== false
     ) {
 
         $message =
@@ -951,10 +1211,12 @@ try {
 
     http_response_code(400);
 
-
     echo json_encode([
-        'status'  => 'error',
-        'message' => $message,
+        'status' =>
+            'error',
+
+        'message' =>
+            $message,
     ]);
 }
 
