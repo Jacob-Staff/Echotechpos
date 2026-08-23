@@ -1,114 +1,490 @@
 <?php
 /**
- * Authentication Helper Functions
- * Optimized for PHARMA-JACOBS Multi-Branch Operations
- * Roles: Admin, Pharmacist, Manager, User, Cashier
+ * ============================================================
+ * EchoTech POS
+ * Authentication & Authorization Helpers
+ * ============================================================
+ *
+ * Supported roles:
+ *
+ *   Admin
+ *   Pharmacist
+ *   Manager
+ *   User
+ *   Cashier
+ * ============================================================
  */
 
+declare(strict_types=1);
+
+
+/*
+|--------------------------------------------------------------------------
+| Start secure session
+|--------------------------------------------------------------------------
+*/
+
 if (session_status() === PHP_SESSION_NONE) {
+
+    $isHttps =
+        (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        ||
+        (
+            isset($_SERVER['SERVER_PORT'])
+            && (int) $_SERVER['SERVER_PORT'] === 443
+        );
+
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path'     => '/',
+        'secure'   => $isHttps,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+
     session_start();
 }
 
+
+/*
+|--------------------------------------------------------------------------
+| Authentication
+|--------------------------------------------------------------------------
+*/
+
 /**
- * Check if a user is currently authenticated
+ * Determine whether a user is authenticated.
  */
-function is_logged_in() {
+function is_logged_in(): bool
+{
     return !empty($_SESSION['user_id']);
 }
 
-/**
- * Get the current display name
- * FIXED: Matches 'sessionUsername' from login.php
- */
-function current_user() {
-    return $_SESSION['sessionUsername'] ?? 'Guest';
-}
 
 /**
- * Get the current user role
+ * Get authenticated user ID.
  */
-function current_role() {
-    return $_SESSION['role'] ?? null; 
-}
-
-/**
- * Get the current branch ID for data filtering
- */
-function current_branch() {
-    return isset($_SESSION['branch_id']) ? intval($_SESSION['branch_id']) : null;
-}
-
-/**
- * Redirect to login if the session is invalid
- */
-function require_login() {
-    if (!is_logged_in()) {
-        header('Location: ../login.php?error=session_expired'); 
-        exit;
+function current_user_id(): ?int
+{
+    if (empty($_SESSION['user_id'])) {
+        return null;
     }
+
+    return (int) $_SESSION['user_id'];
 }
 
+
 /**
- * Restrict access to Management (Admin & Manager)
- * Used for Staff Management, Payroll, and Global Reports
+ * Get current username/display name.
  */
-function require_admin() {
-    require_login();
-    $current = current_role();
-    
-    // Only Admin and Manager can access these files
-    if ($current !== 'Admin' && $current !== 'Manager') {
-        http_response_code(403);
-        render_denied_message("This area is restricted to Administrative and Management staff only.");
-        exit;
+function current_user(): string
+{
+    return
+        $_SESSION['full_name']
+        ?? $_SESSION['sessionUsername']
+        ?? $_SESSION['username']
+        ?? 'Guest';
+}
+
+
+/**
+ * Get current username/login name.
+ */
+function current_username(): ?string
+{
+    return $_SESSION['username']
+        ?? $_SESSION['sessionUsername']
+        ?? null;
+}
+
+
+/**
+ * Get current role.
+ */
+function current_role(): ?string
+{
+    return $_SESSION['role'] ?? null;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Tenant helpers
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * Get current pharmacy ID.
+ */
+function current_pharmacy(): ?int
+{
+    if (!isset($_SESSION['pharmacy_id'])) {
+        return null;
     }
+
+    $id = (int) $_SESSION['pharmacy_id'];
+
+    return $id > 0 ? $id : null;
 }
 
+
 /**
- * Restrict access to standard staff modules
+ * Get current branch ID.
  */
-function require_user() {
+function current_branch(): ?int
+{
+    if (!isset($_SESSION['branch_id'])) {
+        return null;
+    }
+
+    $id = (int) $_SESSION['branch_id'];
+
+    return $id > 0 ? $id : null;
+}
+
+
+/**
+ * Get current branch name.
+ */
+function current_branch_name(): string
+{
+    return $_SESSION['branch_name'] ?? 'Main Branch';
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Authentication requirements
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * Redirect unauthenticated users to login.
+ */
+function require_login(): void
+{
+    if (is_logged_in()) {
+        return;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Always use an absolute application path.
+    |--------------------------------------------------------------------------
+    */
+
+    $loginUrl = '/login_inc.php?error=session_expired';
+
+    header('Location: ' . $loginUrl);
+    exit;
+}
+
+
+/**
+ * Require a valid pharmacy assignment.
+ */
+function require_pharmacy(): void
+{
     require_login();
-    // Logic ensures the user is at least logged in; roles are checked via has_permission
+
+    if (current_pharmacy() !== null) {
+        return;
+    }
+
+    http_response_code(403);
+
+    render_denied_message(
+        'Your account is not assigned to a valid pharmacy.'
+    );
+
+    exit;
 }
 
-/**
- * Helper to display a styled Access Denied message
- * Enhanced with PHARMA-JACOBS dark theme styling
- */
-function render_denied_message($message) {
-    echo "
-    <div style='background:#0f111a; color:white; height:100vh; display:flex; align-items:center; justify-content:center; font-family:sans-serif;'>
-        <div style='text-align:center; padding: 40px; background:#161b22; border:1px solid #30363d; border-radius:16px; max-width:400px;'>
-            <h2 style='color: #ff4d4d;'>⚠️ Access Denied</h2>
-            <p style='color:#8b949e;'>$message</p>
-            <hr style='border:0; border-top:1px solid #30363d; margin: 20px 0;'>
-            <a href='../index.php' style='display:inline-block; padding:10px 20px; background:#00d2ff; color:#000; text-decoration:none; border-radius:30px; font-weight:bold;'>Back to Safety</a>
-        </div>
-    </div>";
-    die();
-}
 
 /**
- * Granular Permission Check
- * Usage: if(has_permission('inventory', 'can_edit')) { ... }
+ * Require a valid branch assignment.
  */
-function has_permission($module, $action = 'can_view') {
-    global $conn;
+function require_branch(): void
+{
+    require_login();
+
+    if (current_branch() !== null) {
+        return;
+    }
+
+    http_response_code(403);
+
+    render_denied_message(
+        'Your account is not assigned to a valid branch.'
+    );
+
+    exit;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Role restrictions
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * Require Admin or Manager.
+ */
+function require_admin(): void
+{
+    require_login();
+
     $role = current_role();
-    
-    // Admins are "God Mode" - bypass all checks
-    if ($role === 'Admin') return true;
 
-    // Prepared statement for security
-    $stmt = $conn->prepare("SELECT $action FROM role_permissions WHERE role = ? AND module_name = ?");
-    $stmt->bind_param("ss", $role, $module);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    if ($row = $result->fetch_assoc()) {
-        return ($row[$action] == 1);
+    if ($role !== 'Admin' && $role !== 'Manager') {
+
+        http_response_code(403);
+
+        render_denied_message(
+            'This area is restricted to Administrative and Management staff only.'
+        );
+
+        exit;
+    }
+}
+
+
+/**
+ * Require any authenticated staff user.
+ */
+function require_user(): void
+{
+    require_login();
+}
+
+
+/**
+ * Require one of the supplied roles.
+ *
+ * Example:
+ *
+ * require_role(['Admin', 'Manager']);
+ */
+function require_role(array $allowedRoles): void
+{
+    require_login();
+
+    $role = current_role();
+
+    if (!in_array($role, $allowedRoles, true)) {
+
+        http_response_code(403);
+
+        render_denied_message(
+            'You do not have permission to access this area.'
+        );
+
+        exit;
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Permission system
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * Check a granular role permission.
+ *
+ * Example:
+ *
+ * has_permission('inventory', 'can_edit')
+ */
+function has_permission(
+    string $module,
+    string $action = 'can_view'
+): bool {
+
+    global $conn;
+
+    $role = current_role();
+
+    /*
+    |--------------------------------------------------------------------------
+    | Must be authenticated
+    |--------------------------------------------------------------------------
+    */
+
+    if (!$role) {
+        return false;
     }
 
-    return false;
+
+    /*
+    |--------------------------------------------------------------------------
+    | Admin bypass
+    |--------------------------------------------------------------------------
+    */
+
+    if ($role === 'Admin') {
+        return true;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Whitelist permission columns
+    |--------------------------------------------------------------------------
+    |
+    | Prevents an arbitrary SQL identifier being injected into
+    | the SELECT statement.
+    |
+    */
+
+    $allowedActions = [
+        'can_view',
+        'can_add',
+        'can_edit',
+        'can_delete',
+    ];
+
+    if (!in_array($action, $allowedActions, true)) {
+        return false;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Database connection check
+    |--------------------------------------------------------------------------
+    */
+
+    if (!isset($conn) || !($conn instanceof mysqli)) {
+        error_log(
+            'has_permission(): database connection unavailable.'
+        );
+
+        return false;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Permission query
+    |--------------------------------------------------------------------------
+    */
+
+    try {
+
+        $sql = "
+            SELECT `$action`
+            FROM role_permissions
+            WHERE role = ?
+              AND module_name = ?
+            LIMIT 1
+        ";
+
+        $stmt = $conn->prepare($sql);
+
+        $stmt->bind_param(
+            'ss',
+            $role,
+            $module
+        );
+
+        $stmt->execute();
+
+        $result = $stmt->get_result();
+
+        $allowed = false;
+
+        if ($row = $result->fetch_assoc()) {
+            $allowed = ((int) ($row[$action] ?? 0) === 1);
+        }
+
+        $stmt->close();
+
+        return $allowed;
+
+    } catch (Throwable $e) {
+
+        error_log(
+            'Permission check failed: '
+            . $e->getMessage()
+        );
+
+        return false;
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Access denied UI
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * Display access denied message.
+ */
+function render_denied_message(string $message): void
+{
+    $safeMessage = htmlspecialchars(
+        $message,
+        ENT_QUOTES,
+        'UTF-8'
+    );
+
+    echo "
+    <div style='
+        background:#0f111a;
+        color:white;
+        min-height:100vh;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-family:sans-serif;
+        padding:20px;
+    '>
+
+        <div style='
+            text-align:center;
+            padding:40px;
+            background:#161b22;
+            border:1px solid #30363d;
+            border-radius:16px;
+            max-width:400px;
+            width:100%;
+        '>
+
+            <h2 style='color:#ff4d4d;'>
+                ⚠️ Access Denied
+            </h2>
+
+            <p style='color:#8b949e;'>
+                {$safeMessage}
+            </p>
+
+            <hr style='
+                border:0;
+                border-top:1px solid #30363d;
+                margin:20px 0;
+            '>
+
+            <a href='/dashboard/index.php'
+               style='
+                   display:inline-block;
+                   padding:10px 20px;
+                   background:#00d2ff;
+                   color:#000;
+                   text-decoration:none;
+                   border-radius:30px;
+                   font-weight:bold;
+               '>
+                Back to Dashboard
+            </a>
+
+        </div>
+
+    </div>";
+
+    exit;
 }
