@@ -1,5 +1,7 @@
-<?php  
-ini_set('display_errors', 0);
+<?php
+declare(strict_types=1);
+
+ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -16,458 +18,839 @@ $branch_id   = (int)($_SESSION['branch_id'] ?? 0);
 
 if (!$pharmacy_id || !$branch_id) {
     header("Location: ../login.php?error=session_expired");
-    exit();
+    exit;
 }
 
-// Dynamic Pharmacy & Branch Name Retrieval
-$display_pharmacy_name = "Echo Prime Ltd"; 
+$display_pharmacy_name = "PHARMANOVA";
 $display_branch_name   = "Main Branch";
 
-$pharm_query = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
-$pharm_query->bind_param("i", $pharmacy_id);
-$pharm_query->execute();
-$pharm_res = $pharm_query->get_result();
-if ($row = $pharm_res->fetch_assoc()) {
-    $display_pharmacy_name = $row['name'];
+$stmt = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1");
+if ($stmt) {
+    $stmt->bind_param("i", $pharmacy_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if ($row = $res->fetch_assoc()) {
+        $display_pharmacy_name = $row['name'];
+    }
+    $stmt->close();
 }
-$pharm_query->close();
 
-$branch_query = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ? LIMIT 1");
-$branch_query->bind_param("ii", $branch_id, $pharmacy_id);
-$branch_query->execute();
-$branch_res = $branch_query->get_result();
-if ($row = $branch_res->fetch_assoc()) {
-    $display_branch_name = $row['branch_name'];
+$stmt = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ? LIMIT 1");
+if ($stmt) {
+    $stmt->bind_param("ii", $branch_id, $pharmacy_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if ($row = $res->fetch_assoc()) {
+        $display_branch_name = $row['branch_name'];
+    }
+    $stmt->close();
 }
-$branch_query->close();
 
-// Fetch Store Categories for Dropdown Filter
-$cat_options = [];
-$cat_stmt = $conn->prepare("SELECT DISTINCT category FROM store_items WHERE pharmacy_id = ? AND category IS NOT NULL AND category != '' ORDER BY category ASC");
-$cat_stmt->bind_param("i", $pharmacy_id);
-$cat_stmt->execute();
-$cat_res = $cat_stmt->get_result();
-while ($c_row = $cat_res->fetch_assoc()) {
-    $cat_options[] = $c_row['category'];
+$categories = [];
+$stmt = $conn->prepare("
+    SELECT DISTINCT category
+    FROM store_items
+    WHERE pharmacy_id = ?
+      AND category IS NOT NULL
+      AND category <> ''
+    ORDER BY category ASC
+");
+if ($stmt) {
+    $stmt->bind_param("i", $pharmacy_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    while ($row = $res->fetch_assoc()) {
+        $categories[] = $row['category'];
+    }
+    $stmt->close();
 }
-$cat_stmt->close();
 
-// Fetch Payment Methods for Dropdown Filter
-$pay_options = [];
-$pay_stmt = $conn->prepare("SELECT DISTINCT payment_method FROM sales WHERE pharmacy_id = ? AND branch_id = ? AND payment_method IS NOT NULL AND payment_method != '' ORDER BY payment_method ASC");
-$pay_stmt->bind_param("ii", $pharmacy_id, $branch_id);
-$pay_stmt->execute();
-$pay_res = $pay_stmt->get_result();
-while ($p_row = $pay_res->fetch_assoc()) {
-    $pay_options[] = $p_row['payment_method'];
+$paymentMethods = [];
+$stmt = $conn->prepare("
+    SELECT DISTINCT payment_method
+    FROM sales
+    WHERE pharmacy_id = ?
+      AND branch_id = ?
+      AND payment_method IS NOT NULL
+      AND payment_method <> ''
+    ORDER BY payment_method ASC
+");
+if ($stmt) {
+    $stmt->bind_param("ii", $pharmacy_id, $branch_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    while ($row = $res->fetch_assoc()) {
+        $paymentMethods[] = $row['payment_method'];
+    }
+    $stmt->close();
 }
-$pay_stmt->close();
+
+$today = date('Y-m-d');
+$sixMonthsAgo = date('Y-m-d', strtotime('-6 months'));
 
 require_once "../includes/head.php";
 ?>
 
 <style>
-.sales-trend-wrapper {
-    background-color: #f4f6f9 !important;
+:root {
+    --dash-blue: #1677ff;
+    --dash-blue-dark: #33475b;
+    --dash-orange: #ff9800;
+    --dash-green: #198754;
+    --dash-red: #d90429;
+    --page-bg: #f1f4f8;
+    --card-border: #e1e7ef;
+}
+
+.sales-trend-page {
     min-height: calc(100vh - 70px);
-    padding: 1.25rem;
-    color: #212529;
+    background: var(--page-bg);
+    padding: 18px;
 }
 
-.kpi-card {
-    border-radius: 10px;
-    border: none;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.03);
-    transition: transform 0.2s ease-in-out;
+.sales-trend-shell {
+    max-width: 1500px;
+    margin: 0 auto;
 }
 
-.kpi-card:hover {
-    transform: translateY(-2px);
+.trend-titlebar {
+    background: #fff;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: 0 3px 12px rgba(25, 45, 70, .05);
 }
 
-.card-custom {
-    background-color: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+.trend-title-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: #eaf3ff;
+    color: var(--dash-blue);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 21px;
 }
 
-/* Print Specific Stylesheet */
-@media print {
-    body {
-        background-color: #ffffff !important;
-        color: #000000 !important;
+.trend-card {
+    background: #fff;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    box-shadow: 0 3px 12px rgba(25, 45, 70, .05);
+}
+
+.kpi {
+    position: relative;
+    overflow: hidden;
+    min-height: 125px;
+    color: #fff;
+    border: 0;
+}
+
+.kpi::after {
+    content: "";
+    position: absolute;
+    width: 110px;
+    height: 110px;
+    border-radius: 50%;
+    right: -28px;
+    bottom: -45px;
+    background: rgba(255,255,255,.10);
+}
+
+.kpi-blue { background: #4299cf; }
+.kpi-dark { background: #3e4f60; }
+.kpi-orange { background: linear-gradient(135deg, #ff9800, #ef6c00); }
+.kpi-green { background: #198754; }
+
+.kpi-label {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    opacity: .88;
+}
+
+.kpi-value {
+    font-size: 27px;
+    font-weight: 800;
+    margin-top: 5px;
+}
+
+.kpi-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: rgba(255,255,255,.20);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 2;
+}
+
+.filter-card {
+    padding: 16px;
+}
+
+.filter-label {
+    font-size: 11px;
+    font-weight: 800;
+    color: #536274;
+    text-transform: uppercase;
+    letter-spacing: .35px;
+    margin-bottom: 6px;
+}
+
+.form-control,
+.form-select {
+    border-color: #d7e0ea;
+    min-height: 40px;
+    border-radius: 7px;
+}
+
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--dash-blue);
+    box-shadow: 0 0 0 .18rem rgba(22,119,255,.10);
+}
+
+.preset-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.preset-buttons .btn {
+    border-radius: 6px !important;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.chart-wrap {
+    height: 430px;
+    position: relative;
+}
+
+.chart-header {
+    padding-bottom: 12px;
+    border-bottom: 1px solid #edf1f5;
+}
+
+.chart-legend-note {
+    font-size: 12px;
+    color: #748092;
+}
+
+.insight-box {
+    background: #f8fafc;
+    border: 1px solid #e5ebf2;
+    border-radius: 9px;
+    padding: 13px 15px;
+}
+
+.insight-value {
+    font-weight: 800;
+    color: #203047;
+}
+
+.status-message {
+    display: none;
+    padding: 10px 12px;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.status-message.error {
+    display: block;
+    background: #fff0f1;
+    color: #b4232d;
+    border: 1px solid #ffd2d6;
+}
+
+.status-message.loading {
+    display: block;
+    background: #eef6ff;
+    color: #145fc0;
+    border: 1px solid #cfe4ff;
+}
+
+@media (max-width: 768px) {
+    .sales-trend-page {
+        padding: 10px;
     }
 
-    #header, #aside, .no-print, nav, .btn, .input-group, form, footer {
+    .chart-wrap {
+        height: 340px;
+    }
+
+    .kpi-value {
+        font-size: 23px;
+    }
+}
+
+@media print {
+    #header,
+    #aside,
+    nav,
+    footer,
+    .no-print {
         display: none !important;
     }
 
-    .sales-trend-wrapper {
+    .sales-trend-page {
         padding: 0 !important;
-        background-color: #ffffff !important;
+        background: #fff !important;
     }
 
-    .card {
-        border: 1px solid #ddd !important;
+    .trend-card,
+    .trend-titlebar {
         box-shadow: none !important;
+        border: 1px solid #ddd !important;
     }
 
-    .print-header {
-        display: block !important;
-        text-align: center;
-        margin-bottom: 20px;
-        border-bottom: 2px solid #333;
-        padding-bottom: 10px;
+    .chart-wrap {
+        height: 430px !important;
     }
-
-    .chart-container {
-        page-break-inside: avoid;
-    }
-}
-
-.print-header {
-    display: none;
 }
 </style>
 
 <div id="main-wrapper">
-    <?php 
-    if (file_exists("../includes/header.php")) require_once "../includes/header.php"; 
-    if (file_exists("../includes/aside.php")) require_once "../includes/aside.php"; 
+    <?php
+    if (file_exists("../includes/header.php")) {
+        require_once "../includes/header.php";
+    }
+    if (file_exists("../includes/aside.php")) {
+        require_once "../includes/aside.php";
+    }
     ?>
 
-    <div class="page-wrapper sales-trend-wrapper">
-        <div class="container-fluid p-0">
+    <main class="page-wrapper sales-trend-page">
+        <div class="sales-trend-shell">
 
-            <!-- Print Banner Header -->
-            <div class="print-header">
-                <h2 class="fw-bold mb-1"><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></h2>
-                <h5 class="mb-1"><?= htmlspecialchars($display_branch_name) ?> - Advanced Sales Trend Report</h5>
-                <small class="text-muted">Generated on: <?= date('d M Y, H:i A') ?></small>
-            </div>
-
-            <!-- Header & Print Trigger -->
-            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2">
-                <div>
-                    <h3 class="fw-bold text-dark mb-0">
-                        <i class="fas fa-chart-line me-2 text-primary"></i>Sales Trend & Analytics
-                    </h3>
-                    <span class="text-secondary small">
-                        <b><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></b> | <?= htmlspecialchars($display_branch_name) ?>
-                    </span>
-                </div>
-                <div class="no-print">
-                    <button class="btn btn-outline-dark fw-bold" onclick="window.print();">
-                        <i class="fas fa-print me-1"></i> Print / Export PDF
-                    </button>
-                </div>
-            </div>
-
-            <!-- Summary KPI Dashboard Cards -->
-            <div class="row g-3 mb-4">
-                <div class="col-12 col-md-4">
-                    <div class="card kpi-card bg-primary text-white p-3">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <span class="text-white-50 small fw-bold text-uppercase">Total Revenue</span>
-                                <h2 id="total-revenue" class="fw-bold mb-0 mt-1">K 0.00</h2>
-                            </div>
-                            <div class="bg-white bg-opacity-25 rounded-circle p-3">
-                                <i class="fas fa-wallet fa-2x text-white"></i>
-                            </div>
+            <div class="trend-titlebar mb-3 d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="trend-title-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div>
+                        <h3 class="mb-1 fw-bold">Sales Trend</h3>
+                        <div class="small text-muted">
+                            <strong><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></strong>
+                            <span class="mx-1">â€¢</span>
+                            <?= htmlspecialchars($display_branch_name) ?>
                         </div>
                     </div>
                 </div>
-                <div class="col-12 col-md-4">
-                    <div class="card kpi-card bg-dark text-white p-3">
-                        <div class="d-flex justify-content-between align-items-center">
+
+                <button type="button" class="btn btn-outline-dark fw-bold no-print" onclick="window.print()">
+                    <i class="fas fa-print me-1"></i> Print / Export PDF
+                </button>
+            </div>
+
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-md-6 col-xl-3">
+                    <div class="trend-card kpi kpi-blue p-3">
+                        <div class="d-flex justify-content-between align-items-start">
                             <div>
-                                <span class="text-white-50 small fw-bold text-uppercase">Transactions Volume</span>
-                                <h2 id="total-transactions" class="fw-bold mb-0 mt-1">0</h2>
+                                <div class="kpi-label">Total Revenue</div>
+                                <div class="kpi-value" id="total-revenue">K 0.00</div>
+                                <small>Selected period</small>
                             </div>
-                            <div class="bg-white bg-opacity-25 rounded-circle p-3">
-                                <i class="fas fa-shopping-cart fa-2x text-white"></i>
-                            </div>
+                            <div class="kpi-icon"><i class="fas fa-wallet"></i></div>
                         </div>
                     </div>
                 </div>
-                <div class="col-12 col-md-4">
-                    <div class="card kpi-card bg-success text-white p-3">
-                        <div class="d-flex justify-content-between align-items-center">
+
+                <div class="col-12 col-md-6 col-xl-3">
+                    <div class="trend-card kpi kpi-dark p-3">
+                        <div class="d-flex justify-content-between align-items-start">
                             <div>
-                                <span class="text-white-50 small fw-bold text-uppercase">Average Ticket Value</span>
-                                <h2 id="avg-ticket" class="fw-bold mb-0 mt-1">K 0.00</h2>
+                                <div class="kpi-label">Transactions</div>
+                                <div class="kpi-value" id="total-transactions">0</div>
+                                <small>Completed sales</small>
                             </div>
-                            <div class="bg-white bg-opacity-25 rounded-circle p-3">
-                                <i class="fas fa-receipt fa-2x text-white"></i>
+                            <div class="kpi-icon"><i class="fas fa-receipt"></i></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-6 col-xl-3">
+                    <div class="trend-card kpi kpi-orange p-3">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <div class="kpi-label">Average Ticket</div>
+                                <div class="kpi-value" id="avg-ticket">K 0.00</div>
+                                <small>Revenue per transaction</small>
                             </div>
+                            <div class="kpi-icon"><i class="fas fa-calculator"></i></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-6 col-xl-3">
+                    <div class="trend-card kpi kpi-green p-3">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <div class="kpi-label">Best Period</div>
+                                <div class="kpi-value" id="best-period">â€”</div>
+                                <small id="best-period-value">No sales yet</small>
+                            </div>
+                            <div class="kpi-icon"><i class="fas fa-trophy"></i></div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Advanced Multi-Level Filter Panel -->
-            <div class="card card-custom p-3 mb-4 no-print">
+            <div class="trend-card filter-card mb-3 no-print">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <h5 class="fw-bold mb-1"><i class="fas fa-sliders-h text-primary me-2"></i>Trend Filters</h5>
+                        <small class="text-muted">Analyze this branch without leaving the page.</small>
+                    </div>
+                    <span class="badge bg-light text-primary border">ZMW</span>
+                </div>
+
+                <div class="preset-buttons mb-3">
+                    <button type="button" class="btn btn-outline-secondary" data-preset="today">Today</button>
+                    <button type="button" class="btn btn-outline-secondary" data-preset="yesterday">Yesterday</button>
+                    <button type="button" class="btn btn-outline-secondary" data-preset="this_week">This Week</button>
+                    <button type="button" class="btn btn-outline-secondary" data-preset="this_month">This Month</button>
+                    <button type="button" class="btn btn-outline-secondary" data-preset="last_month">Last Month</button>
+                    <button type="button" class="btn btn-outline-secondary" data-preset="6_months">Last 6 Months</button>
+                    <button type="button" class="btn btn-outline-secondary" data-preset="this_year">This Year</button>
+                </div>
+
                 <div class="row g-3">
-                    <!-- Preset Date Range Buttons -->
-                    <div class="col-12">
-                        <div class="btn-group btn-group-sm flex-wrap" role="group">
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('today')">Today</button>
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('yesterday')">Yesterday</button>
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('this_week')">This Week</button>
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('this_month')">This Month</button>
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('last_month')">Last Month</button>
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('6_months')">Last 6 Months</button>
-                            <button type="button" class="btn btn-outline-secondary" onclick="setDatePreset('this_year')">This Year</button>
+                    <div class="col-12 col-lg-3">
+                        <label class="filter-label">Search</label>
+                        <input type="text" id="search" class="form-control" placeholder="Invoice, product or barcode...">
+                    </div>
+
+                    <div class="col-12 col-md-6 col-lg-2">
+                        <label class="filter-label">Category</label>
+                        <select id="category" class="form-select">
+                            <option value="">All Categories</option>
+                            <?php foreach ($categories as $category): ?>
+                                <option value="<?= htmlspecialchars($category) ?>"><?= htmlspecialchars($category) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-md-6 col-lg-2">
+                        <label class="filter-label">Payment</label>
+                        <select id="payment_method" class="form-select">
+                            <option value="">All Methods</option>
+                            <?php foreach ($paymentMethods as $method): ?>
+                                <option value="<?= htmlspecialchars($method) ?>"><?= htmlspecialchars($method) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-md-6 col-lg-2">
+                        <label class="filter-label">Grouping</label>
+                        <select id="trendType" class="form-select">
+                            <option value="daily">Daily</option>
+                            <option value="weekly" selected>Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="yearly">Yearly</option>
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-md-6 col-lg-3">
+                        <label class="filter-label">Date Range</label>
+                        <div class="d-flex gap-2">
+                            <input type="date" id="startDate" class="form-control" value="<?= $sixMonthsAgo ?>">
+                            <input type="date" id="endDate" class="form-control" value="<?= $today ?>">
                         </div>
                     </div>
 
-                    <!-- Row 1 Filters -->
-                    <div class="col-12 col-md-3">
-                        <label class="form-label small fw-bold text-muted mb-1">Search Keyword</label>
-                        <input type="text" id="search" class="form-control" placeholder="Invoice #, Product, Cashier...">
-                    </div>
-
-                    <div class="col-12 col-md-3">
-                        <label class="form-label small fw-bold text-muted mb-1">Category</label>
-                        <select id="category" class="form-select">
-                            <option value="">-- All Categories --</option>
-                            <?php foreach ($cat_options as $cat): ?>
-                                <option value="<?= htmlspecialchars($cat) ?>"><?= htmlspecialchars($cat) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <div class="col-12 col-md-3">
-                        <label class="form-label small fw-bold text-muted mb-1">Payment Method</label>
-                        <select id="payment_method" class="form-select">
-                            <option value="">-- All Payment Methods --</option>
-                            <?php foreach ($pay_options as $pm): ?>
-                                <option value="<?= htmlspecialchars($pm) ?>"><?= htmlspecialchars($pm) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <div class="col-12 col-md-3">
-                        <label class="form-label small fw-bold text-muted mb-1">Trend Grouping</label>
-                        <select id="trendType" class="form-select">
-                            <option value="daily">Daily Grouping</option>
-                            <option value="weekly" selected>Weekly Grouping</option>
-                            <option value="monthly">Monthly Grouping</option>
-                            <option value="yearly">Yearly Grouping</option>
-                        </select>
-                    </div>
-
-                    <!-- Row 2 Filters & Action -->
-                    <div class="col-12 col-md-4">
-                        <label class="form-label small fw-bold text-muted mb-1">Start Date</label>
-                        <input type="date" id="startDate" class="form-control" value="<?= date('Y-m-d', strtotime('-6 months')) ?>">
-                    </div>
-
-                    <div class="col-12 col-md-4">
-                        <label class="form-label small fw-bold text-muted mb-1">End Date</label>
-                        <input type="date" id="endDate" class="form-control" value="<?= date('Y-m-d') ?>">
-                    </div>
-
-                    <div class="col-12 col-md-4 d-grid align-self-end">
-                        <button class="btn btn-primary fw-bold py-2" id="filter-btn">
+                    <div class="col-12">
+                        <button type="button" id="filter-btn" class="btn btn-primary fw-bold px-4">
                             <i class="fas fa-sync-alt me-1"></i> APPLY FILTERS
                         </button>
+                        <button type="button" id="reset-btn" class="btn btn-light border fw-bold ms-2">
+                            Reset
+                        </button>
+                    </div>
+
+                    <div class="col-12">
+                        <div id="status-message" class="status-message"></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Interactive Trend Canvas -->
-            <div class="row">
-                <div class="col-12">
-                    <div class="card card-custom p-4 shadow-sm chart-container">
-                        <div class="d-flex justify-content-between align-items-center mb-4">
-                            <h5 class="fw-bold text-dark mb-0">Sales Performance Curve</h5>
-                            <span class="text-muted small"><i class="fas fa-chart-line text-success me-1"></i> Revenue vs Transaction Volume</span>
+            <div class="trend-card p-3 p-lg-4">
+                <div class="chart-header d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+                    <div>
+                        <h5 class="fw-bold mb-1">Sales Performance</h5>
+                        <div class="chart-legend-note">
+                            Revenue and transaction volume for the selected period.
                         </div>
-                        <div style="position: relative; height: 380px;">
-                            <canvas id="salesTrendChart"></canvas>
+                    </div>
+                    <div class="small text-muted">
+                        <i class="fas fa-circle text-primary me-1"></i> Revenue
+                        <span class="mx-2">|</span>
+                        <i class="fas fa-circle text-warning me-1"></i> Transactions
+                    </div>
+                </div>
+
+                <div class="chart-wrap">
+                    <canvas id="salesTrendChart"></canvas>
+                </div>
+
+                <div class="row g-3 mt-2">
+                    <div class="col-12 col-md-4">
+                        <div class="insight-box">
+                            <div class="small text-muted">Highest Revenue Period</div>
+                            <div class="insight-value" id="insight-highest">â€”</div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <div class="insight-box">
+                            <div class="small text-muted">Transactions in Best Period</div>
+                            <div class="insight-value" id="insight-count">0</div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <div class="insight-box">
+                            <div class="small text-muted">Selected Date Range</div>
+                            <div class="insight-value" id="insight-range">â€”</div>
                         </div>
                     </div>
                 </div>
             </div>
 
         </div>
-    </div>
+    </main>
 
-    <?php 
-    if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"; 
+    <?php
+    if (file_exists("../includes/footer.php")) {
+        require_once "../includes/footer.php";
+    }
     ?>
 </div>
 
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 
 <script>
-let trendChart = null;
+(() => {
+    'use strict';
 
-function setDatePreset(type) {
-    const today = new Date();
-    let start = new Date();
-    let end = new Date();
+    let trendChart = null;
 
-    if (type === 'today') {
-        start = today;
-        end = today;
-        $('#trendType').val('daily');
-    } else if (type === 'yesterday') {
-        start.setDate(today.getDate() - 1);
-        end.setDate(today.getDate() - 1);
-        $('#trendType').val('daily');
-    } else if (type === 'this_week') {
-        const day = today.getDay();
-        const diff = today.getDate() - day + (day === 0 ? -6 : 1);
-        start = new Date(today.setDate(diff));
-        end = new Date();
-        $('#trendType').val('daily');
-    } else if (type === 'this_month') {
-        start = new Date(today.getFullYear(), today.getMonth(), 1);
-        end = new Date();
-        $('#trendType').val('weekly');
-    } else if (type === 'last_month') {
-        start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        end = new Date(today.getFullYear(), today.getMonth(), 0);
-        $('#trendType').val('weekly');
-    } else if (type === '6_months') {
-        start.setMonth(today.getMonth() - 6);
-        end = new Date();
-        $('#trendType').val('monthly');
-    } else if (type === 'this_year') {
-        start = new Date(today.getFullYear(), 0, 1);
-        end = new Date();
-        $('#trendType').val('monthly');
+    const $ = (id) => document.getElementById(id);
+
+    function localDateString(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
     }
 
-    const formatDate = (d) => d.toISOString().split('T')[0];
-    $('#startDate').val(formatDate(start));
-    $('#endDate').val(formatDate(end));
-    loadTrendData();
-}
+    function parseLocalDate(value) {
+        const [y, m, d] = value.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
 
-function loadTrendData() {
-    const btn = $('#filter-btn');
-    btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> UPDATING...');
+    function formatMoney(value) {
+        return 'K ' + Number(value || 0).toLocaleString('en-ZM', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
 
-    $.ajax({
-        url: 'actions/fetch_sales_trend.php',
-        method: 'POST',
-        data: {
-            search: $('#search').val(),
-            category: $('#category').val(),
-            payment_method: $('#payment_method').val(),
-            startDate: $('#startDate').val(),
-            endDate: $('#endDate').val(),
-            trendType: $('#trendType').val()
-        },
-        dataType: 'json',
-        success: function(res) {
-            const rev = parseFloat(res.total_revenue || 0);
-            const tx = parseInt(res.total_transactions || 0);
-            const avg = tx > 0 ? (rev / tx) : 0;
+    function setStatus(message = '', type = '') {
+        const box = $('status-message');
+        box.className = 'status-message';
 
-            $('#total-revenue').text('K ' + rev.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}));
-            $('#total-transactions').text(tx.toLocaleString());
-            $('#avg-ticket').text('K ' + avg.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}));
-
-            renderTrendChart(res.labels || [], res.totals || [], res.counts || []);
-        },
-        error: function(xhr) {
-            console.error(xhr.responseText);
-            alert("Failed to fetch trend analysis data. Check server response.");
-        },
-        complete: function() {
-            btn.prop('disabled', false).html('<i class="fas fa-sync-alt me-1"></i> APPLY FILTERS');
+        if (message) {
+            box.textContent = message;
+            box.classList.add(type);
         }
-    });
-}
-
-function renderTrendChart(labels, totals, counts) {
-    if (trendChart) {
-        trendChart.destroy();
     }
 
-    const ctx = document.getElementById('salesTrendChart').getContext('2d');
-    trendChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: 'Revenue (ZMW)',
-                    data: totals,
-                    borderColor: '#0d6efd',
-                    backgroundColor: 'rgba(13, 110, 253, 0.08)',
-                    fill: true,
-                    tension: 0.35,
-                    pointRadius: 4,
-                    pointBackgroundColor: '#0d6efd',
-                    borderWidth: 3,
-                    yAxisID: 'y'
-                },
-                {
-                    label: 'Transactions Count',
-                    data: counts,
-                    borderColor: '#fd7e14',
-                    backgroundColor: 'transparent',
-                    fill: false,
-                    tension: 0.35,
-                    borderDash: [5, 5],
-                    pointRadius: 4,
-                    pointBackgroundColor: '#fd7e14',
-                    borderWidth: 2,
-                    yAxisID: 'y1'
+    function setPreset(type) {
+        const today = new Date();
+        let start = new Date(today);
+        let end = new Date(today);
+
+        switch (type) {
+            case 'today':
+                $('trendType').value = 'daily';
+                break;
+
+            case 'yesterday':
+                start.setDate(start.getDate() - 1);
+                end = new Date(start);
+                $('trendType').value = 'daily';
+                break;
+
+            case 'this_week': {
+                const day = today.getDay();
+                const mondayOffset = day === 0 ? -6 : 1 - day;
+                start.setDate(today.getDate() + mondayOffset);
+                $('trendType').value = 'daily';
+                break;
+            }
+
+            case 'this_month':
+                start = new Date(today.getFullYear(), today.getMonth(), 1);
+                $('trendType').value = 'weekly';
+                break;
+
+            case 'last_month':
+                start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                end = new Date(today.getFullYear(), today.getMonth(), 0);
+                $('trendType').value = 'weekly';
+                break;
+
+            case '6_months':
+                start = new Date(today.getFullYear(), today.getMonth() - 6, today.getDate());
+                $('trendType').value = 'monthly';
+                break;
+
+            case 'this_year':
+                start = new Date(today.getFullYear(), 0, 1);
+                $('trendType').value = 'monthly';
+                break;
+        }
+
+        $('startDate').value = localDateString(start);
+        $('endDate').value = localDateString(end);
+
+        loadTrendData();
+    }
+
+    async function loadTrendData() {
+        const btn = $('filter-btn');
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> UPDATING...';
+        setStatus('Loading sales trend...', 'loading');
+
+        const form = new FormData();
+        form.append('search', $('search').value.trim());
+        form.append('category', $('category').value);
+        form.append('payment_method', $('payment_method').value);
+        form.append('startDate', $('startDate').value);
+        form.append('endDate', $('endDate').value);
+        form.append('trendType', $('trendType').value);
+
+        try {
+            const response = await fetch('actions/fetch_sales_trend.php', {
+                method: 'POST',
+                body: form,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
                 }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { 
-                    position: 'top', 
-                    labels: { usePointStyle: true, boxWidth: 6 } 
-                }
+            });
+
+            const text = await response.text();
+            let data;
+
+            try {
+                data = JSON.parse(text);
+            } catch (e) {
+                console.error('Invalid JSON:', text);
+                throw new Error('The server returned an invalid response.');
+            }
+
+            if (!response.ok || data.status === 'error') {
+                throw new Error(data.message || 'Unable to load sales trend data.');
+            }
+
+            updateDashboard(data);
+            setStatus('');
+        } catch (error) {
+            console.error(error);
+            setStatus(error.message || 'Failed to load sales trend data.', 'error');
+
+            $('total-revenue').textContent = 'K 0.00';
+            $('total-transactions').textContent = '0';
+            $('avg-ticket').textContent = 'K 0.00';
+            $('best-period').textContent = 'â€”';
+            $('best-period-value').textContent = 'No sales yet';
+            renderChart([], [], []);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i> APPLY FILTERS';
+        }
+    }
+
+    function updateDashboard(data) {
+        const revenue = Number(data.total_revenue || 0);
+        const transactions = Number(data.total_transactions || 0);
+        const average = transactions > 0 ? revenue / transactions : 0;
+
+        const labels = Array.isArray(data.labels) ? data.labels : [];
+        const totals = Array.isArray(data.totals) ? data.totals.map(Number) : [];
+        const counts = Array.isArray(data.counts) ? data.counts.map(Number) : [];
+
+        $('total-revenue').textContent = formatMoney(revenue);
+        $('total-transactions').textContent = transactions.toLocaleString('en-ZM');
+        $('avg-ticket').textContent = formatMoney(average);
+
+        let bestIndex = -1;
+        let bestValue = 0;
+
+        totals.forEach((value, index) => {
+            if (value > bestValue) {
+                bestValue = value;
+                bestIndex = index;
+            }
+        });
+
+        if (bestIndex >= 0) {
+            $('best-period').textContent = labels[bestIndex] || 'â€”';
+            $('best-period-value').textContent = formatMoney(bestValue);
+            $('insight-highest').textContent = `${labels[bestIndex]} â€” ${formatMoney(bestValue)}`;
+            $('insight-count').textContent = (counts[bestIndex] || 0).toLocaleString('en-ZM');
+        } else {
+            $('best-period').textContent = 'â€”';
+            $('best-period-value').textContent = 'No sales yet';
+            $('insight-highest').textContent = 'No sales recorded';
+            $('insight-count').textContent = '0';
+        }
+
+        $('insight-range').textContent =
+            `${$('startDate').value} â†’ ${$('endDate').value}`;
+
+        renderChart(labels, totals, counts);
+    }
+
+    function renderChart(labels, totals, counts) {
+        const canvas = $('salesTrendChart');
+
+        if (trendChart) {
+            trendChart.destroy();
+        }
+
+        trendChart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Revenue (ZMW)',
+                        data: totals,
+                        borderColor: '#1677ff',
+                        backgroundColor: 'rgba(22,119,255,.10)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: .35,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#1677ff',
+                        yAxisID: 'revenue'
+                    },
+                    {
+                        label: 'Transactions',
+                        data: counts,
+                        borderColor: '#ff9800',
+                        backgroundColor: 'transparent',
+                        borderWidth: 3,
+                        borderDash: [7, 5],
+                        tension: .35,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#ff9800',
+                        yAxisID: 'transactions'
+                    }
+                ]
             },
-            scales: {
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    beginAtZero: true,
-                    grid: { color: '#f1f5f9' },
-                    title: { display: true, text: 'Revenue (ZMW)' }
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
                 },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    beginAtZero: true,
-                    grid: { drawOnChartArea: false },
-                    title: { display: true, text: 'Transaction Count' }
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 18
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label(context) {
+                                if (context.dataset.yAxisID === 'revenue') {
+                                    return ` Revenue: ${formatMoney(context.parsed.y)}`;
+                                }
+                                return ` Transactions: ${context.parsed.y}`;
+                            }
+                        }
+                    }
                 },
-                x: {
-                    grid: { display: false }
+                scales: {
+                    revenue: {
+                        type: 'linear',
+                        position: 'left',
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Revenue (ZMW)'
+                        },
+                        grid: {
+                            color: '#edf1f5'
+                        }
+                    },
+                    transactions: {
+                        type: 'linear',
+                        position: 'right',
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        },
+                        title: {
+                            display: true,
+                            text: 'Transactions'
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        }
+                    }
                 }
             }
-        }
-    });
-}
+        });
+    }
 
-$(document).ready(function() {
-    loadTrendData();
-    
-    $('#filter-btn').on('click', function(e) {
-        e.preventDefault();
+    $('filter-btn').addEventListener('click', loadTrendData);
+
+    $('reset-btn').addEventListener('click', () => {
+        $('search').value = '';
+        $('category').value = '';
+        $('payment_method').value = '';
+        $('trendType').value = 'weekly';
+        $('startDate').value = '<?= $sixMonthsAgo ?>';
+        $('endDate').value = '<?= $today ?>';
         loadTrendData();
     });
-});
+
+    document.querySelectorAll('[data-preset]').forEach(button => {
+        button.addEventListener('click', () => setPreset(button.dataset.preset));
+    });
+
+    $('search').addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            loadTrendData();
+        }
+    });
+
+    loadTrendData();
+})();
 </script>
+
 </body>
 </html>
