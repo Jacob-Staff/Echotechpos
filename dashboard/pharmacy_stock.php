@@ -661,6 +661,32 @@ require_once "../includes/head.php";
     }
 }
 
+
+/* =========================================================
+   REAL-TIME FILTER UI
+   ========================================================= */
+#stock-filter-form .form-select,
+#stock-filter-form #stock-search {
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+#stock-filter-form.is-filtering {
+    opacity: .72;
+    pointer-events: none;
+}
+
+#stock-filter-form .ps-filter-loading {
+    display: none;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ps-blue);
+    margin-top: 8px;
+}
+
+#stock-filter-form.is-filtering .ps-filter-loading {
+    display: block;
+}
+
 @media print {
     .no-print,
     .topbar,
@@ -907,6 +933,11 @@ if (file_exists("../includes/aside.php")) {
                     </button>
                 </div>
 
+            </div>
+
+            <div class="ps-filter-loading" aria-live="polite">
+                <i class="fas fa-spinner fa-spin me-1"></i>
+                Updating stock...
             </div>
 
             <?php if ($search !== '' || $category !== '' || $stock_filter !== 'all' || $expiry_filter !== 'all'): ?>
@@ -1369,6 +1400,91 @@ if (file_exists("../includes/footer.php")) {
     const adjustModal = adjustModalEl
         ? new bootstrap.Modal(adjustModalEl)
         : null;
+
+    /* =========================================================
+       REAL-TIME FILTERS
+       ---------------------------------------------------------
+       Category / Stock / Expiry submit immediately when changed.
+       Search submits automatically after the user pauses typing.
+       The existing Apply button remains as a manual fallback.
+       ========================================================= */
+    const filterForm = document.getElementById('stock-filter-form');
+
+    if (filterForm) {
+        const filterSelects = filterForm.querySelectorAll(
+            'select[name="category"], select[name="stock"], select[name="expiry"]'
+        );
+
+        let filterSubmitting = false;
+        let searchTimer = null;
+
+        function submitFilters() {
+            if (filterSubmitting) return;
+
+            filterSubmitting = true;
+            filterForm.classList.add('is-filtering');
+
+            /*
+             * Reset pagination whenever a filter changes so the user
+             * always starts on the first page of the new result.
+             */
+            let pageInput = filterForm.querySelector('input[name="page"]');
+
+            if (!pageInput) {
+                pageInput = document.createElement('input');
+                pageInput.type = 'hidden';
+                pageInput.name = 'page';
+                filterForm.appendChild(pageInput);
+            }
+
+            pageInput.value = '1';
+
+            /*
+             * Native form submission is intentional here. It sends the
+             * exact same GET parameters the working Apply button sends,
+             * but without requiring the user to press Apply.
+             */
+            if (typeof filterForm.requestSubmit === 'function') {
+                filterForm.requestSubmit();
+            } else {
+                filterForm.submit();
+            }
+        }
+
+        filterSelects.forEach(function (select) {
+            select.addEventListener('change', function () {
+                submitFilters();
+            });
+        });
+
+        const searchInput = document.getElementById('stock-search');
+
+        if (searchInput) {
+            searchInput.addEventListener('input', function () {
+                clearTimeout(searchTimer);
+
+                searchTimer = setTimeout(function () {
+                    submitFilters();
+                }, 450);
+            });
+
+            searchInput.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    clearTimeout(searchTimer);
+                    submitFilters();
+                }
+            });
+        }
+
+        /*
+         * If the user presses Apply manually, use the same loading state.
+         */
+        filterForm.addEventListener('submit', function () {
+            filterSubmitting = true;
+            filterForm.classList.add('is-filtering');
+        });
+    }
 
     async function sendStockAction(action, values) {
 
