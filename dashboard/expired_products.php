@@ -785,6 +785,33 @@ require_once "../includes/head.php";
     }
 }
 
+
+/* ============================================================
+   PROFESSIONAL DISCARD CONFIRMATION MODAL
+   ============================================================ */
+.discard-modal-backdrop{position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.62);backdrop-filter:blur(4px)}
+.discard-modal-backdrop.show{display:flex;animation:discardFadeIn .16s ease-out}
+.discard-modal{width:min(440px,100%);background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.28);overflow:hidden;transform:translateY(8px) scale(.98);animation:discardModalIn .18s ease-out forwards}
+.discard-modal-top{padding:22px 22px 16px;text-align:center}
+.discard-modal-icon{width:62px;height:62px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#fff0f1;color:#dc3545;font-size:25px}
+.discard-modal-icon.sales{background:#fff4e5;color:#f08a00}
+.discard-modal-title{margin:0;color:#26364a;font-size:20px;font-weight:800}
+.discard-modal-product{margin-top:7px;color:#dc3545;font-weight:800;word-break:break-word}
+.discard-modal-message{margin:12px 0 0;color:#667487;font-size:13px;line-height:1.55}
+.discard-modal-warning{margin:16px 22px;padding:11px 13px;border-radius:9px;background:#fff8e8;border:1px solid #ffe2a8;color:#7a5700;font-size:12px;line-height:1.45;text-align:left}
+.discard-modal-actions{display:flex;gap:10px;padding:16px 22px 20px;border-top:1px solid #edf0f4}
+.discard-modal-actions button{flex:1;min-height:44px;border-radius:8px;font-weight:800;border:0;cursor:pointer}
+.discard-cancel-btn{background:#eef2f6;color:#465568}
+.discard-cancel-btn:hover{background:#e2e7ed}
+.discard-confirm-btn{background:#dc3545;color:#fff}
+.discard-confirm-btn:hover{background:#b02a37}
+.discard-confirm-btn.sales{background:#e67a00}
+.discard-confirm-btn.sales:hover{background:#c86600}
+.discard-confirm-btn:disabled{opacity:.65;cursor:not-allowed}
+@keyframes discardFadeIn{from{opacity:0}to{opacity:1}}
+@keyframes discardModalIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:480px){.discard-modal-backdrop{padding:12px}.discard-modal-top{padding:20px 18px 14px}.discard-modal-warning{margin:14px 18px}.discard-modal-actions{padding:14px 18px 18px}}
+
 @media print {
     .no-print,
     .topbar,
@@ -866,12 +893,7 @@ if (file_exists("../includes/aside.php")) {
                 <form
                     method="post"
                     class="d-inline"
-                    onsubmit="return confirm(
-                        'DISCARD ALL EXPIRED STOCK?\\n\\n' +
-                        'Items with no sales history will be permanently removed.\\n' +
-                        'Items linked to sales will have their expired quantity set to 0 so sales history remains intact.\\n\\n' +
-                        'This cannot be undone.'
-                    );"
+                    onsubmit="return confirmBulkDiscard(this);"
                 >
                     <button
                         type="submit"
@@ -1225,7 +1247,8 @@ if (file_exists("../includes/aside.php")) {
                                     class="d-inline"
                                     onsubmit="return confirmDiscard(
                                         <?= $has_sales ? 'true' : 'false' ?>,
-                                        <?= json_encode($row['item_name']) ?>
+                                        <?= json_encode($row['item_name']) ?>,
+                                        this
                                     );"
                                 >
 
@@ -1396,6 +1419,35 @@ if (file_exists("../includes/footer.php")) {
 
 </div>
 
+
+<!-- DISCARD CONFIRMATION POPUP -->
+<div class="discard-modal-backdrop" id="discard-modal" role="dialog" aria-modal="true" aria-labelledby="discard-modal-title">
+    <div class="discard-modal">
+        <div class="discard-modal-top">
+            <div class="discard-modal-icon" id="discard-modal-icon">
+                <i class="fas fa-trash-alt"></i>
+            </div>
+            <h4 class="discard-modal-title" id="discard-modal-title">Discard Expired Product?</h4>
+            <div class="discard-modal-product" id="discard-modal-product">Product</div>
+            <p class="discard-modal-message" id="discard-modal-message">
+                Are you sure you want to discard this expired stock?
+            </p>
+        </div>
+        <div class="discard-modal-warning" id="discard-modal-warning">
+            <i class="fas fa-exclamation-triangle me-1"></i>
+            This action cannot be undone.
+        </div>
+        <div class="discard-modal-actions">
+            <button type="button" class="discard-cancel-btn" id="discard-cancel-btn">
+                <i class="fas fa-times me-1"></i> Cancel
+            </button>
+            <button type="button" class="discard-confirm-btn" id="discard-confirm-btn">
+                <i class="fas fa-trash-alt me-1"></i> Yes, Discard
+            </button>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -1467,36 +1519,108 @@ if (file_exists("../includes/footer.php")) {
 
     }
 
+    
     /* =========================================================
-       SAFE DISCARD CONFIRMATION
+       PROFESSIONAL DISCARD CONFIRMATION POPUP
        ========================================================= */
 
-    window.confirmDiscard = function (hasSales, productName) {
+    const discardModal = document.getElementById('discard-modal');
+    const discardModalTitle = document.getElementById('discard-modal-title');
+    const discardModalProduct = document.getElementById('discard-modal-product');
+    const discardModalMessage = document.getElementById('discard-modal-message');
+    const discardModalWarning = document.getElementById('discard-modal-warning');
+    const discardModalIcon = document.getElementById('discard-modal-icon');
+    const discardConfirmBtn = document.getElementById('discard-confirm-btn');
+    const discardCancelBtn = document.getElementById('discard-cancel-btn');
+
+    let pendingDiscardForm = null;
+
+    window.confirmDiscard = function(hasSales, productName, formElement) {
+        pendingDiscardForm = formElement;
+        discardModalProduct.textContent = productName;
 
         if (hasSales) {
-
-            return confirm(
-                'DISCARD EXPIRED STOCK?\\n\\n' +
-                productName + '\\n\\n' +
-                'This product has sales history.\\n' +
-                'Its expired quantity will be set to 0, but the sales history will be preserved.\\n\\n' +
-                'The product will disappear from the expired products page.\\n\\n' +
-                'Continue?'
-            );
-
+            discardModalTitle.textContent = 'Discard Expired Stock?';
+            discardModalMessage.textContent =
+                'This product has sales history. The expired quantity will be removed from inventory, while all historical sales records will be preserved.';
+            discardModalWarning.innerHTML =
+                '<i class="fas fa-shield-alt me-1"></i>' +
+                'Sales history will be preserved. Only the expired inventory quantity will be cleared.';
+            discardModalIcon.classList.add('sales');
+            discardConfirmBtn.classList.add('sales');
+        } else {
+            discardModalTitle.textContent = 'Permanently Remove Product?';
+            discardModalMessage.textContent =
+                'This product has no sales history. Its inventory record will be permanently deleted from the system.';
+            discardModalWarning.innerHTML =
+                '<i class="fas fa-exclamation-triangle me-1"></i>' +
+                'This product has no sales history and will be permanently removed. This action cannot be undone.';
+            discardModalIcon.classList.remove('sales');
+            discardConfirmBtn.classList.remove('sales');
         }
 
-        return confirm(
-            'PERMANENTLY REMOVE EXPIRED PRODUCT?\\n\\n' +
-            productName + '\\n\\n' +
-            'This product has no sales history.\\n' +
-            'Its inventory record will be permanently deleted.\\n\\n' +
-            'This cannot be undone.\\n\\n' +
-            'Continue?'
-        );
+        discardModal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+        setTimeout(() => discardCancelBtn.focus(), 50);
+        return false;
     };
 
-    /* =========================================================
+    window.confirmBulkDiscard = function(formElement) {
+        pendingDiscardForm = formElement;
+        discardModalProduct.textContent =
+            'ALL EXPIRED STOCK â€” <?= number_format($total_expired) ?> ITEM(S)';
+        discardModalTitle.textContent = 'Discard All Expired Stock?';
+        discardModalMessage.textContent =
+            'Expired items without sales history will be permanently removed. Items linked to sales will have their expired quantity cleared while their sales history is preserved.';
+        discardModalWarning.innerHTML =
+            '<i class="fas fa-exclamation-triangle me-1"></i>' +
+            'This will process all expired stock in this branch. The operation cannot be undone.';
+        discardModalIcon.classList.remove('sales');
+        discardConfirmBtn.classList.remove('sales');
+        discardModal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+        setTimeout(() => discardCancelBtn.focus(), 50);
+        return false;
+    };
+
+    function closeDiscardModal() {
+        discardModal.classList.remove('show');
+        document.body.style.overflow = '';
+        pendingDiscardForm = null;
+        discardModalIcon.classList.remove('sales');
+        discardConfirmBtn.classList.remove('sales');
+        discardConfirmBtn.disabled = false;
+        discardConfirmBtn.innerHTML =
+            '<i class="fas fa-trash-alt me-1"></i> Yes, Discard';
+    }
+
+    discardCancelBtn.addEventListener('click', closeDiscardModal);
+
+    discardModal.addEventListener('click', function(event) {
+        if (event.target === discardModal) closeDiscardModal();
+    });
+
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape' && discardModal.classList.contains('show')) {
+            closeDiscardModal();
+        }
+    });
+
+    discardConfirmBtn.addEventListener('click', function() {
+        if (!pendingDiscardForm) {
+            closeDiscardModal();
+            return;
+        }
+
+        const form = pendingDiscardForm;
+        discardConfirmBtn.disabled = true;
+        discardConfirmBtn.innerHTML =
+            '<i class="fas fa-spinner fa-spin me-1"></i> Discarding...';
+
+        form.submit();
+    });
+
+/* =========================================================
        PDF EXPORT
        ========================================================= */
 
