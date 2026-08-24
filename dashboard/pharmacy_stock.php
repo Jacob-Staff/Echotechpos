@@ -43,13 +43,9 @@ if (function_exists('require_login')) {
     require_login();
 }
 
-$pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
-$branch_id   = (int)($_SESSION['branch_id'] ?? 0);
+$pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 10);
+$branch_id   = (int)($_SESSION['branch_id'] ?? 13);
 
-/*
- * Keep the same working POS branch as the current PHARMANOVA session
- * if older sessions do not contain the IDs.
- */
 if ($pharmacy_id <= 0) {
     $pharmacy_id = 10;
 }
@@ -235,7 +231,7 @@ try {
    IMPORTANT:
    Pharmacy Stock shows ONLY products that have:
      - quantity > 0
-     - selling price is used for stock valuation
+     - price > 0
      - not expired
 
    Expired and zero-stock products belong to their own pages.
@@ -245,6 +241,7 @@ $where = [
     "si.pharmacy_id = {$pharmacy_id}",
     "si.branch_id = {$branch_id}",
     "si.quantity > 0",
+    "si.price > 0",
     "(
         si.expiry_date IS NULL
         OR si.expiry_date = '0000-00-00'
@@ -396,6 +393,7 @@ try {
         WHERE pharmacy_id = {$pharmacy_id}
           AND branch_id = {$branch_id}
           AND quantity > 0
+          AND price > 0
           AND (
               expiry_date IS NULL
               OR expiry_date = '0000-00-00'
@@ -499,40 +497,6 @@ try {
 
 } catch (Throwable $e) {
     error_log('PHARMACY STOCK ROWS: ' . $e->getMessage());
-}
-
-/* ============================================================
-   RAW BRANCH STOCK CHECK
-   ------------------------------------------------------------
-   This is intentionally NOT used to show products. It only lets
-   the page distinguish "no stock" from "a filter mismatch".
-   ============================================================ */
-$raw_branch_products = 0;
-$raw_branch_quantity = 0;
-
-try {
-    $raw_sql = "
-        SELECT
-            COUNT(*) AS product_count,
-            COALESCE(SUM(quantity), 0) AS unit_count
-        FROM store_items
-        WHERE pharmacy_id = {$pharmacy_id}
-          AND branch_id = {$branch_id}
-          AND quantity > 0
-    ";
-
-    $raw_result = $conn->query($raw_sql);
-
-    if ($raw_result && ($raw_row = $raw_result->fetch_assoc())) {
-        $raw_branch_products = (int)$raw_row['product_count'];
-        $raw_branch_quantity = (int)$raw_row['unit_count'];
-    }
-
-    if ($raw_result) {
-        $raw_result->free();
-    }
-} catch (Throwable $e) {
-    error_log('PHARMACY STOCK RAW CHECK: ' . $e->getMessage());
 }
 
 /* Existing header already knows the current pharmacy/branch. */
@@ -781,7 +745,7 @@ if (file_exists("../includes/aside.php")) {
                 </div>
 
                 <div class="small text-muted mt-1">
-                    Showing only products with available stock. Expired and out-of-stock items are excluded.
+                    Showing only products with available stock value. Expired and out-of-stock items are excluded.
                 </div>
             </div>
         </div>
@@ -1180,14 +1144,6 @@ if (file_exists("../includes/aside.php")) {
                                 Expired and out-of-stock products are intentionally
                                 excluded from Pharmacy Stock.
                             </div>
-
-                            <?php if ($raw_branch_products > 0): ?>
-                                <div class="small text-warning mt-2">
-                                    <?= number_format($raw_branch_products) ?> product(s)
-                                    with <?= number_format($raw_branch_quantity) ?> available unit(s)
-                                    exist in this branch, but none match the current filters.
-                                </div>
-                            <?php endif; ?>
 
                         </td>
                     </tr>
