@@ -593,12 +593,12 @@ require_once "../includes/head.php";
 
 <style>
 :root {
-    --expired-red: #dc3545;
-    --expired-red-dark: #b02a37;
-    --expired-orange: #f17808;
+    --expired-red: #64748b;
+    --expired-red-dark: #475569;
+    --expired-orange: #64748b;
     --expired-green: #198754;
     --expired-dark: #3e4f60;
-    --expired-bg: #f4f6f9;
+    --expired-bg: #f5f7fa;
     --expired-border: #dfe6ee;
 }
 
@@ -622,15 +622,15 @@ require_once "../includes/head.php";
 
 .expired-header {
     padding: 18px 20px;
-    border-left: 5px solid var(--expired-red);
+    border-left: 4px solid #64748b;
 }
 
 .expired-icon {
     width: 48px;
     height: 48px;
     border-radius: 11px;
-    background: #ffeded;
-    color: var(--expired-red);
+    background: #f1f5f9;
+    color: #64748b;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -644,7 +644,7 @@ require_once "../includes/head.php";
 }
 
 .expired-kpi-red {
-    background: linear-gradient(180deg, #dc3545, #b02a37);
+    background: linear-gradient(180deg, #64748b, #475569);
 }
 
 .expired-kpi-dark {
@@ -652,7 +652,7 @@ require_once "../includes/head.php";
 }
 
 .expired-kpi-orange {
-    background: linear-gradient(180deg, #f17808, #ca1818);
+    background: linear-gradient(180deg, #64748b, #475569);
 }
 
 .expired-kpi-label {
@@ -705,7 +705,7 @@ require_once "../includes/head.php";
 }
 
 .expired-table thead th {
-    background: var(--expired-red);
+    background: #64748b;
     color: #fff !important;
     padding: 13px;
     font-size: 10px;
@@ -713,7 +713,7 @@ require_once "../includes/head.php";
     text-transform: uppercase;
     letter-spacing: .35px;
     white-space: nowrap;
-    border-bottom: 2px solid var(--expired-red-dark);
+    border-bottom: 2px solid #475569;
 }
 
 .expired-table tbody td {
@@ -725,7 +725,7 @@ require_once "../includes/head.php";
 }
 
 .expired-table tbody tr:hover {
-    background: #fff8f8;
+    background: #f8fafc;
 }
 
 .expired-product {
@@ -743,9 +743,9 @@ require_once "../includes/head.php";
     min-width: 55px;
     padding: 5px 10px;
     border-radius: 6px;
-    background: #ffeded;
-    color: #dc3545;
-    border: 1px solid #ffcccc;
+    background: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #dbe3ec;
     font-weight: 800;
     text-align: center;
 }
@@ -789,24 +789,24 @@ require_once "../includes/head.php";
 /* ============================================================
    PROFESSIONAL DISCARD CONFIRMATION MODAL
    ============================================================ */
-.discard-modal-backdrop{position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.62);backdrop-filter:blur(4px)}
+.discard-modal-backdrop{position:fixed;inset:0;z-index:2147483647;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.62);backdrop-filter:blur(4px)}
 .discard-modal-backdrop.show{display:flex;animation:discardFadeIn .16s ease-out}
 .discard-modal{width:min(440px,100%);background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.28);overflow:hidden;transform:translateY(8px) scale(.98);animation:discardModalIn .18s ease-out forwards}
 .discard-modal-top{padding:22px 22px 16px;text-align:center}
-.discard-modal-icon{width:62px;height:62px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#fff0f1;color:#dc3545;font-size:25px}
+.discard-modal-icon{width:62px;height:62px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#f1f5f9;color:#64748b;font-size:25px}
 .discard-modal-icon.sales{background:#fff4e5;color:#f08a00}
 .discard-modal-title{margin:0;color:#26364a;font-size:20px;font-weight:800}
-.discard-modal-product{margin-top:7px;color:#dc3545;font-weight:800;word-break:break-word}
+.discard-modal-product{margin-top:7px;color:#475569;font-weight:800;word-break:break-word}
 .discard-modal-message{margin:12px 0 0;color:#667487;font-size:13px;line-height:1.55}
 .discard-modal-warning{margin:16px 22px;padding:11px 13px;border-radius:9px;background:#fff8e8;border:1px solid #ffe2a8;color:#7a5700;font-size:12px;line-height:1.45;text-align:left}
 .discard-modal-actions{display:flex;gap:10px;padding:16px 22px 20px;border-top:1px solid #edf0f4}
 .discard-modal-actions button{flex:1;min-height:44px;border-radius:8px;font-weight:800;border:0;cursor:pointer}
 .discard-cancel-btn{background:#eef2f6;color:#465568}
 .discard-cancel-btn:hover{background:#e2e7ed}
-.discard-confirm-btn{background:#dc3545;color:#fff}
-.discard-confirm-btn:hover{background:#b02a37}
-.discard-confirm-btn.sales{background:#e67a00}
-.discard-confirm-btn.sales:hover{background:#c86600}
+.discard-confirm-btn{background:#475569;color:#fff}
+.discard-confirm-btn:hover{background:#334155}
+.discard-confirm-btn.sales{background:#64748b}
+.discard-confirm-btn.sales:hover{background:#475569}
 .discard-confirm-btn:disabled{opacity:.65;cursor:not-allowed}
 @keyframes discardFadeIn{from{opacity:0}to{opacity:1}}
 @keyframes discardModalIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
@@ -868,7 +868,7 @@ if (file_exists("../includes/aside.php")) {
                     Expired Products
                 </h3>
 
-                <div class="small text-danger">
+                <div class="small text-muted">
                     <i class="fas fa-exclamation-triangle me-1"></i>
                     Expired Stock
                     <span class="mx-1">â€¢</span>
@@ -898,7 +898,7 @@ if (file_exists("../includes/aside.php")) {
                     <button
                         type="submit"
                         name="clear_expired"
-                        class="btn btn-danger fw-bold"
+                        class="btn btn-secondary fw-bold"
                     >
                         <i class="fas fa-trash-alt me-1"></i>
                         Discard All
@@ -1090,7 +1090,7 @@ if (file_exists("../includes/aside.php")) {
 
             <div>
                 <h5 class="mb-1 fw-bold">
-                    <i class="fas fa-exclamation-triangle text-danger me-2"></i>
+                    <i class="fas fa-calendar-times text-secondary me-2"></i>
                     Expired Stock
                 </h5>
 
@@ -1204,7 +1204,7 @@ if (file_exists("../includes/aside.php")) {
 
                             <td>
 
-                                <span class="text-danger fw-bold">
+                                <span class="text-secondary fw-bold">
                                     <?= date(
                                         'd M Y',
                                         strtotime($row['expiry_date'])
@@ -1261,7 +1261,7 @@ if (file_exists("../includes/aside.php")) {
                                     <button
                                         type="submit"
                                         name="dispose_product"
-                                        class="btn btn-sm btn-outline-danger discard-btn fw-bold"
+                                        class="btn btn-sm btn-outline-secondary discard-btn fw-bold"
                                         title="Discard expired stock"
                                     >
                                         <i class="fas fa-trash-alt me-1"></i>
@@ -1613,11 +1613,18 @@ if (file_exists("../includes/footer.php")) {
         }
 
         const form = pendingDiscardForm;
+
         discardConfirmBtn.disabled = true;
         discardConfirmBtn.innerHTML =
             '<i class="fas fa-spinner fa-spin me-1"></i> Discarding...';
 
-        form.submit();
+        /*
+         * The confirmation handler returns false on the original submit.
+         * After the user explicitly confirms, submit the form natively.
+         * form.submit() is intentional here: it bypasses the confirmation
+         * handler so the request reaches the PHP disposal block exactly once.
+         */
+        HTMLFormElement.prototype.submit.call(form);
     });
 
 /* =========================================================
