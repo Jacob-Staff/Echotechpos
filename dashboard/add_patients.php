@@ -386,6 +386,110 @@ body {
     box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);
 }
 
+/* =========================================================
+   PATIENT PAGE - CUSTOM UI / LIVE FILTERS
+========================================================= */
+
+.custom-toast-container {
+    position: fixed;
+    top: 82px;
+    right: 20px;
+    z-index: 2000;
+    width: min(390px, calc(100vw - 40px));
+    pointer-events: none;
+}
+
+.custom-toast {
+    pointer-events: auto;
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, .14);
+    padding: 14px 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 10px;
+    animation: patientToastIn .25s ease both;
+}
+
+.custom-toast.success { border-left: 4px solid #10b981; }
+.custom-toast.error { border-left: 4px solid #ef4444; }
+.custom-toast.info { border-left: 4px solid #0284c7; }
+
+.custom-toast-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 36px;
+}
+
+.custom-toast.success .custom-toast-icon {
+    background: #ecfdf5;
+    color: #059669;
+}
+.custom-toast.error .custom-toast-icon {
+    background: #fef2f2;
+    color: #dc2626;
+}
+.custom-toast.info .custom-toast-icon {
+    background: #eff6ff;
+    color: #0284c7;
+}
+
+.custom-toast-content { flex: 1; min-width: 0; }
+.custom-toast-title {
+    font-weight: 700;
+    color: #0f172a;
+    font-size: .92rem;
+    margin-bottom: 2px;
+}
+.custom-toast-message {
+    color: #64748b;
+    font-size: .84rem;
+    line-height: 1.45;
+}
+
+.custom-toast-close {
+    border: 0;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 2px 4px;
+}
+.custom-toast-close:hover { color: #334155; }
+
+.live-filter-active {
+    border-color: #0284c7 !important;
+    box-shadow: 0 0 0 3px rgba(2,132,199,.08) !important;
+}
+
+.filter-card.is-loading {
+    opacity: .72;
+    pointer-events: none;
+}
+
+.filter-card {
+    transition: opacity .2s ease, box-shadow .2s ease;
+}
+
+@keyframes patientToastIn {
+    from { opacity: 0; transform: translateY(-10px) translateX(8px); }
+    to { opacity: 1; transform: translateY(0) translateX(0); }
+}
+
+@media (max-width: 767.98px) {
+    .patient-wrapper { padding: 1rem .75rem; }
+    .custom-toast-container {
+        top: 70px;
+        right: 12px;
+        width: calc(100vw - 24px);
+    }
+}
+
 /* Print Only Header Styling */
 .print-only-header {
     display: none;
@@ -435,6 +539,10 @@ body {
 </style>
 
 <div id="main-wrapper">
+
+    <!-- CUSTOM NON-BROWSER NOTIFICATION AREA -->
+    <div id="customToastContainer" class="custom-toast-container no-print" aria-live="polite" aria-atomic="true"></div>
+
     <?php 
     if (file_exists("../includes/header.php")) require_once "../includes/header.php"; 
     if (file_exists("../includes/aside.php")) require_once "../includes/aside.php"; 
@@ -620,7 +728,7 @@ body {
             <div class="row justify-content-center mb-4 no-print">
                 <div class="col-12 col-xl-10">
                     <div class="filter-card p-3">
-                        <form method="GET" action="add_patients.php" class="row g-2 align-items-end">
+                        <form method="GET" action="add_patients.php" id="patientFilterForm" class="row g-2 align-items-end">
                             <!-- Search Query -->
                             <div class="col-12 col-md-3">
                                 <label class="form-label small fw-semibold text-muted">Search Query</label>
@@ -663,12 +771,12 @@ body {
 
                             <!-- Filter Submit & Reset -->
                             <div class="col-12 col-md-2 d-flex gap-1">
-                                <button type="submit" class="btn btn-primary w-100">
-                                    <i class="fas fa-filter me-1"></i> Filter
+                                <button type="button" id="resetPatientFilters" class="btn btn-outline-secondary w-100">
+                                    <i class="fas fa-undo me-1"></i> Reset
                                 </button>
-                                <a href="add_patients.php" class="btn btn-outline-secondary" title="Reset Filters">
-                                    <i class="fas fa-undo"></i>
-                                </a>
+                                <span id="filterLiveStatus" class="d-none align-items-center justify-content-center px-2 text-muted small">
+                                    <i class="fas fa-spinner fa-spin me-1"></i> Updating
+                                </span>
                             </div>
                         </form>
                     </div>
@@ -834,157 +942,343 @@ body {
 <script>
 $(document).ready(function(){
 
-    // Register Patient AJAX
+    /* =========================================================
+       CUSTOM NOTIFICATIONS - NO browser alert()/confirm()
+    ========================================================= */
+    function escapeHtml(value) {
+        return $('<div>').text(value == null ? '' : value).html();
+    }
+
+    function showToast(type, title, message, duration = 4200) {
+        const icons = {
+            success: 'fa-check-circle',
+            error: 'fa-exclamation-circle',
+            info: 'fa-info-circle'
+        };
+
+        const toastId = 'patient-toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+
+        const html = `
+            <div class="custom-toast ${type}" id="${toastId}" role="status">
+                <div class="custom-toast-icon">
+                    <i class="fas ${icons[type] || icons.info}"></i>
+                </div>
+                <div class="custom-toast-content">
+                    <div class="custom-toast-title">${escapeHtml(title)}</div>
+                    <div class="custom-toast-message">${escapeHtml(message)}</div>
+                </div>
+                <button type="button" class="custom-toast-close" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+
+        $('#customToastContainer').append(html);
+
+        const $toast = $('#' + toastId);
+
+        $toast.find('.custom-toast-close').on('click', function(){
+            $toast.fadeOut(180, function(){ $(this).remove(); });
+        });
+
+        setTimeout(function(){
+            $toast.fadeOut(220, function(){ $(this).remove(); });
+        }, duration);
+    }
+
+    /* =========================================================
+       ADD PATIENT
+    ========================================================= */
     $('#addPatientForm').submit(function(e){
         e.preventDefault();
-        let btn = $('#submitBtn');
-        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i> SAVING PATIENT...');
+
+        const $form = $(this);
+        const $btn = $('#submitBtn');
+
+        if ($btn.prop('disabled')) return;
+
+        $btn.prop('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-2"></i> SAVING PATIENT...');
 
         $.ajax({
             url: 'add_patients.php',
             type: 'POST',
-            data: $(this).serialize(),
-            dataType: 'json',
-            success: function(res){
-                if(res.status === 'success'){
-                    $('#form-message').html(`
-                        <div class="alert alert-success border-0 shadow-sm d-flex align-items-center" role="alert">
-                            <i class="fas fa-check-circle fa-lg me-3"></i>
-                            <div>${res.message}</div>
-                        </div>
-                    `);
-                    setTimeout(() => { location.reload(); }, 1200);
-                } else {
-                    $('#form-message').html(`
-                        <div class="alert alert-danger border-0 shadow-sm d-flex align-items-center" role="alert">
-                            <i class="fas fa-exclamation-triangle fa-lg me-3"></i>
-                            <div>${res.message}</div>
-                        </div>
-                    `);
-                    btn.prop('disabled', false).html('<i class="fas fa-save me-2"></i> REGISTER PATIENT');
-                }
-            },
-            error: function(){
+            data: $form.serialize(),
+            dataType: 'json'
+        })
+        .done(function(res){
+            if (res.status === 'success') {
+                $('#form-message').html(`
+                    <div class="alert alert-success border-0 shadow-sm d-flex align-items-center" role="alert">
+                        <i class="fas fa-check-circle fa-lg me-3"></i>
+                        <div>${escapeHtml(res.message)}</div>
+                    </div>
+                `);
+
+                showToast('success', 'Patient Registered', res.message);
+
+                setTimeout(function(){
+                    window.location.reload();
+                }, 900);
+            } else {
                 $('#form-message').html(`
                     <div class="alert alert-danger border-0 shadow-sm d-flex align-items-center" role="alert">
                         <i class="fas fa-exclamation-triangle fa-lg me-3"></i>
-                        <div>Server communication error.</div>
+                        <div>${escapeHtml(res.message)}</div>
                     </div>
                 `);
-                btn.prop('disabled', false).html('<i class="fas fa-save me-2"></i> REGISTER PATIENT');
+
+                showToast('error', 'Registration Failed', res.message);
+                $btn.prop('disabled', false)
+                    .html('<i class="fas fa-save me-2"></i> REGISTER PATIENT');
             }
+        })
+        .fail(function(){
+            showToast('error', 'Connection Error', 'The server could not process the patient registration.');
+
+            $('#form-message').html(`
+                <div class="alert alert-danger border-0 shadow-sm d-flex align-items-center" role="alert">
+                    <i class="fas fa-exclamation-triangle fa-lg me-3"></i>
+                    <div>Server communication error. Please try again.</div>
+                </div>
+            `);
+
+            $btn.prop('disabled', false)
+                .html('<i class="fas fa-save me-2"></i> REGISTER PATIENT');
         });
     });
 
-    // Open Edit Modal
+    /* =========================================================
+       EDIT PATIENT MODAL
+    ========================================================= */
     $(document).on('click', '.btn-edit-patient', function(){
-        let id = $(this).data('id');
-        let invoice = $(this).data('invoice');
-        let first = $(this).data('first');
-        let last = $(this).data('last');
-        let phone = $(this).data('phone');
-        let condition = $(this).data('condition');
+        const $button = $(this);
 
-        $('#edit_patient_id').val(id);
-        $('#edit_invoice_number').val(invoice);
-        $('#edit_first_name').val(first);
-        $('#edit_last_name').val(last);
-        $('#edit_contact_number').val(phone);
-        $('#edit_patient_condation').val(condition);
+        $('#edit_patient_id').val($button.data('id'));
+        $('#edit_invoice_number').val($button.data('invoice'));
+        $('#edit_first_name').val($button.data('first'));
+        $('#edit_last_name').val($button.data('last'));
+        $('#edit_contact_number').val($button.data('phone'));
+        $('#edit_patient_condation').val($button.data('condition'));
 
         $('#edit-form-message').html('');
         $('#editPatientModal').modal('show');
     });
 
-    // Save Edited Patient AJAX
     $('#editPatientForm').submit(function(e){
         e.preventDefault();
-        let btn = $('#saveEditBtn');
-        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
+
+        const $form = $(this);
+        const $btn = $('#saveEditBtn');
+
+        if ($btn.prop('disabled')) return;
+
+        $btn.prop('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
 
         $.ajax({
             url: 'add_patients.php',
             type: 'POST',
-            data: $(this).serialize(),
-            dataType: 'json',
-            success: function(res){
-                if(res.status === 'success'){
-                    $('#edit-form-message').html(`
-                        <div class="alert alert-success border-0 py-2 mt-2" role="alert">
-                            <i class="fas fa-check-circle me-1"></i> ${res.message}
-                        </div>
-                    `);
-                    setTimeout(() => { location.reload(); }, 1000);
-                } else {
-                    $('#edit-form-message').html(`
-                        <div class="alert alert-danger border-0 py-2 mt-2" role="alert">
-                            <i class="fas fa-exclamation-triangle me-1"></i> ${res.message}
-                        </div>
-                    `);
-                    btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save Changes');
-                }
-            },
-            error: function(){
+            data: $form.serialize(),
+            dataType: 'json'
+        })
+        .done(function(res){
+            if (res.status === 'success') {
                 $('#edit-form-message').html(`
-                    <div class="alert alert-danger border-0 py-2 mt-2" role="alert">
-                        <i class="fas fa-exclamation-triangle me-1"></i> Server error.
+                    <div class="alert alert-success border-0 py-2 mt-2" role="alert">
+                        <i class="fas fa-check-circle me-1"></i> ${escapeHtml(res.message)}
                     </div>
                 `);
-                btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save Changes');
+
+                showToast('success', 'Patient Updated', res.message);
+
+                setTimeout(function(){
+                    window.location.reload();
+                }, 700);
+            } else {
+                $('#edit-form-message').html(`
+                    <div class="alert alert-danger border-0 py-2 mt-2" role="alert">
+                        <i class="fas fa-exclamation-triangle me-1"></i> ${escapeHtml(res.message)}
+                    </div>
+                `);
+
+                showToast('error', 'Update Failed', res.message);
+
+                $btn.prop('disabled', false)
+                    .html('<i class="fas fa-save me-1"></i> Save Changes');
             }
+        })
+        .fail(function(){
+            showToast('error', 'Connection Error', 'The server could not save the patient changes.');
+
+            $btn.prop('disabled', false)
+                .html('<i class="fas fa-save me-1"></i> Save Changes');
         });
     });
 
-    // Trigger Custom Delete Modal
+    /* =========================================================
+       CUSTOM DELETE CONFIRMATION
+    ========================================================= */
     $(document).on('click', '.btn-delete-patient', function(){
-        let id = $(this).data('id');
-        let name = $(this).data('name');
-
-        $('#delete_patient_id').val(id);
-        $('#delete_patient_name').text(name);
+        $('#delete_patient_id').val($(this).data('id'));
+        $('#delete_patient_name').text($(this).data('name'));
         $('#deletePatientModal').modal('show');
     });
 
-    // Confirm Delete Action AJAX
     $('#confirmDeleteBtn').click(function(){
-        let patientId = $('#delete_patient_id').val();
-        let btn = $(this);
+        const patientId = $('#delete_patient_id').val();
+        const $btn = $(this);
 
-        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Deleting...');
+        if (!patientId || $btn.prop('disabled')) return;
+
+        $btn.prop('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-1"></i> Deleting...');
 
         $.ajax({
             url: 'add_patients.php',
             type: 'POST',
-            data: { 
-                action: 'delete_patient', 
-                patient_id: patientId 
+            data: {
+                action: 'delete_patient',
+                patient_id: patientId
             },
-            dataType: 'json',
-            success: function(res){
-                $('#deletePatientModal').modal('hide');
-                btn.prop('disabled', false).html('<i class="fas fa-trash me-1"></i> Delete');
+            dataType: 'json'
+        })
+        .done(function(res){
+            $('#deletePatientModal').modal('hide');
 
-                if(res.status === 'success'){
-                    $(`#patient-row-${patientId}`).fadeOut(300, function(){ $(this).remove(); });
-                    $('#page-alert').html(`
-                        <div class="alert alert-success alert-dismissible fade show border-0 shadow-sm" role="alert">
-                            <i class="fas fa-check-circle me-2"></i> ${res.message}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                    `);
-                } else {
-                    alert(res.message);
-                }
-            },
-            error: function(){
-                $('#deletePatientModal').modal('hide');
-                btn.prop('disabled', false).html('<i class="fas fa-trash me-1"></i> Delete');
-                alert('Error processing patient deletion.');
+            $btn.prop('disabled', false)
+                .html('<i class="fas fa-trash me-1"></i> Delete');
+
+            if (res.status === 'success') {
+                const $row = $('#patient-row-' + patientId);
+
+                $row.fadeOut(300, function(){
+                    $(this).remove();
+                });
+
+                $('#page-alert').html(`
+                    <div class="alert alert-success border-0 shadow-sm d-flex align-items-center" role="alert">
+                        <i class="fas fa-check-circle me-2"></i>
+                        <span>${escapeHtml(res.message)}</span>
+                    </div>
+                `);
+
+                showToast('success', 'Patient Deleted', res.message);
+            } else {
+                showToast('error', 'Deletion Failed', res.message);
             }
+        })
+        .fail(function(){
+            $('#deletePatientModal').modal('hide');
+
+            $btn.prop('disabled', false)
+                .html('<i class="fas fa-trash me-1"></i> Delete');
+
+            showToast('error', 'Connection Error', 'The patient could not be deleted. Please try again.');
         });
     });
 
+    /* =========================================================
+       LIVE PATIENT FILTERS
+       - Search updates after a short pause
+       - Select/date/limit update immediately
+       - No Filter button required
+       - Existing server-side filtering remains the source of truth
+    ========================================================= */
+    const $filterForm = $('#patientFilterForm');
+    const $filterCard = $filterForm.closest('.filter-card');
+    const $liveStatus = $('#filterLiveStatus');
+
+    let filterTimer = null;
+    let lastFilterUrl = window.location.href;
+
+    function buildFilterUrl() {
+        const params = new URLSearchParams();
+
+        $filterForm.serializeArray().forEach(function(item){
+            const value = String(item.value || '').trim();
+
+            if (value !== '') {
+                params.set(item.name, value);
+            }
+        });
+
+        const query = params.toString();
+        return 'add_patients.php' + (query ? '?' + query : '');
+    }
+
+    function updateFilters(immediate) {
+        clearTimeout(filterTimer);
+
+        const run = function(){
+            const url = buildFilterUrl();
+
+            if (url === lastFilterUrl.replace(window.location.origin + '/', '')) {
+                return;
+            }
+
+            lastFilterUrl = url;
+
+            $filterCard.addClass('is-loading');
+            $liveStatus.removeClass('d-none').addClass('d-flex');
+
+            window.location.href = url;
+        };
+
+        if (immediate) {
+            run();
+        } else {
+            filterTimer = setTimeout(run, 450);
+        }
+    }
+
+    // Text search: small debounce so every keystroke doesn't reload the page.
+    $filterForm.on('submit', function(e){ e.preventDefault(); updateFilters(true); });
+
+    $filterForm.find('input[name="search"]').on('input', function(){
+        $(this).addClass('live-filter-active');
+        updateFilters(false);
+    });
+
+    // Dropdowns and dates: update immediately when changed.
+    $filterForm.find('select, input[type="date"]').on('change', function(){
+        $(this).addClass('live-filter-active');
+        updateFilters(true);
+    });
+
+    // Enter in search applies immediately.
+    $filterForm.find('input[name="search"]').on('keydown', function(e){
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            updateFilters(true);
+        }
+    });
+
+    // Reset without a browser navigation confirmation.
+    $('#resetPatientFilters').on('click', function(){
+        window.location.href = 'add_patients.php';
+    });
+
+    // Make the page's quick emergency metric behave consistently.
+    $('.stat-card').closest('a[href*="priority=Yes"]').on('click', function(){
+        // Let the normal link navigation occur.
+    });
+
+    /* =========================================================
+       ACCESSIBILITY / UX
+    ========================================================= */
+    $('#editPatientModal').on('hidden.bs.modal', function(){
+        $('#editPatientForm')[0].reset();
+        $('#edit-form-message').empty();
+    });
+
+    $('#deletePatientModal').on('hidden.bs.modal', function(){
+        $('#delete_patient_id').val('');
+        $('#delete_patient_name').text('');
+    });
+
 });
+</script>
 </script>
 </body>
 </html>
