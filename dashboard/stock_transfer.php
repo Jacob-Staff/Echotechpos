@@ -44,6 +44,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } else {
         $conn->begin_transaction();
         try {
+            // Validate every selected product before creating the transfer.
+            $validated_items = [];
+            $seen_products = [];
+
+            foreach ($product_ids as $index => $raw_p_id) {
+                $p_id = (int)$raw_p_id;
+                $qty  = (int)($quantities[$index] ?? 0);
+
+                if ($p_id <= 0 || $qty <= 0) {
+                    continue;
+                }
+
+                // Do not allow the same product to be transferred twice in one request.
+                if (isset($seen_products[$p_id])) {
+                    throw new Exception("The same product cannot be added more than once to a transfer.");
+                }
+                $seen_products[$p_id] = true;
+
+                $stock_chk = $conn->prepare(
+                    "SELECT id, item_name, strength, quantity
+                     FROM store_items
+                     WHERE id = ? AND branch_id = ? AND pharmacy_id = ? AND is_active = 1
+                     LIMIT 1"
+                );
+                $stock_chk->bind_param("iii", $p_id, $branch_id, $pharmacy_id);
+                $stock_chk->execute();
+                $product = $stock_chk->get_result()->fetch_assoc();
+                $stock_chk->close();
+
+                if (!$product) {
+                    throw new Exception("One of the selected products is no longer available in this branch.");
+                }
+
+                if ($qty > (int)$product['quantity']) {
+                    throw new Exception(
+                        "Insufficient stock for " . $product['item_name'] .
+                        ". Available: " . (int)$product['quantity'] .
+                        ", requested: " . $qty . "."
+                    );
+                }
+
+                $validated_items[] = ['id' => $p_id, 'qty' => $qty];
+            }
+
+            if (empty($validated_items)) {
+                throw new Exception("Select at least one valid product with a quantity greater than zero.");
+            }
             $transfer_code = 'TRF-' . strtoupper(dechex(time())) . '-' . rand(100, 999);
             
             $stmt = $conn->prepare("INSERT INTO stock_transfers (pharmacy_id, from_branch_id, to_branch_id, transfer_code, status, requested_by, notes) VALUES (?, ?, ?, ?, 'pending', ?, ?)");
@@ -54,24 +101,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
             $item_stmt = $conn->prepare("INSERT INTO stock_transfer_items (transfer_id, from_product_id, quantity) VALUES (?, ?, ?)");
             
-            foreach ($product_ids as $index => $p_id) {
-                $p_id = (int)$p_id;
-                $qty  = (int)($quantities[$index] ?? 0);
+            foreach ($validated_items as $transfer_item) {
+                $p_id = $transfer_item['id'];
+                $qty  = $transfer_item['qty'];
 
-                if ($p_id > 0 && $qty > 0) {
-                    $stock_chk = $conn->prepare("SELECT quantity FROM store_items WHERE id = ? AND branch_id = ? AND pharmacy_id = ?");
-                    $stock_chk->bind_param("iii", $p_id, $branch_id, $pharmacy_id);
-                    $stock_chk->execute();
-                    $avail_stock = $stock_chk->get_result()->fetch_assoc()['quantity'] ?? 0;
-                    $stock_chk->close();
-
-                    if ($qty > $avail_stock) {
-                        throw new Exception("Requested quantity exceeds available stock for one or more selected items.");
-                    }
-
-                    $item_stmt->bind_param("iii", $transfer_id, $p_id, $qty);
-                    $item_stmt->execute();
-                }
+                $item_stmt->bind_param("iii", $transfer_id, $p_id, $qty);
+                $item_stmt->execute();
             }
             $item_stmt->close();
 
@@ -104,8 +139,12 @@ if (isset($_GET['action']) && in_array($_GET['action'], ['approve', 'reject']) &
                     $p_id = $item['from_product_id'];
                     $qty  = $item['quantity'];
 
-                    $deduct = $conn->prepare("UPDATE store_items SET quantity = quantity - ? WHERE id = ? AND pharmacy_id = ? AND quantity >= ?");
-                    $deduct->bind_param("iiii", $qty, $p_id, $pharmacy_id, $qty);
+                    $deduct = $conn->prepare(
+                        "UPDATE store_items
+                         SET quantity = quantity - ?
+                         WHERE id = ? AND pharmacy_id = ? AND branch_id = ? AND quantity >= ?"
+                    );
+                    $deduct->bind_param("iiiii", $qty, $p_id, $pharmacy_id, $transfer['from_branch_id'], $qty);
                     $deduct->execute();
 
                     if ($deduct->affected_rows === 0) {
@@ -168,11 +207,22 @@ if (isset($_GET['action']) && $_GET['action'] === 'receive') {
                     $add->close();
                 } else {
                     $ins = $conn->prepare("INSERT INTO store_items (pharmacy_id, branch_id, item_name, price, tax_rate, barcode, cost, category, is_service, description, quantity, strength, is_active, expiry_date, manufacturer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)");
-                    $ins->bind_param("iisddsssisisss", 
-                        $pharmacy_id, $branch_id, $item_name, $item['price'], 
-                        $item['tax_rate'], $item['barcode'], $item['cost'], 
-                        $item['category'], $item['is_service'], $item['description'], 
-                        $qty, $item['strength'], $item['expiry_date'], $item['manufacturer']
+                    $ins->bind_param(
+                        "iisddsdsiisiss",
+                        $pharmacy_id,
+                        $branch_id,
+                        $item_name,
+                        $item['price'],
+                        $item['tax_rate'],
+                        $item['barcode'],
+                        $item['cost'],
+                        $item['category'],
+                        $item['is_service'],
+                        $item['description'],
+                        $qty,
+                        $item['strength'],
+                        $item['expiry_date'],
+                        $item['manufacturer']
                     );
                     $ins->execute();
                     $target_product_id = $ins->insert_id;
@@ -240,14 +290,87 @@ require_once "../includes/head.php";
 <link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet" />
 
 <style>
-    .card-transfer { background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; }
-    .status-badge { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; padding: 5px 10px; border-radius: 20px; }
-    .status-pending { background-color: #fff3cd; color: #856404; }
-    .status-approved { background-color: #cce5ff; color: #004085; }
-    .status-received { background-color: #d4edda; color: #155724; }
-    .status-rejected { background-color: #f8d7da; color: #721c24; }
-    label { font-size: 0.8rem; font-weight: 700; color: #475569; margin-bottom: 5px; text-transform: uppercase; }
+    .card-transfer {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        overflow: hidden;
+    }
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: .72rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        padding: 6px 10px;
+        border-radius: 20px;
+        white-space: nowrap;
+    }
+    .status-pending { background: #fff7df; color: #8a6500; }
+    .status-approved { background: #eaf3ff; color: #075aa5; }
+    .status-received { background: #eaf8ef; color: #1d6b3d; }
+    .status-rejected { background: #fdf0f0; color: #9f3030; }
+    label {
+        font-size: .78rem;
+        font-weight: 700;
+        color: #475569;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+    }
     .select2-container { width: 100% !important; }
+    .transfer-table thead th {
+        font-size: .74rem;
+        text-transform: uppercase;
+        letter-spacing: .3px;
+        color: #64748b;
+        white-space: nowrap;
+    }
+    .transfer-code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-weight: 800;
+        color: #0f172a;
+    }
+    .route-arrow {
+        color: #94a3b8;
+        margin: 0 5px;
+    }
+    .record-count {
+        font-size: .75rem;
+        color: #64748b;
+    }
+    .empty-state {
+        padding: 45px 20px;
+        text-align: center;
+        color: #64748b;
+    }
+    .empty-state i {
+        font-size: 2rem;
+        color: #cbd5e1;
+        margin-bottom: 10px;
+    }
+    .modal-content {
+        border: 0;
+        border-radius: 14px;
+        overflow: hidden;
+    }
+    .transfer-item-row td { vertical-align: middle; }
+    .stock-hint {
+        display: block;
+        font-size: .7rem;
+        color: #64748b;
+        margin-top: 4px;
+    }
+    .duplicate-warning {
+        color: #b45309;
+        font-size: .75rem;
+        display: none;
+    }
+    @media (max-width: 767px) {
+        .transfer-table th:nth-child(3),
+        .transfer-table td:nth-child(3) { display: none; }
+        .page-wrapper .container-fluid { padding-left: 12px; padding-right: 12px; }
+    }
 </style>
 
 <div id="main-wrapper">
@@ -276,7 +399,10 @@ require_once "../includes/head.php";
                 <div class="card-header bg-white py-3">
                     <div class="row g-2 align-items-center">
                         <div class="col-md-4">
-                            <h5 class="mb-0 fw-bold text-dark"><i class="fas fa-list me-2 text-secondary"></i> Transfer Records</h5>
+                            <div>
+                                <h5 class="mb-0 fw-bold text-dark"><i class="fas fa-list me-2 text-secondary"></i> Transfer Records</h5>
+                                <span class="record-count" id="recordCount">Showing all records</span>
+                            </div>
                         </div>
                         <div class="col-md-5">
                             <div class="input-group">
@@ -300,7 +426,7 @@ require_once "../includes/head.php";
 
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0" id="transfersTable">
+                        <table class="table table-hover align-middle mb-0 transfer-table" id="transfersTable">
                             <thead class="table-light">
                                 <tr>
                                     <th>Transfer Code</th>
@@ -323,6 +449,15 @@ require_once "../includes/head.php";
                                             <td><?= htmlspecialchars($row['requester'] ?? 'N/A') ?></td>
                                             <td>
                                                 <span class="status-badge status-<?= htmlspecialchars($row['status']) ?>">
+                                                    <?php
+                                                        $status_icon = [
+                                                            'pending' => 'fa-clock',
+                                                            'approved' => 'fa-truck',
+                                                            'received' => 'fa-check-circle',
+                                                            'rejected' => 'fa-times-circle'
+                                                        ][$row['status']] ?? 'fa-circle';
+                                                    ?>
+                                                    <i class="fas <?= $status_icon ?>"></i>
                                                     <?= ucfirst(htmlspecialchars($row['status'])) ?>
                                                 </span>
                                             </td>
@@ -330,16 +465,16 @@ require_once "../includes/head.php";
                                             <td class="text-end">
                                                 <?php if ($row['status'] === 'pending' && $is_admin): ?>
                                                     <a href="?action=approve&id=<?= $row['id'] ?>" class="btn btn-sm btn-success me-1" onclick="return confirm('Approve this transfer and deduct stock from source branch?')">
-                                                        <i class="fas fa-check"></i> Approve
+                                                        <i class="fas fa-check me-1"></i> Approve
                                                     </a>
                                                     <a href="?action=reject&id=<?= $row['id'] ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Reject this stock transfer request?')">
-                                                        <i class="fas fa-times"></i> Reject
+                                                        <i class="fas fa-times me-1"></i> Reject
                                                     </a>
                                                 <?php endif; ?>
 
                                                 <?php if ($row['status'] === 'approved' && $row['to_branch_id'] == $branch_id): ?>
                                                     <a href="?action=receive&id=<?= $row['id'] ?>" class="btn btn-sm btn-primary" onclick="return confirm('Confirm receipt of stock into branch inventory?')">
-                                                        <i class="fas fa-boxes"></i> Reconcile & Receive
+                                                        <i class="fas fa-boxes me-1"></i> Receive Stock
                                                     </a>
                                                 <?php endif; ?>
                                             </td>
@@ -418,7 +553,8 @@ require_once "../includes/head.php";
                                     </select>
                                 </td>
                                 <td>
-                                    <input type="number" name="quantities[]" class="form-control" min="1" value="1" required>
+                                    <input type="number" name="quantities[]" class="form-control quantity-input" min="1" value="1" required>
+                                    <span class="stock-hint">Select a product</span>
                                 </td>
                                 <td class="text-center">
                                     <button type="button" class="btn btn-outline-danger btn-sm remove-row"><i class="fas fa-trash"></i></button>
@@ -445,63 +581,249 @@ require_once "../includes/head.php";
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
 <script>
-    $(document).ready(function() {
-        // Initialize Select2 Live Search on product dropdowns
-        function initSelect2(element) {
-            $(element).select2({
-                theme: 'bootstrap-5',
-                dropdownParent: $('#newTransferModal'),
-                placeholder: '-- Search & Select Product --',
-                allowClear: true
+$(document).ready(function () {
+    const modal = $('#newTransferModal');
+
+    function initSelect2(element) {
+        $(element).select2({
+            theme: 'bootstrap-5',
+            dropdownParent: modal,
+            placeholder: '-- Search & Select Product --',
+            allowClear: true,
+            width: '100%'
+        });
+    }
+
+    function refreshRowStock(row) {
+        const select = row.find('.product-select');
+        const qty = row.find('.quantity-input');
+        const hint = row.find('.stock-hint');
+        const option = select.find('option:selected');
+        const stock = parseInt(option.data('stock'), 10) || 0;
+
+        if (select.val()) {
+            hint.text('Available stock: ' + stock);
+            qty.attr('max', stock);
+
+            if (parseInt(qty.val(), 10) > stock) {
+                qty.val(stock > 0 ? stock : 1);
+            }
+        } else {
+            hint.text('Select a product');
+            qty.removeAttr('max');
+        }
+    }
+
+    function selectedProductIds() {
+        const ids = [];
+        $('.product-select').each(function () {
+            const value = $(this).val();
+            if (value) ids.push(String(value));
+        });
+        return ids;
+    }
+
+    function updateDuplicateWarnings() {
+        const counts = {};
+        $('.product-select').each(function () {
+            const value = $(this).val();
+            if (value) counts[value] = (counts[value] || 0) + 1;
+        });
+
+        $('.product-select').each(function () {
+            const row = $(this).closest('tr');
+            const value = $(this).val();
+
+            row.find('.duplicate-warning').remove();
+
+            if (value && counts[value] > 1) {
+                row.find('td:first').append(
+                    '<span class="duplicate-warning d-block">This product is already selected.</span>'
+                );
+            }
+        });
+    }
+
+    initSelect2('.product-select');
+
+    $(document).on('change', '.product-select', function () {
+        refreshRowStock($(this).closest('tr'));
+        updateDuplicateWarnings();
+    });
+
+    $(document).on('input', '.quantity-input', function () {
+        const max = parseInt($(this).attr('max'), 10);
+
+        if (Number.isFinite(max) && max > 0 && parseInt(this.value, 10) > max) {
+            this.value = max;
+        }
+
+        if (parseInt(this.value, 10) < 1 || !this.value) {
+            this.value = 1;
+        }
+    });
+
+    $('#addRowBtn').click(function () {
+        const firstRow = $('#transferItemsTable tbody tr:first');
+
+        firstRow.find('.product-select').select2('destroy');
+
+        const row = firstRow.clone(false);
+        row.find('select').val('');
+        row.find('input.quantity-input').val('1').removeAttr('max');
+        row.find('.stock-hint').text('Select a product');
+        row.find('.duplicate-warning').remove();
+
+        $('#transferItemsTable tbody').append(row);
+
+        $('.product-select').each(function () {
+            initSelect2(this);
+        });
+
+        updateDuplicateWarnings();
+    });
+
+    $(document).on('click', '.remove-row', function () {
+        const rows = $('#transferItemsTable tbody tr');
+
+        if (rows.length > 1) {
+            $(this).closest('tr').remove();
+        } else {
+            const row = $(this).closest('tr');
+            row.find('.product-select').val(null).trigger('change');
+            row.find('.quantity-input').val(1);
+        }
+
+        updateDuplicateWarnings();
+    });
+
+    $('#transferForm').on('submit', function (event) {
+        event.preventDefault();
+
+        const destination = $('select[name="to_branch_id"]').val();
+        const ids = selectedProductIds();
+        let valid = true;
+        let errorMessage = '';
+
+        if (!destination) {
+            valid = false;
+            errorMessage = 'Please select a destination branch.';
+        }
+
+        if (valid && ids.length === 0) {
+            valid = false;
+            errorMessage = 'Please select at least one product.';
+        }
+
+        if (valid && new Set(ids).size !== ids.length) {
+            valid = false;
+            errorMessage = 'The same product cannot be added more than once.';
+            updateDuplicateWarnings();
+        }
+
+        if (valid) {
+            $('.transfer-item-row, #transferItemsTable tbody tr').each(function () {
+                const row = $(this);
+                const product = row.find('.product-select').val();
+                const qty = parseInt(row.find('.quantity-input').val(), 10) || 0;
+                const max = parseInt(row.find('.quantity-input').attr('max'), 10);
+
+                if (product && qty < 1) {
+                    valid = false;
+                    errorMessage = 'Every selected item must have a quantity of at least 1.';
+                    return false;
+                }
+
+                if (product && Number.isFinite(max) && qty > max) {
+                    valid = false;
+                    errorMessage = 'A transfer quantity exceeds the available stock.';
+                    return false;
+                }
             });
         }
 
-        // Initialize for first row
-        initSelect2('.product-select');
+        if (!valid) {
+            showTransferNotice(errorMessage, 'danger');
+            return;
+        }
 
-        // Add new item row dynamically
-        $('#addRowBtn').click(function() {
-            // Destroy Select2 on template row before cloning
-            $('.product-select').select2('destroy');
+        const button = $(this).find('button[type="submit"]');
+        button.prop('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-1"></i> Submitting...');
 
-            let row = $('#transferItemsTable tbody tr:first').clone();
-            row.find('input').val('1');
-            row.find('select').val('');
-            $('#transferItemsTable tbody').append(row);
-
-            // Re-initialize Select2 on all rows
-            $('.product-select').each(function() {
-                initSelect2(this);
-            });
-        });
-
-        // Remove row
-        $(document).on('click', '.remove-row', function() {
-            if ($('#transferItemsTable tbody tr').length > 1) {
-                $(this).closest('tr').remove();
-            }
-        });
-
-        // Live Search Filter for Table Records
-        $('#recordSearch').on('keyup', function() {
-            let value = $(this).val().toLowerCase();
-            let visibleRows = 0;
-
-            $('#transfersTable tbody tr').not('#noResultsRow').filter(function() {
-                let isMatch = $(this).text().toLowerCase().indexOf(value) > -1;
-                $(this).toggle(isMatch);
-                if (isMatch) visibleRows++;
-            });
-
-            if (visibleRows === 0) {
-                if ($('#noSearchMatch').length === 0) {
-                    $('#transfersTable tbody').append('<tr id="noSearchMatch"><td colspan="6" class="text-center py-4 text-muted">No matching transfer records found.</td></tr>');
-                }
-            } else {
-                $('#noSearchMatch').remove();
-            }
-        });
+        this.submit();
     });
+
+    function showTransferNotice(message, type) {
+        const existing = $('#transferClientNotice');
+        if (existing.length) existing.remove();
+
+        $('#transferForm .modal-body').prepend(
+            '<div id="transferClientNotice" class="alert alert-' + type +
+            ' py-2 mb-3"><i class="fas fa-info-circle me-1"></i>' +
+            $('<div>').text(message).html() + '</div>'
+        );
+    }
+
+    $('#recordSearch').on('input', function () {
+        const value = $(this).val().trim().toLowerCase();
+        let visibleRows = 0;
+        const rows = $('#transfersTable tbody tr').not('#noResultsRow, #noSearchMatch');
+
+        rows.each(function () {
+            const match = !value || $(this).text().toLowerCase().indexOf(value) !== -1;
+            $(this).toggle(match);
+            if (match) visibleRows++;
+        });
+
+        $('#noSearchMatch').remove();
+
+        if (rows.length > 0 && visibleRows === 0) {
+            $('#transfersTable tbody').append(
+                '<tr id="noSearchMatch"><td colspan="6" class="text-center py-4 text-muted">' +
+                '<i class="fas fa-search me-1"></i>No matching transfer records found.</td></tr>'
+            );
+        }
+
+        $('#recordCount').text(
+            value
+                ? 'Showing ' + visibleRows + ' matching record' + (visibleRows === 1 ? '' : 's')
+                : 'Showing ' + rows.length + ' record' + (rows.length === 1 ? '' : 's')
+        );
+    });
+
+    // Confirm destructive/state-changing actions and prevent double-clicks.
+    $(document).on('click', 'a[href*="action=approve"], a[href*="action=reject"], a[href*="action=receive"]', function (event) {
+        const link = $(this);
+
+        if (link.data('confirmed')) return;
+
+        let question = 'Continue with this stock transfer action?';
+
+        if (link.attr('href').indexOf('action=approve') !== -1) {
+            question = 'Approve this transfer? Stock will be deducted from the source branch.';
+        } else if (link.attr('href').indexOf('action=reject') !== -1) {
+            question = 'Reject this stock transfer request?';
+        } else if (link.attr('href').indexOf('action=receive') !== -1) {
+            question = 'Confirm that the stock has physically arrived at this branch?';
+        }
+
+        if (!window.confirm(question)) {
+            event.preventDefault();
+            return false;
+        }
+
+        link.data('confirmed', true);
+        link.addClass('disabled').css('pointer-events', 'none');
+    });
+
+    // Initial stock hints.
+    $('.product-select').each(function () {
+        refreshRowStock($(this).closest('tr'));
+    });
+
+    $('#recordSearch').trigger('input');
+});
 </script>
 </body>
 </html>
