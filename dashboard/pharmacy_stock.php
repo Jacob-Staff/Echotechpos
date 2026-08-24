@@ -1,32 +1,32 @@
 <?php
-declare(strict_types=1);
-
 /**
  * ============================================================
  * PHARMANOVA POS
- * PHARMACY STOCK â€” CONSOLIDATED VERSION
+ * PHARMACY STOCK â€” FINAL CONSOLIDATED PAGE
  * ============================================================
  *
- * ONE FILE ONLY:
- *   dashboard/pharmacy_stock.php
- *
- * This page intentionally displays ONLY stock that has value:
+ * This page displays ONLY stock with current value:
  *   - quantity > 0
  *   - selling price > 0
  *   - not expired
- *   - active products
  *
- * Expired and out-of-stock products remain on their dedicated
- * pages and are therefore NOT displayed here.
+ * Expired and out-of-stock products are intentionally excluded
+ * because they have their own dedicated pages.
  *
- * The search, filtering, deletion and stock summary logic are
- * handled in this file. No fetch_products.php or
- * delete_product_inc.php dependency is required.
+ * Uses the existing EchoTech POS:
+ *   - includes/conn.php
+ *   - includes/auth.php
+ *   - includes/head.php
+ *   - includes/header.php
+ *   - includes/aside.php
+ *   - includes/footer.php
+ *
+ * No fetch_products.php dependency.
+ * No delete_product_inc.php dependency.
  * ============================================================
  */
 
 ini_set('display_errors', '0');
-ini_set('display_startup_errors', '0');
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -38,304 +38,173 @@ require_once "../includes/auth.php";
 
 date_default_timezone_set('Africa/Lusaka');
 
+/* Require the normal POS session. */
+if (function_exists('require_login')) {
+    require_login();
+}
+
 $pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
 $branch_id   = (int)($_SESSION['branch_id'] ?? 0);
-$user_id     = (int)($_SESSION['user_id'] ?? 0);
 
 if ($pharmacy_id <= 0 || $branch_id <= 0) {
-    header("Location: ../index.php?error=session_expired");
+    header("Location: /login_inc.php?error=session_expired");
     exit;
 }
 
-/* ============================================================
-   HELPERS
-============================================================ */
+$today = date('Y-m-d');
+$search = trim((string)($_GET['search'] ?? ''));
+$category = trim((string)($_GET['category'] ?? ''));
+$stock_filter = trim((string)($_GET['stock'] ?? 'all'));
+$expiry_filter = trim((string)($_GET['expiry'] ?? 'all'));
 
-function stock_json(array $payload, int $status = 200): never
+$page = max(1, (int)($_GET['page'] ?? 1));
+$per_page = 25;
+
+/* Small local helpers with unique names to avoid collisions. */
+function ps_h($value): string
+{
+    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
+function ps_money($value): string
+{
+    return 'K ' . number_format((float)$value, 2);
+}
+
+function ps_json(array $data, int $status = 200): never
 {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
-
-    echo json_encode(
-        $payload,
-        JSON_UNESCAPED_UNICODE |
-        JSON_UNESCAPED_SLASHES
-    );
-
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
-function h(mixed $value): string
-{
-    return htmlspecialchars(
-        (string)$value,
-        ENT_QUOTES,
-        'UTF-8'
-    );
-}
-
-function money(float $amount): string
-{
-    return 'K ' . number_format($amount, 2);
-}
-
 /* ============================================================
-   CONSOLIDATED AJAX ACTIONS
-============================================================ */
+   CONSOLIDATED ACTIONS
+   ============================================================ */
 
-$action = trim(
-    (string)($_POST['action'] ?? $_GET['action'] ?? '')
-);
+$action = trim((string)($_POST['action'] ?? $_GET['action'] ?? ''));
 
-/*
- * DELETE PRODUCT
- *
- * This deliberately uses pharmacy + branch restrictions so one
- * tenant cannot delete another tenant's stock.
- */
 if ($action === 'delete') {
 
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        stock_json([
-            'status'  => 'error',
-            'message' => 'Invalid request method.'
-        ], 405);
+        ps_json(['status' => 'error', 'message' => 'Invalid request method.'], 405);
     }
 
     $product_id = (int)($_POST['id'] ?? 0);
 
     if ($product_id <= 0) {
-        stock_json([
-            'status'  => 'error',
-            'message' => 'Invalid product.'
-        ], 422);
+        ps_json(['status' => 'error', 'message' => 'Invalid product.'], 422);
     }
 
-    $stmt = $conn->prepare("
-        SELECT id, item_name, quantity
-        FROM store_items
-        WHERE id = ?
-          AND pharmacy_id = ?
-          AND branch_id = ?
-        LIMIT 1
-    ");
+    try {
+        $stmt = $conn->prepare("
+            DELETE FROM store_items
+            WHERE id = ?
+              AND pharmacy_id = ?
+              AND branch_id = ?
+            LIMIT 1
+        ");
 
-    if (!$stmt) {
-        stock_json([
-            'status'  => 'error',
-            'message' => 'Unable to prepare product lookup.'
-        ], 500);
-    }
+        $stmt->bind_param("iii", $product_id, $pharmacy_id, $branch_id);
+        $stmt->execute();
 
-    $stmt->bind_param(
-        "iii",
-        $product_id,
-        $pharmacy_id,
-        $branch_id
-    );
+        if ($stmt->affected_rows !== 1) {
+            $stmt->close();
+            ps_json([
+                'status' => 'error',
+                'message' => 'Product was not found in this branch.'
+            ], 404);
+        }
 
-    $stmt->execute();
-
-    $result = $stmt->get_result();
-    $product = $result->fetch_assoc();
-
-    $stmt->close();
-
-    if (!$product) {
-        stock_json([
-            'status'  => 'error',
-            'message' => 'Product not found or access denied.'
-        ], 404);
-    }
-
-    /*
-     * Keep deletion intentionally explicit.
-     * This is a hard delete, matching the existing page's
-     * behaviour, but it remains tenant-scoped.
-     */
-    $stmt = $conn->prepare("
-        DELETE FROM store_items
-        WHERE id = ?
-          AND pharmacy_id = ?
-          AND branch_id = ?
-        LIMIT 1
-    ");
-
-    if (!$stmt) {
-        stock_json([
-            'status'  => 'error',
-            'message' => 'Unable to prepare product deletion.'
-        ], 500);
-    }
-
-    $stmt->bind_param(
-        "iii",
-        $product_id,
-        $pharmacy_id,
-        $branch_id
-    );
-
-    if (!$stmt->execute()) {
-        $error = $stmt->error;
         $stmt->close();
 
-        error_log(
-            "PHARMACY STOCK DELETE: " . $error
-        );
+        ps_json([
+            'status' => 'success',
+            'message' => 'Product deleted successfully.'
+        ]);
 
-        stock_json([
-            'status'  => 'error',
+    } catch (Throwable $e) {
+        error_log('PHARMACY STOCK DELETE: ' . $e->getMessage());
+
+        ps_json([
+            'status' => 'error',
             'message' => 'Unable to delete the product.'
         ], 500);
     }
-
-    $affected = $stmt->affected_rows;
-    $stmt->close();
-
-    if ($affected !== 1) {
-        stock_json([
-            'status'  => 'error',
-            'message' => 'Product was not deleted.'
-        ], 500);
-    }
-
-    stock_json([
-        'status'  => 'success',
-        'message' => 'Product deleted successfully.',
-        'id'      => $product_id
-    ]);
 }
-
-/* ============================================================
-   UPDATE STOCK QUANTITY
- *
- * Optional consolidated quick-adjust action.
- * It adjusts the current quantity without creating another file.
-============================================================ */
 
 if ($action === 'adjust_stock') {
 
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        stock_json([
-            'status'  => 'error',
-            'message' => 'Invalid request method.'
-        ], 405);
+        ps_json(['status' => 'error', 'message' => 'Invalid request method.'], 405);
     }
 
     $product_id = (int)($_POST['id'] ?? 0);
-    $new_qty    = filter_var(
-        $_POST['quantity'] ?? null,
-        FILTER_VALIDATE_INT
-    );
+    $new_qty = filter_var($_POST['quantity'] ?? null, FILTER_VALIDATE_INT);
 
-    if (
-        $product_id <= 0 ||
-        $new_qty === false ||
-        $new_qty < 0
-    ) {
-        stock_json([
-            'status'  => 'error',
+    if ($product_id <= 0 || $new_qty === false || $new_qty < 0) {
+        ps_json([
+            'status' => 'error',
             'message' => 'Enter a valid stock quantity.'
         ], 422);
     }
 
-    $stmt = $conn->prepare("
-        UPDATE store_items
-        SET quantity = ?
-        WHERE id = ?
-          AND pharmacy_id = ?
-          AND branch_id = ?
-        LIMIT 1
-    ");
+    try {
+        $stmt = $conn->prepare("
+            UPDATE store_items
+            SET quantity = ?
+            WHERE id = ?
+              AND pharmacy_id = ?
+              AND branch_id = ?
+            LIMIT 1
+        ");
 
-    if (!$stmt) {
-        stock_json([
-            'status'  => 'error',
-            'message' => 'Unable to prepare stock update.'
-        ], 500);
-    }
+        $stmt->bind_param(
+            "iiii",
+            $new_qty,
+            $product_id,
+            $pharmacy_id,
+            $branch_id
+        );
 
-    $stmt->bind_param(
-        "iiii",
-        $new_qty,
-        $product_id,
-        $pharmacy_id,
-        $branch_id
-    );
-
-    if (!$stmt->execute()) {
+        $stmt->execute();
         $stmt->close();
 
-        stock_json([
-            'status'  => 'error',
+        ps_json([
+            'status' => 'success',
+            'message' => 'Stock quantity updated.',
+            'quantity' => $new_qty
+        ]);
+
+    } catch (Throwable $e) {
+        error_log('PHARMACY STOCK ADJUST: ' . $e->getMessage());
+
+        ps_json([
+            'status' => 'error',
             'message' => 'Unable to update stock quantity.'
         ], 500);
     }
-
-    $stmt->close();
-
-    stock_json([
-        'status'   => 'success',
-        'message'  => 'Stock quantity updated.',
-        'quantity' => $new_qty
-    ]);
 }
 
 /* ============================================================
-   PAGE DATA
-============================================================ */
+   CATEGORIES
+   ============================================================ */
 
-$current_date = date('Y-m-d');
-
-/*
- * Search/filter values.
- */
-$search = trim(
-    (string)($_GET['search'] ?? '')
-);
-
-$category_filter = trim(
-    (string)($_GET['category'] ?? '')
-);
-
-$stock_filter = trim(
-    (string)($_GET['stock'] ?? 'all')
-);
-
-$expiry_filter = trim(
-    (string)($_GET['expiry'] ?? 'all')
-);
-
-$page = max(
-    1,
-    (int)($_GET['page'] ?? 1)
-);
-
-$per_page = 20;
-
-/*
- * Categories for the filter.
- */
 $categories = [];
 
-$stmt = $conn->prepare("
-    SELECT DISTINCT category
-    FROM store_items
-    WHERE pharmacy_id = ?
-      AND branch_id = ?
-      AND category IS NOT NULL
-      AND category <> ''
-    ORDER BY category ASC
-");
+try {
+    $stmt = $conn->prepare("
+        SELECT DISTINCT category
+        FROM store_items
+        WHERE pharmacy_id = ?
+          AND branch_id = ?
+          AND category IS NOT NULL
+          AND category <> ''
+        ORDER BY category ASC
+    ");
 
-if ($stmt) {
-
-    $stmt->bind_param(
-        "ii",
-        $pharmacy_id,
-        $branch_id
-    );
-
+    $stmt->bind_param("ii", $pharmacy_id, $branch_id);
     $stmt->execute();
 
     $result = $stmt->get_result();
@@ -345,22 +214,19 @@ if ($stmt) {
     }
 
     $stmt->close();
+
+} catch (Throwable $e) {
+    error_log('PHARMACY STOCK CATEGORIES: ' . $e->getMessage());
 }
 
 /* ============================================================
-   BASE DISPLAY CONDITION
- *
- * Pharmacy Stock is intentionally ONLY:
- *   quantity > 0
- *   price > 0
- *   active
- *   not expired
-============================================================ */
+   FILTER CONDITIONS
+   Only known fields from the existing store_items usage are used.
+   ============================================================ */
 
 $where = [
     "si.pharmacy_id = ?",
     "si.branch_id = ?",
-    "si.is_active = 1",
     "si.quantity > 0",
     "si.price > 0",
     "(
@@ -370,83 +236,46 @@ $where = [
     )"
 ];
 
-$params = [
-    $pharmacy_id,
-    $branch_id,
-    $current_date
-];
-
+$params = [$pharmacy_id, $branch_id, $today];
 $types = "iis";
 
-/* ============================================================
-   SEARCH
-============================================================ */
-
 if ($search !== '') {
+    $where[] = "(
+        si.item_name LIKE ?
+        OR si.barcode LIKE ?
+        OR si.category LIKE ?
+        OR si.strength LIKE ?
+    )";
 
-    $where[] = "
-        (
-            si.item_name LIKE ?
-            OR si.barcode LIKE ?
-        )
-    ";
+    $like = '%' . $search . '%';
 
-    $search_like = '%' . $search . '%';
+    $params[] = $like;
+    $params[] = $like;
+    $params[] = $like;
+    $params[] = $like;
 
-    $params[] = $search_like;
-    $params[] = $search_like;
-
-    $types .= "ss";
+    $types .= "ssss";
 }
 
-/* ============================================================
-   CATEGORY
-============================================================ */
-
-if ($category_filter !== '') {
-
+if ($category !== '') {
     $where[] = "si.category = ?";
-
-    $params[] = $category_filter;
-
+    $params[] = $category;
     $types .= "s";
 }
 
-/* ============================================================
-   STOCK FILTER
- *
- * Low stock = 10 or fewer.
- * Healthy = more than 10.
-============================================================ */
-
 if ($stock_filter === 'low') {
-
     $where[] = "si.quantity BETWEEN 1 AND 10";
-
 } elseif ($stock_filter === 'healthy') {
-
     $where[] = "si.quantity > 10";
 }
 
-/* ============================================================
-   EXPIRY FILTER
-============================================================ */
-
 if ($expiry_filter === 'no_expiry') {
-
-    $where[] = "
-        (
-            si.expiry_date IS NULL
-            OR si.expiry_date = '0000-00-00'
-        )
-    ";
-
+    $where[] = "(
+        si.expiry_date IS NULL
+        OR si.expiry_date = '0000-00-00'
+    )";
 } elseif ($expiry_filter === 'soon') {
-
-    $expiry_limit = date(
-        'Y-m-d',
-        strtotime('+90 days')
-    );
+    $expiry_limit = date('Y-m-d', strtotime('+90 days'));
 
     $where[] = "
         si.expiry_date IS NOT NULL
@@ -454,538 +283,374 @@ if ($expiry_filter === 'no_expiry') {
         AND si.expiry_date BETWEEN ? AND ?
     ";
 
-    $params[] = $current_date;
+    $params[] = $today;
     $params[] = $expiry_limit;
-
     $types .= "ss";
 }
 
-/* ============================================================
-   WHERE SQL
-============================================================ */
-
-$where_sql = implode(
-    " AND ",
-    $where
-);
+$where_sql = implode(" AND ", $where);
 
 /* ============================================================
-   GLOBAL STOCK SUMMARY
- *
- * These figures are for the same valid stock pool:
- * active + quantity > 0 + price > 0 + not expired.
-============================================================ */
-
-$summary_sql = "
-    SELECT
-        COUNT(*) AS product_count,
-        COALESCE(SUM(quantity), 0) AS unit_count,
-        COALESCE(SUM(price * quantity), 0) AS selling_value,
-        COALESCE(SUM(COALESCE(cost, 0) * quantity), 0) AS cost_value,
-        COALESCE(
-            SUM(
-                CASE
-                    WHEN quantity BETWEEN 1 AND 10
-                    THEN 1
-                    ELSE 0
-                END
-            ),
-            0
-        ) AS low_stock_count,
-        COALESCE(
-            SUM(
-                CASE
-                    WHEN expiry_date IS NOT NULL
-                     AND expiry_date <> '0000-00-00'
-                     AND expiry_date <= DATE_ADD(?, INTERVAL 90 DAY)
-                    THEN 1
-                    ELSE 0
-                END
-            ),
-            0
-        ) AS expiring_soon_count
-    FROM store_items
-    WHERE pharmacy_id = ?
-      AND branch_id = ?
-      AND is_active = 1
-      AND quantity > 0
-      AND price > 0
-      AND (
-          expiry_date IS NULL
-          OR expiry_date = '0000-00-00'
-          OR expiry_date >= ?
-      )
-";
+   SUMMARY
+   ============================================================ */
 
 $summary = [
-    'product_count'      => 0,
-    'unit_count'         => 0,
-    'selling_value'      => 0,
-    'cost_value'         => 0,
-    'low_stock_count'    => 0,
-    'expiring_soon_count'=> 0
+    'product_count' => 0,
+    'unit_count' => 0,
+    'selling_value' => 0,
+    'low_stock_count' => 0,
+    'expiring_soon_count' => 0
 ];
 
-$stmt = $conn->prepare($summary_sql);
+try {
+    $summary_stmt = $conn->prepare("
+        SELECT
+            COUNT(*) AS product_count,
+            COALESCE(SUM(quantity), 0) AS unit_count,
+            COALESCE(SUM(price * quantity), 0) AS selling_value,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN quantity BETWEEN 1 AND 10 THEN 1
+                        ELSE 0
+                    END
+                ), 0
+            ) AS low_stock_count,
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN expiry_date IS NOT NULL
+                         AND expiry_date <> '0000-00-00'
+                         AND expiry_date BETWEEN ? AND DATE_ADD(?, INTERVAL 90 DAY)
+                        THEN 1
+                        ELSE 0
+                    END
+                ), 0
+            ) AS expiring_soon_count
+        FROM store_items
+        WHERE pharmacy_id = ?
+          AND branch_id = ?
+          AND quantity > 0
+          AND price > 0
+          AND (
+              expiry_date IS NULL
+              OR expiry_date = '0000-00-00'
+              OR expiry_date >= ?
+          )
+    ");
 
-if ($stmt) {
-
-    $stmt->bind_param(
-        "siis",
-        $current_date,
+    $summary_stmt->bind_param(
+        "ssiii",
+        $today,
+        $today,
         $pharmacy_id,
         $branch_id,
-        $current_date
+        $today
     );
 
-    if ($stmt->execute()) {
+    $summary_stmt->execute();
+    $summary_result = $summary_stmt->get_result();
 
-        $result = $stmt->get_result();
-
-        if ($row = $result->fetch_assoc()) {
-            $summary = $row;
-        }
+    if ($summary_row = $summary_result->fetch_assoc()) {
+        $summary = $summary_row;
     }
 
-    $stmt->close();
+    $summary_stmt->close();
+
+} catch (Throwable $e) {
+    error_log('PHARMACY STOCK SUMMARY: ' . $e->getMessage());
 }
 
 /* ============================================================
-   FILTERED COUNT
-============================================================ */
-
-$count_sql = "
-    SELECT COUNT(*) AS total
-    FROM store_items si
-    WHERE {$where_sql}
-";
-
-$stmt = $conn->prepare($count_sql);
+   TOTAL FILTERED RECORDS
+   ============================================================ */
 
 $total_records = 0;
 
-if ($stmt) {
+try {
+    $count_stmt = $conn->prepare("
+        SELECT COUNT(*) AS total
+        FROM store_items si
+        WHERE {$where_sql}
+    ");
 
-    $stmt->bind_param(
-        $types,
-        ...$params
-    );
+    $count_stmt->bind_param($types, ...$params);
+    $count_stmt->execute();
 
-    if ($stmt->execute()) {
+    $count_result = $count_stmt->get_result();
 
-        $result = $stmt->get_result();
-
-        if ($row = $result->fetch_assoc()) {
-            $total_records = (int)$row['total'];
-        }
+    if ($count_row = $count_result->fetch_assoc()) {
+        $total_records = (int)$count_row['total'];
     }
 
-    $stmt->close();
+    $count_stmt->close();
+
+} catch (Throwable $e) {
+    error_log('PHARMACY STOCK COUNT: ' . $e->getMessage());
 }
 
-$total_pages = max(
-    1,
-    (int)ceil(
-        $total_records / $per_page
-    )
-);
+$total_pages = max(1, (int)ceil($total_records / $per_page));
 
 if ($page > $total_pages) {
     $page = $total_pages;
 }
 
-$offset = (
-    $page - 1
-) * $per_page;
+$offset = ($page - 1) * $per_page;
 
 /* ============================================================
-   FILTERED STOCK QUERY
-============================================================ */
-
-$sql = "
-    SELECT
-        si.id,
-        si.item_name,
-        si.barcode,
-        si.category,
-        si.price,
-        si.cost,
-        si.quantity,
-        si.expiry_date,
-        si.image_path AS image,
-        si.is_active
-    FROM store_items si
-    WHERE {$where_sql}
-    ORDER BY
-        si.item_name ASC,
-        si.id DESC
-    LIMIT ?, ?
-";
-
-$params_with_limit = $params;
-$params_with_limit[] = $offset;
-$params_with_limit[] = $per_page;
-
-$types_with_limit = $types . "ii";
+   STOCK ROWS
+   ============================================================ */
 
 $stock_rows = [];
 
-$stmt = $conn->prepare($sql);
+try {
+    $stock_sql = "
+        SELECT
+            si.id,
+            si.item_name,
+            si.barcode,
+            si.category,
+            si.strength,
+            si.price,
+            si.quantity,
+            si.expiry_date
+        FROM store_items si
+        WHERE {$where_sql}
+        ORDER BY si.item_name ASC, si.id DESC
+        LIMIT ?, ?
+    ";
 
-if ($stmt) {
+    $stock_params = $params;
+    $stock_params[] = $offset;
+    $stock_params[] = $per_page;
 
-    $stmt->bind_param(
-        $types_with_limit,
-        ...$params_with_limit
-    );
+    $stock_types = $types . "ii";
 
-    if ($stmt->execute()) {
+    $stock_stmt = $conn->prepare($stock_sql);
+    $stock_stmt->bind_param($stock_types, ...$stock_params);
+    $stock_stmt->execute();
 
-        $result = $stmt->get_result();
+    $stock_result = $stock_stmt->get_result();
 
-        while ($row = $result->fetch_assoc()) {
-            $stock_rows[] = $row;
-        }
+    while ($row = $stock_result->fetch_assoc()) {
+        $stock_rows[] = $row;
     }
 
-    $stmt->close();
+    $stock_stmt->close();
+
+} catch (Throwable $e) {
+    error_log('PHARMACY STOCK ROWS: ' . $e->getMessage());
 }
 
-/* ============================================================
-   DISPLAY DETAILS
-============================================================ */
+/* Existing header already knows the current pharmacy/branch. */
+$pharmacy_name = (string)(
+    $_SESSION['pharmacy_name']
+    ?? $_SESSION['pharmacyName']
+    ?? 'PHARMACY'
+);
 
-$branch_name = "Our Branch";
-
-$stmt = $conn->prepare("
-    SELECT branch_name
-    FROM branches
-    WHERE id = ?
-      AND pharmacy_id = ?
-    LIMIT 1
-");
-
-if ($stmt) {
-
-    $stmt->bind_param(
-        "ii",
-        $branch_id,
-        $pharmacy_id
-    );
-
-    $stmt->execute();
-
-    $result = $stmt->get_result();
-
-    if ($row = $result->fetch_assoc()) {
-        $branch_name = $row['branch_name'];
-    }
-
-    $stmt->close();
-}
-
-$pharmacy_name = "PHARMACY";
-
-$stmt = $conn->prepare("
-    SELECT name
-    FROM pharmacies
-    WHERE id = ?
-    LIMIT 1
-");
-
-if ($stmt) {
-
-    $stmt->bind_param(
-        "i",
-        $pharmacy_id
-    );
-
-    $stmt->execute();
-
-    $result = $stmt->get_result();
-
-    if ($row = $result->fetch_assoc()) {
-        $pharmacy_name = $row['name'];
-    }
-
-    $stmt->close();
-}
+$branch_name = (string)(
+    $_SESSION['branch_name']
+    ?? $_SESSION['branchName']
+    ?? 'Main Branch'
+);
 
 require_once "../includes/head.php";
 ?>
 
 <style>
-/* ============================================================
-   PHARMACY STOCK UI
-============================================================ */
-
 :root {
-    --stock-blue: #1677ff;
-    --stock-dark: #33475b;
-    --stock-green: #198754;
-    --stock-orange: #ff9800;
-    --stock-red: #dc3545;
-    --stock-bg: #f1f4f8;
-    --stock-border: #e1e7ef;
+    --ps-blue: #4299cf;
+    --ps-dark: #3e4f60;
+    --ps-green: #198754;
+    --ps-orange: #f17808;
+    --ps-red: #c90d1b;
+    --ps-bg: #f4f6f9;
+    --ps-border: #dfe6ee;
 }
 
-.stock-page {
-    min-height: calc(100vh - 70px);
-    background: var(--stock-bg);
-    padding: 18px;
+.pharmacy-stock-page {
+    background: var(--ps-bg);
+    min-height: calc(100vh - 60px);
+    padding: 15px;
 }
 
-.stock-shell {
+.ps-shell {
     max-width: 1600px;
     margin: 0 auto;
 }
 
-.stock-card {
+.ps-card {
     background: #fff;
-    border: 1px solid var(--stock-border);
-    border-radius: 12px;
-    box-shadow: 0 3px 12px rgba(25, 45, 70, .05);
+    border: 1px solid var(--ps-border);
+    border-radius: 10px;
+    box-shadow: 0 2px 7px rgba(31, 48, 67, .05);
 }
 
-.stock-heading {
-    padding: 16px 18px;
-}
-
-.stock-heading-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
-    background: #eaf3ff;
-    color: var(--stock-blue);
+.ps-title-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
+    background: #e8f3fb;
+    color: var(--ps-blue);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 21px;
+    font-size: 20px;
 }
 
-.stock-kpi {
-    min-height: 118px;
+.ps-kpi {
+    min-height: 112px;
     color: #fff;
     border: 0;
-    position: relative;
     overflow: hidden;
+    position: relative;
 }
 
-.stock-kpi-blue {
-    background: #4299cf;
-}
+.ps-blue { background: linear-gradient(180deg, #449cd5, #3586ba); }
+.ps-dark { background: #3f4d5b; }
+.ps-green { background: #198754; }
+.ps-orange { background: linear-gradient(180deg, #f17808, #ca1818); }
 
-.stock-kpi-dark {
-    background: #3e4f60;
-}
-
-.stock-kpi-green {
-    background: #198754;
-}
-
-.stock-kpi-orange {
-    background: linear-gradient(
-        135deg,
-        #ff9800,
-        #ef6c00
-    );
-}
-
-.stock-kpi-red {
-    background: #dc3545;
-}
-
-.stock-kpi-label {
+.ps-kpi-label {
     font-size: 10px;
     font-weight: 800;
+    letter-spacing: .5px;
     text-transform: uppercase;
-    letter-spacing: .55px;
-    opacity: .88;
+    opacity: .9;
 }
 
-.stock-kpi-value {
+.ps-kpi-value {
     font-size: 24px;
     font-weight: 800;
-    margin-top: 5px;
+    margin-top: 4px;
 }
 
-.stock-kpi-icon {
-    width: 43px;
-    height: 43px;
+.ps-kpi-icon {
+    width: 42px;
+    height: 42px;
     border-radius: 11px;
-    background: rgba(255, 255, 255, .18);
+    background: rgba(255,255,255,.18);
     display: flex;
     align-items: center;
     justify-content: center;
+    font-size: 17px;
 }
 
-.stock-filter {
-    padding: 16px;
+.ps-filter {
+    padding: 15px;
 }
 
-.stock-label {
+.ps-label {
     font-size: 10px;
     font-weight: 800;
-    color: #657487;
+    color: #637286;
     text-transform: uppercase;
     letter-spacing: .35px;
     margin-bottom: 6px;
 }
 
-.form-control,
-.form-select {
-    min-height: 40px;
-    border-color: #d7e0ea;
-    border-radius: 7px;
-}
-
-.form-control:focus,
-.form-select:focus {
-    border-color: var(--stock-blue);
-    box-shadow: 0 0 0 .18rem rgba(22, 119, 255, .10);
-}
-
-.stock-table {
+.ps-table {
     margin-bottom: 0;
 }
 
-.stock-table thead th {
+.ps-table thead th {
     background: #f8fafc;
-    color: #68778a;
+    color: #637286;
     font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: .35px;
     font-weight: 800;
+    letter-spacing: .35px;
+    text-transform: uppercase;
     white-space: nowrap;
     padding: 12px;
+    border-bottom: 1px solid var(--ps-border);
 }
 
-.stock-table tbody td {
+.ps-table tbody td {
     padding: 12px;
     vertical-align: middle;
 }
 
-.product-name {
+.ps-product {
     font-weight: 800;
     color: #26364a;
 }
 
-.product-barcode {
+.ps-sub {
+    color: #8793a2;
     font-size: 11px;
-    color: #8a96a5;
 }
 
-.category-badge {
-    background: #f4f7fa;
-    border: 1px solid #e1e7ef;
-    color: #526174;
-    font-weight: 700;
-}
-
-.quantity-badge {
-    min-width: 54px;
+.ps-qty {
+    min-width: 50px;
     display: inline-block;
+    padding: 5px 9px;
+    border-radius: 6px;
     text-align: center;
-    padding: 6px 10px;
-    border-radius: 7px;
     font-weight: 800;
 }
 
-.quantity-good {
-    background: #d1e7dd;
-    color: #0f5132;
-}
-
-.quantity-low {
+.ps-qty-low {
     background: #fff3cd;
     color: #856404;
 }
 
-.expiry-normal {
-    color: #526174;
-    font-size: 12px;
+.ps-qty-good {
+    background: #d1e7dd;
+    color: #0f5132;
 }
 
-.expiry-soon {
-    color: #c76a00;
-    font-weight: 800;
-}
-
-.stock-empty-filter {
+.ps-empty {
     padding: 55px 20px;
     text-align: center;
-    color: #7b8795;
+    color: #7c8998;
 }
 
-.stock-empty-filter i {
+.ps-empty i {
+    display: block;
     font-size: 38px;
-    opacity: .35;
-    margin-bottom: 12px;
+    opacity: .3;
+    margin-bottom: 10px;
 }
 
-.pagination .page-link {
-    border-radius: 6px;
-    margin: 0 2px;
-    border-color: #dbe3ed;
-}
-
-.pagination .page-item.active .page-link {
-    background: var(--stock-blue);
-    border-color: var(--stock-blue);
-}
-
-.modal-content {
-    border: 0;
-    border-radius: 14px;
-}
-
-.modal-confirm-icon {
+.ps-modal-icon {
     width: 62px;
     height: 62px;
     border-radius: 50%;
+    background: #fff0f1;
+    color: var(--ps-red);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: #fff0f1;
-    color: var(--stock-red);
     font-size: 24px;
 }
 
 @media (max-width: 768px) {
-    .stock-page {
+    .pharmacy-stock-page {
         padding: 10px;
     }
 
-    .stock-kpi-value {
+    .ps-kpi-value {
         font-size: 21px;
-    }
-
-    .stock-heading {
-        padding: 13px;
     }
 }
 
 @media print {
-    #header,
-    #aside,
-    nav,
-    footer,
-    .no-print {
+    .no-print,
+    .topbar,
+    .left-sidebar,
+    footer {
         display: none !important;
     }
 
-    .stock-page {
+    .pharmacy-stock-page {
+        margin: 0 !important;
         padding: 0 !important;
         background: #fff !important;
     }
 
-    .stock-card {
+    .ps-card {
         box-shadow: none !important;
-        border: 1px solid #ddd !important;
-    }
-
-    .stock-table {
-        font-size: 10px;
     }
 }
 </style>
@@ -1002,979 +667,536 @@ if (file_exists("../includes/aside.php")) {
 }
 ?>
 
-<main class="page-wrapper stock-page">
+<main class="page-wrapper pharmacy-stock-page">
+<div class="ps-shell">
 
-<div class="stock-shell">
-
-    <!-- ======================================================
-         PAGE HEADER
-    ======================================================= -->
-
-    <div class="stock-card stock-heading mb-3
-                d-flex flex-column flex-lg-row
-                justify-content-between
-                align-items-lg-center gap-3">
+    <!-- PAGE HEADER -->
+    <div class="ps-card p-3 mb-3 d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
 
         <div class="d-flex align-items-center gap-3">
-
-            <div class="stock-heading-icon">
+            <div class="ps-title-icon">
                 <i class="fas fa-boxes"></i>
             </div>
 
             <div>
-
-                <h3 class="mb-1 fw-bold">
-                    Pharmacy Stock
-                </h3>
+                <h3 class="mb-1 fw-bold">Pharmacy Stock</h3>
 
                 <div class="small text-muted">
-
-                    <strong>
-                        <?= h(strtoupper($pharmacy_name)) ?>
-                    </strong>
-
+                    <strong><?= ps_h(strtoupper($pharmacy_name)) ?></strong>
                     <span class="mx-1">â€¢</span>
-
-                    <?= h($branch_name) ?>
-
+                    <?= ps_h($branch_name) ?>
                 </div>
 
+                <div class="small text-muted mt-1">
+                    Showing only products with available stock value.
+                </div>
             </div>
-
         </div>
 
         <div class="no-print">
-
-            <a
-                href="update_items_stock.php"
-                class="btn btn-outline-dark fw-bold me-1"
-            >
+            <a href="update_items_stock.php" class="btn btn-outline-dark fw-bold me-1">
                 <i class="fas fa-truck-loading me-1"></i>
                 Restock
             </a>
 
-            <a
-                href="add_product.php"
-                class="btn btn-success fw-bold"
-            >
+            <a href="add_product.php" class="btn btn-success fw-bold me-1">
                 <i class="fas fa-plus me-1"></i>
                 New Product
             </a>
 
-            <button
-                type="button"
-                class="btn btn-outline-primary fw-bold ms-1"
-                onclick="window.print()"
-            >
+            <button type="button" class="btn btn-outline-primary fw-bold" onclick="window.print()">
                 <i class="fas fa-print me-1"></i>
                 Print
             </button>
-
         </div>
-
     </div>
 
-
-    <!-- ======================================================
-         KPI CARDS
-    ======================================================= -->
-
+    <!-- KPI CARDS -->
     <div class="row g-3 mb-3">
 
         <div class="col-12 col-md-6 col-xl-3">
-
-            <div class="stock-card stock-kpi stock-kpi-blue p-3">
-
+            <div class="ps-card ps-kpi ps-blue p-3">
                 <div class="d-flex justify-content-between">
-
                     <div>
-
-                        <div class="stock-kpi-label">
-                            Products In Stock
-                        </div>
-
-                        <div class="stock-kpi-value">
+                        <div class="ps-kpi-label">Products In Stock</div>
+                        <div class="ps-kpi-value">
                             <?= number_format((int)$summary['product_count']) ?>
                         </div>
-
-                        <small>
-                            Active products with value
-                        </small>
-
+                        <small>Products with value</small>
                     </div>
 
-                    <div class="stock-kpi-icon">
+                    <div class="ps-kpi-icon">
                         <i class="fas fa-pills"></i>
                     </div>
-
                 </div>
-
             </div>
-
         </div>
 
-
         <div class="col-12 col-md-6 col-xl-3">
-
-            <div class="stock-card stock-kpi stock-kpi-dark p-3">
-
+            <div class="ps-card ps-kpi ps-dark p-3">
                 <div class="d-flex justify-content-between">
-
                     <div>
-
-                        <div class="stock-kpi-label">
-                            Units In Stock
-                        </div>
-
-                        <div class="stock-kpi-value">
+                        <div class="ps-kpi-label">Units In Stock</div>
+                        <div class="ps-kpi-value">
                             <?= number_format((int)$summary['unit_count']) ?>
                         </div>
-
-                        <small>
-                            Available units
-                        </small>
-
+                        <small>Available units</small>
                     </div>
 
-                    <div class="stock-kpi-icon">
+                    <div class="ps-kpi-icon">
                         <i class="fas fa-layer-group"></i>
                     </div>
-
                 </div>
-
             </div>
-
         </div>
 
-
         <div class="col-12 col-md-6 col-xl-3">
-
-            <div class="stock-card stock-kpi stock-kpi-green p-3">
-
+            <div class="ps-card ps-kpi ps-green p-3">
                 <div class="d-flex justify-content-between">
-
                     <div>
-
-                        <div class="stock-kpi-label">
-                            Selling Value
+                        <div class="ps-kpi-label">Selling Value</div>
+                        <div class="ps-kpi-value">
+                            <?= ps_money($summary['selling_value']) ?>
                         </div>
-
-                        <div class="stock-kpi-value">
-                            <?= money((float)$summary['selling_value']) ?>
-                        </div>
-
-                        <small>
-                            Current branch stock
-                        </small>
-
+                        <small>Current branch stock</small>
                     </div>
 
-                    <div class="stock-kpi-icon">
+                    <div class="ps-kpi-icon">
                         <i class="fas fa-money-bill-wave"></i>
                     </div>
-
                 </div>
-
             </div>
-
         </div>
-
 
         <div class="col-12 col-md-6 col-xl-3">
-
-            <div class="stock-card stock-kpi stock-kpi-orange p-3">
-
+            <div class="ps-card ps-kpi ps-orange p-3">
                 <div class="d-flex justify-content-between">
-
                     <div>
-
-                        <div class="stock-kpi-label">
-                            Cost Value
-                        </div>
-
-                        <div class="stock-kpi-value">
-                            <?= money((float)$summary['cost_value']) ?>
-                        </div>
-
-                        <small>
-                            Estimated acquisition value
-                        </small>
-
-                    </div>
-
-                    <div class="stock-kpi-icon">
-                        <i class="fas fa-calculator"></i>
-                    </div>
-
-                </div>
-
-            </div>
-
-        </div>
-
-    </div>
-
-
-    <!-- ======================================================
-         SECONDARY STOCK INDICATORS
-    ======================================================= -->
-
-    <div class="row g-3 mb-3">
-
-        <div class="col-12 col-md-6">
-
-            <div class="stock-card p-3">
-
-                <div class="d-flex justify-content-between align-items-center">
-
-                    <div>
-                        <div class="text-muted small">
-                            Low Stock
-                        </div>
-
-                        <div class="fw-bold fs-5 text-warning">
+                        <div class="ps-kpi-label">Low Stock</div>
+                        <div class="ps-kpi-value">
                             <?= number_format((int)$summary['low_stock_count']) ?>
                         </div>
+                        <small>10 or fewer units</small>
                     </div>
 
-                    <div class="text-warning fs-4">
+                    <div class="ps-kpi-icon">
                         <i class="fas fa-exclamation-triangle"></i>
                     </div>
-
                 </div>
-
-                <div class="small text-muted mt-1">
-                    Products with 10 or fewer units.
-                </div>
-
             </div>
-
-        </div>
-
-
-        <div class="col-12 col-md-6">
-
-            <div class="stock-card p-3">
-
-                <div class="d-flex justify-content-between align-items-center">
-
-                    <div>
-                        <div class="text-muted small">
-                            Expiring Within 90 Days
-                        </div>
-
-                        <div class="fw-bold fs-5 text-danger">
-                            <?= number_format((int)$summary['expiring_soon_count']) ?>
-                        </div>
-                    </div>
-
-                    <div class="text-danger fs-4">
-                        <i class="fas fa-calendar-times"></i>
-                    </div>
-
-                </div>
-
-                <div class="small text-muted mt-1">
-                    Still displayed here because they have stock value.
-                </div>
-
-            </div>
-
         </div>
 
     </div>
 
-
-    <!-- ======================================================
-         FILTERS
-    ======================================================= -->
-
-    <div class="stock-card stock-filter mb-3 no-print">
-
-        <form
-            method="GET"
-            action="pharmacy_stock.php"
-            id="stock-filter-form"
-        >
+    <!-- FILTERS -->
+    <div class="ps-card ps-filter mb-3 no-print">
+        <form method="GET" action="pharmacy_stock.php" id="stock-filter-form">
 
             <div class="row g-3 align-items-end">
 
                 <div class="col-12 col-lg-4">
-
-                    <label class="stock-label">
-                        Search Product
-                    </label>
+                    <label class="ps-label">Search Product</label>
 
                     <div class="input-group">
-
                         <span class="input-group-text bg-white">
                             <i class="fas fa-search text-muted"></i>
                         </span>
 
                         <input
-                            type="text"
+                            type="search"
+                            class="form-control"
                             name="search"
                             id="stock-search"
-                            class="form-control"
-                            value="<?= h($search) ?>"
-                            placeholder="Product name or barcode..."
+                            value="<?= ps_h($search) ?>"
+                            placeholder="Name, barcode, category or strength..."
                         >
-
                     </div>
-
                 </div>
 
-
                 <div class="col-12 col-md-4 col-lg-2">
+                    <label class="ps-label">Category</label>
 
-                    <label class="stock-label">
-                        Category
-                    </label>
+                    <select name="category" class="form-select">
+                        <option value="">All Categories</option>
 
-                    <select
-                        name="category"
-                        class="form-select"
-                    >
-
-                        <option value="">
-                            All Categories
-                        </option>
-
-                        <?php foreach ($categories as $category): ?>
-
+                        <?php foreach ($categories as $cat): ?>
                             <option
-                                value="<?= h($category) ?>"
-                                <?= $category_filter === $category ? 'selected' : '' ?>
+                                value="<?= ps_h($cat) ?>"
+                                <?= $category === $cat ? 'selected' : '' ?>
                             >
-                                <?= h($category) ?>
+                                <?= ps_h($cat) ?>
                             </option>
-
                         <?php endforeach; ?>
-
                     </select>
-
                 </div>
 
-
                 <div class="col-12 col-md-4 col-lg-2">
+                    <label class="ps-label">Stock Level</label>
 
-                    <label class="stock-label">
-                        Stock Level
-                    </label>
-
-                    <select
-                        name="stock"
-                        class="form-select"
-                    >
-
-                        <option value="all"
-                            <?= $stock_filter === 'all' ? 'selected' : '' ?>>
+                    <select name="stock" class="form-select">
+                        <option value="all" <?= $stock_filter === 'all' ? 'selected' : '' ?>>
                             All Stock
                         </option>
 
-                        <option value="low"
-                            <?= $stock_filter === 'low' ? 'selected' : '' ?>>
+                        <option value="low" <?= $stock_filter === 'low' ? 'selected' : '' ?>>
                             Low Stock
                         </option>
 
-                        <option value="healthy"
-                            <?= $stock_filter === 'healthy' ? 'selected' : '' ?>>
+                        <option value="healthy" <?= $stock_filter === 'healthy' ? 'selected' : '' ?>>
                             Healthy Stock
                         </option>
-
                     </select>
-
                 </div>
 
-
                 <div class="col-12 col-md-4 col-lg-2">
+                    <label class="ps-label">Expiry</label>
 
-                    <label class="stock-label">
-                        Expiry
-                    </label>
-
-                    <select
-                        name="expiry"
-                        class="form-select"
-                    >
-
-                        <option value="all"
-                            <?= $expiry_filter === 'all' ? 'selected' : '' ?>>
-                            All
+                    <select name="expiry" class="form-select">
+                        <option value="all" <?= $expiry_filter === 'all' ? 'selected' : '' ?>>
+                            All Valid
                         </option>
 
-                        <option value="soon"
-                            <?= $expiry_filter === 'soon' ? 'selected' : '' ?>>
-                            Within 90 Days
-                        </option>
-
-                        <option value="no_expiry"
-                            <?= $expiry_filter === 'no_expiry' ? 'selected' : '' ?>>
+                        <option value="no_expiry" <?= $expiry_filter === 'no_expiry' ? 'selected' : '' ?>>
                             No Expiry
                         </option>
 
+                        <option value="soon" <?= $expiry_filter === 'soon' ? 'selected' : '' ?>>
+                            Within 90 Days
+                        </option>
                     </select>
-
                 </div>
 
-
-                <div class="col-12 col-lg-2 d-flex gap-2">
-
-                    <button
-                        type="submit"
-                        class="btn btn-primary fw-bold flex-fill"
-                    >
+                <div class="col-12 col-lg-2">
+                    <button type="submit" class="btn btn-primary w-100 fw-bold">
                         <i class="fas fa-filter me-1"></i>
-                        Filter
+                        Apply
                     </button>
-
-                    <a
-                        href="pharmacy_stock.php"
-                        class="btn btn-light border fw-bold"
-                        title="Reset"
-                    >
-                        <i class="fas fa-redo"></i>
-                    </a>
-
                 </div>
 
             </div>
+
+            <?php if ($search !== '' || $category !== '' || $stock_filter !== 'all' || $expiry_filter !== 'all'): ?>
+                <div class="mt-2">
+                    <a href="pharmacy_stock.php" class="small text-decoration-none">
+                        <i class="fas fa-times me-1"></i>
+                        Clear filters
+                    </a>
+                </div>
+            <?php endif; ?>
 
         </form>
-
     </div>
 
+    <!-- STOCK TABLE -->
+    <div class="ps-card overflow-hidden">
 
-    <!-- ======================================================
-         TABLE
-    ======================================================= -->
+        <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
+            <div>
+                <h5 class="mb-1 fw-bold">
+                    <i class="fas fa-clipboard-list text-primary me-2"></i>
+                    Available Stock
+                </h5>
 
-    <div class="stock-card">
-
-        <div class="p-3 border-bottom">
-
-            <div class="d-flex flex-column flex-md-row
-                        justify-content-between
-                        align-items-md-center gap-2">
-
-                <div>
-
-                    <h5 class="fw-bold mb-1">
-                        Live Stock
-                    </h5>
-
-                    <small class="text-muted">
-                        Showing only active, non-expired products
-                        with quantity and selling value.
-                    </small>
-
+                <div class="small text-muted">
+                    <?= number_format($total_records) ?> product(s) found
                 </div>
-
-                <span class="badge bg-light text-primary border">
-                    <?= number_format($total_records) ?> product(s)
-                </span>
-
             </div>
 
+            <div class="small text-muted">
+                Page <?= $page ?> of <?= $total_pages ?>
+            </div>
         </div>
 
-
         <div class="table-responsive">
-
-            <table class="table stock-table align-middle">
+            <table class="table ps-table align-middle">
 
                 <thead>
-
                     <tr>
-
                         <th>#</th>
-
-                        <th>
-                            Product
-                        </th>
-
-                        <th>
-                            Barcode
-                        </th>
-
-                        <th>
-                            Category
-                        </th>
-
-                        <th>
-                            Cost
-                        </th>
-
-                        <th>
-                            Selling Price
-                        </th>
-
-                        <th>
-                            Quantity
-                        </th>
-
-                        <th>
-                            Stock Value
-                        </th>
-
-                        <th>
-                            Expiry
-                        </th>
-
-                        <th class="text-end no-print">
-                            Action
-                        </th>
-
+                        <th>Product</th>
+                        <th>Barcode</th>
+                        <th>Category</th>
+                        <th>Unit Price</th>
+                        <th>Quantity</th>
+                        <th>Stock Value</th>
+                        <th>Expiry</th>
+                        <th class="text-end no-print">Action</th>
                     </tr>
-
                 </thead>
 
+                <tbody>
 
-                <tbody id="stock-table-body">
+                <?php if (!empty($stock_rows)): ?>
 
-                <?php if (count($stock_rows) > 0): ?>
+                    <?php $sn = $offset + 1; ?>
 
-                    <?php
+                    <?php foreach ($stock_rows as $row): ?>
 
-                    $sn = $offset + 1;
-
-                    foreach ($stock_rows as $row):
-
+                        <?php
+                        $qty = (int)$row['quantity'];
                         $price = (float)$row['price'];
-                        $cost  = (float)($row['cost'] ?? 0);
-                        $qty   = (int)$row['quantity'];
+                        $stock_value = $qty * $price;
 
-                        $stock_value =
-                            $price * $qty;
+                        $expiry = $row['expiry_date'] ?? null;
+                        $has_expiry = !empty($expiry) && $expiry !== '0000-00-00';
 
-                        $expiry = $row['expiry_date'];
+                        $days_to_expiry = null;
+                        $expiry_soon = false;
 
-                        $has_expiry =
-                            !empty($expiry) &&
-                            $expiry !== '0000-00-00';
+                        if ($has_expiry) {
+                            $expiry_timestamp = strtotime($expiry);
 
-                        $expiry_timestamp =
-                            $has_expiry
-                                ? strtotime($expiry)
-                                : false;
+                            if ($expiry_timestamp !== false) {
+                                $days_to_expiry = (int)floor(
+                                    ($expiry_timestamp - strtotime($today)) / 86400
+                                );
 
-                        $days_to_expiry =
-                            $expiry_timestamp !== false
-                                ? (int)floor(
-                                    (
-                                        $expiry_timestamp -
-                                        strtotime($current_date)
-                                    ) / 86400
-                                )
-                                : null;
+                                $expiry_soon =
+                                    $days_to_expiry >= 0 &&
+                                    $days_to_expiry <= 90;
+                            }
+                        }
+                        ?>
 
-                        $low_stock =
-                            $qty <= 10;
+                        <tr data-product-id="<?= (int)$row['id'] ?>">
 
-                        $expiry_soon =
-                            $days_to_expiry !== null &&
-                            $days_to_expiry >= 0 &&
-                            $days_to_expiry <= 90;
+                            <td class="text-muted">
+                                <?= $sn++ ?>
+                            </td>
 
-                    ?>
+                            <td>
+                                <div class="ps-product">
+                                    <?= ps_h($row['item_name']) ?>
 
-                    <tr
-                        data-product-id="<?= (int)$row['id'] ?>"
-                    >
-
-                        <td class="text-muted">
-                            <?= $sn++ ?>
-                        </td>
-
-
-                        <td>
-
-                            <div class="product-name">
-                                <?= h($row['item_name']) ?>
-                            </div>
-
-                            <?php if (!empty($row['image'])): ?>
-
-                                <small class="text-muted">
-                                    <i class="fas fa-image me-1"></i>
-                                    Image available
-                                </small>
-
-                            <?php endif; ?>
-
-                        </td>
-
-
-                        <td>
-
-                            <?php if (!empty($row['barcode'])): ?>
-
-                                <span class="product-barcode">
-                                    <?= h($row['barcode']) ?>
-                                </span>
-
-                            <?php else: ?>
-
-                                <span class="text-muted">
-                                    â€”
-                                </span>
-
-                            <?php endif; ?>
-
-                        </td>
-
-
-                        <td>
-
-                            <span class="badge category-badge">
-                                <?= h($row['category'] ?: 'Medicine') ?>
-                            </span>
-
-                        </td>
-
-
-                        <td class="fw-semibold">
-
-                            <?= money($cost) ?>
-
-                        </td>
-
-
-                        <td class="fw-bold">
-
-                            <?= money($price) ?>
-
-                        </td>
-
-
-                        <td>
-
-                            <span class="quantity-badge
-                                <?= $low_stock
-                                    ? 'quantity-low'
-                                    : 'quantity-good'
-                                ?>"
-                            >
-                                <?= number_format($qty) ?>
-                            </span>
-
-                        </td>
-
-
-                        <td class="fw-bold text-success">
-
-                            <?= money($stock_value) ?>
-
-                        </td>
-
-
-                        <td>
-
-                            <?php if ($has_expiry): ?>
-
-                                <div class="
-                                    <?= $expiry_soon
-                                        ? 'expiry-soon'
-                                        : 'expiry-normal'
-                                    ?>
-                                ">
-
-                                    <?= h(
-                                        date(
-                                            'd M Y',
-                                            $expiry_timestamp
-                                        )
-                                    ) ?>
-
+                                    <?php if (!empty($row['strength'])): ?>
+                                        <span class="ps-sub">
+                                            (<?= ps_h($row['strength']) ?>)
+                                        </span>
+                                    <?php endif; ?>
                                 </div>
+                            </td>
 
-                                <?php if ($expiry_soon): ?>
+                            <td>
+                                <?php if (!empty($row['barcode'])): ?>
+                                    <span class="ps-sub">
+                                        <?= ps_h($row['barcode']) ?>
+                                    </span>
+                                <?php else: ?>
+                                    <span class="text-muted">â€”</span>
+                                <?php endif; ?>
+                            </td>
 
-                                    <small class="text-warning fw-bold">
-                                        <i class="fas fa-clock me-1"></i>
-                                        <?= $days_to_expiry ?> days
-                                    </small>
+                            <td>
+                                <span class="badge bg-light text-dark border">
+                                    <?= ps_h($row['category'] ?: 'Medicine') ?>
+                                </span>
+                            </td>
+
+                            <td class="fw-bold">
+                                <?= ps_money($price) ?>
+                            </td>
+
+                            <td>
+                                <span class="ps-qty <?= $qty <= 10 ? 'ps-qty-low' : 'ps-qty-good' ?>">
+                                    <?= number_format($qty) ?>
+                                </span>
+                            </td>
+
+                            <td class="fw-bold text-success">
+                                <?= ps_money($stock_value) ?>
+                            </td>
+
+                            <td>
+                                <?php if ($has_expiry): ?>
+
+                                    <div class="<?= $expiry_soon ? 'text-warning fw-bold' : 'text-muted' ?>">
+                                        <?= ps_h(date('d M Y', strtotime($expiry))) ?>
+                                    </div>
+
+                                    <?php if ($expiry_soon && $days_to_expiry !== null): ?>
+                                        <small class="text-warning fw-bold">
+                                            <i class="fas fa-clock me-1"></i>
+                                            <?= $days_to_expiry ?> days
+                                        </small>
+                                    <?php endif; ?>
+
+                                <?php else: ?>
+
+                                    <span class="text-muted">No expiry</span>
 
                                 <?php endif; ?>
+                            </td>
 
-                            <?php else: ?>
+                            <td class="text-end no-print">
 
-                                <span class="text-muted">
-                                    No expiry
-                                </span>
+                                <a
+                                    href="update_product.php?id=<?= (int)$row['id'] ?>"
+                                    class="btn btn-sm btn-outline-primary"
+                                    title="Edit Product"
+                                >
+                                    <i class="fas fa-pen"></i>
+                                </a>
 
-                            <?php endif; ?>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-success adjust-stock-btn"
+                                    data-id="<?= (int)$row['id'] ?>"
+                                    data-name="<?= ps_h($row['item_name']) ?>"
+                                    data-qty="<?= $qty ?>"
+                                    title="Adjust Quantity"
+                                >
+                                    <i class="fas fa-boxes"></i>
+                                </button>
 
-                        </td>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-danger delete-stock-btn"
+                                    data-id="<?= (int)$row['id'] ?>"
+                                    data-name="<?= ps_h($row['item_name']) ?>"
+                                    title="Delete Product"
+                                >
+                                    <i class="fas fa-trash"></i>
+                                </button>
 
+                            </td>
 
-                        <td class="text-end no-print">
-
-                            <a
-                                href="update_product.php?id=<?= (int)$row['id'] ?>"
-                                class="btn btn-sm btn-outline-primary"
-                                title="Edit Product"
-                            >
-                                <i class="fas fa-pen"></i>
-                            </a>
-
-
-                            <button
-                                type="button"
-                                class="btn btn-sm btn-outline-success adjust-stock-btn"
-                                data-id="<?= (int)$row['id'] ?>"
-                                data-name="<?= h($row['item_name']) ?>"
-                                data-qty="<?= $qty ?>"
-                                title="Adjust Quantity"
-                            >
-                                <i class="fas fa-boxes"></i>
-                            </button>
-
-
-                            <button
-                                type="button"
-                                class="btn btn-sm btn-outline-danger delete-stock-btn"
-                                data-id="<?= (int)$row['id'] ?>"
-                                data-name="<?= h($row['item_name']) ?>"
-                                title="Delete Product"
-                            >
-                                <i class="fas fa-trash"></i>
-                            </button>
-
-                        </td>
-
-                    </tr>
+                        </tr>
 
                     <?php endforeach; ?>
 
                 <?php else: ?>
 
                     <tr>
+                        <td colspan="9" class="ps-empty">
 
-                        <td
-                            colspan="10"
-                            class="stock-empty-filter"
-                        >
+                            <i class="fas fa-box-open"></i>
 
-                            <i class="fas fa-box-open d-block"></i>
-
-                            <strong>
+                            <strong class="d-block">
                                 No stock products found
                             </strong>
 
                             <div class="small mt-1">
-                                Expired and out-of-stock products
-                                are intentionally excluded from this page.
+                                Expired and out-of-stock products are intentionally
+                                excluded from Pharmacy Stock.
                             </div>
 
                         </td>
-
                     </tr>
 
                 <?php endif; ?>
 
                 </tbody>
-
             </table>
-
         </div>
 
-
-        <!-- ==================================================
-             PAGINATION
-        =================================================== -->
-
+        <!-- PAGINATION -->
         <?php if ($total_pages > 1): ?>
 
             <div class="p-3 border-top no-print">
 
                 <nav>
-
-                    <ul class="pagination
-                               justify-content-center
-                               mb-0">
+                    <ul class="pagination justify-content-center mb-0">
 
                         <?php
-
-                        $query_base = [
-                            'search'   => $search,
-                            'category' => $category_filter,
-                            'stock'    => $stock_filter,
-                            'expiry'   => $expiry_filter
+                        $base_query = [
+                            'search' => $search,
+                            'category' => $category,
+                            'stock' => $stock_filter,
+                            'expiry' => $expiry_filter
                         ];
-
                         ?>
 
                         <?php if ($page > 1): ?>
 
                             <?php
-
-                            $query_base['page'] =
-                                $page - 1;
-
+                            $base_query['page'] = $page - 1;
                             ?>
 
                             <li class="page-item">
-
-                                <a
-                                    class="page-link"
-                                    href="?<?= h(http_build_query($query_base)) ?>"
-                                >
+                                <a class="page-link" href="?<?= ps_h(http_build_query($base_query)) ?>">
                                     <i class="fas fa-chevron-left"></i>
                                 </a>
-
                             </li>
 
                         <?php endif; ?>
 
-
                         <?php
-
-                        $start_page =
-                            max(
-                                1,
-                                $page - 2
-                            );
-
-                        $end_page =
-                            min(
-                                $total_pages,
-                                $page + 2
-                            );
-
-                        for (
-                            $i = $start_page;
-                            $i <= $end_page;
-                            $i++
-                        ):
-
-                            $query_base['page'] = $i;
-
+                        $start_page = max(1, $page - 2);
+                        $end_page = min($total_pages, $page + 2);
                         ?>
 
-                            <li
-                                class="page-item
-                                    <?= $i === $page
-                                        ? 'active'
-                                        : ''
-                                    ?>"
-                            >
+                        <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
 
-                                <a
-                                    class="page-link"
-                                    href="?<?= h(http_build_query($query_base)) ?>"
-                                >
+                            <?php
+                            $base_query['page'] = $i;
+                            ?>
+
+                            <li class="page-item <?= $i === $page ? 'active' : '' ?>">
+                                <a class="page-link" href="?<?= ps_h(http_build_query($base_query)) ?>">
                                     <?= $i ?>
                                 </a>
-
                             </li>
 
                         <?php endfor; ?>
 
-
                         <?php if ($page < $total_pages): ?>
 
                             <?php
-
-                            $query_base['page'] =
-                                $page + 1;
-
+                            $base_query['page'] = $page + 1;
                             ?>
 
                             <li class="page-item">
-
-                                <a
-                                    class="page-link"
-                                    href="?<?= h(http_build_query($query_base)) ?>"
-                                >
+                                <a class="page-link" href="?<?= ps_h(http_build_query($base_query)) ?>">
                                     <i class="fas fa-chevron-right"></i>
                                 </a>
-
                             </li>
 
                         <?php endif; ?>
 
                     </ul>
-
                 </nav>
 
             </div>
 
         <?php endif; ?>
 
-
-        <!-- ==================================================
-             FOOTER VALUE
-        =================================================== -->
-
         <div class="p-3 border-top">
-
             <div class="row align-items-center">
 
                 <div class="col-md-6">
-
                     <small class="text-muted">
                         Current branch stock valuation
                     </small>
-
                 </div>
 
                 <div class="col-md-6 text-md-end">
-
                     <span class="text-muted small">
                         Selling Value:
                     </span>
 
                     <strong class="text-success fs-5">
-                        <?= money(
-                            (float)$summary['selling_value']
-                        ) ?>
+                        <?= ps_money($summary['selling_value']) ?>
                     </strong>
-
-                    <span class="text-muted small ms-3">
-                        Cost Value:
-                    </span>
-
-                    <strong class="text-dark fs-5">
-                        <?= money(
-                            (float)$summary['cost_value']
-                        ) ?>
-                    </strong>
-
                 </div>
 
             </div>
-
         </div>
 
     </div>
 
 </div>
-
 </main>
 
-
 <?php
-
 if (file_exists("../includes/footer.php")) {
     require_once "../includes/footer.php";
 }
-
 ?>
 
 </div>
 
-
-<!-- ============================================================
-     DELETE CONFIRMATION MODAL
-============================================================ -->
-
-<div
-    class="modal fade"
-    id="deleteStockModal"
-    tabindex="-1"
-    aria-hidden="true"
->
+<!-- DELETE MODAL -->
+<div class="modal fade" id="deleteStockModal" tabindex="-1" aria-hidden="true">
 
     <div class="modal-dialog modal-dialog-centered">
 
@@ -1982,39 +1204,24 @@ if (file_exists("../includes/footer.php")) {
 
             <div class="modal-body text-center p-4">
 
-                <div class="modal-confirm-icon mb-3">
-
+                <div class="ps-modal-icon mb-3">
                     <i class="fas fa-trash-alt"></i>
-
                 </div>
 
-                <h5 class="fw-bold">
-                    Delete Product?
-                </h5>
+                <h5 class="fw-bold">Delete Product?</h5>
 
                 <p class="text-muted mb-1">
                     You are about to permanently remove:
                 </p>
 
-                <div
-                    id="delete-product-name"
-                    class="fw-bold text-dark mb-3"
-                >
-                </div>
+                <div id="delete-product-name" class="fw-bold mb-3"></div>
 
-                <div class="alert alert-warning small text-start">
-
+                <div class="alert alert-warning text-start small">
                     <i class="fas fa-exclamation-triangle me-1"></i>
-
-                    This removes the product from this
-                    pharmacy branch. This action cannot be undone.
-
+                    This action permanently removes the product from this branch.
                 </div>
 
-                <input
-                    type="hidden"
-                    id="delete-product-id"
-                >
+                <input type="hidden" id="delete-product-id">
 
                 <button
                     type="button"
@@ -2038,20 +1245,10 @@ if (file_exists("../includes/footer.php")) {
         </div>
 
     </div>
-
 </div>
 
-
-<!-- ============================================================
-     STOCK ADJUSTMENT MODAL
-============================================================ -->
-
-<div
-    class="modal fade"
-    id="adjustStockModal"
-    tabindex="-1"
-    aria-hidden="true"
->
+<!-- ADJUST STOCK MODAL -->
+<div class="modal fade" id="adjustStockModal" tabindex="-1" aria-hidden="true">
 
     <div class="modal-dialog modal-dialog-centered">
 
@@ -2060,13 +1257,9 @@ if (file_exists("../includes/footer.php")) {
             <form id="adjust-stock-form">
 
                 <div class="modal-header">
-
                     <h5 class="modal-title fw-bold">
-
                         <i class="fas fa-boxes text-success me-2"></i>
-
                         Adjust Stock
-
                     </h5>
 
                     <button
@@ -2074,58 +1267,29 @@ if (file_exists("../includes/footer.php")) {
                         class="btn-close"
                         data-bs-dismiss="modal"
                     ></button>
-
                 </div>
-
 
                 <div class="modal-body">
 
+                    <input type="hidden" id="adjust-product-id">
+
+                    <label class="ps-label">Product</label>
+                    <div id="adjust-product-name" class="fw-bold mb-3"></div>
+
+                    <label class="ps-label">New Quantity</label>
+
                     <input
-                        type="hidden"
-                        id="adjust-product-id"
+                        type="number"
+                        id="adjust-quantity"
+                        class="form-control"
+                        min="0"
+                        step="1"
+                        required
                     >
 
-                    <div class="mb-3">
-
-                        <label class="stock-label">
-                            Product
-                        </label>
-
-                        <div
-                            id="adjust-product-name"
-                            class="fw-bold text-dark"
-                        >
-                        </div>
-
-                    </div>
-
-
-                    <div class="mb-3">
-
-                        <label class="stock-label">
-                            New Quantity
-                        </label>
-
-                        <input
-                            type="number"
-                            id="adjust-quantity"
-                            class="form-control"
-                            min="0"
-                            step="1"
-                            required
-                        >
-
-                    </div>
-
-
-                    <div
-                        id="adjust-error"
-                        class="alert alert-danger d-none"
-                    >
-                    </div>
+                    <div id="adjust-error" class="alert alert-danger d-none mt-3"></div>
 
                 </div>
-
 
                 <div class="modal-footer">
 
@@ -2153,441 +1317,192 @@ if (file_exists("../includes/footer.php")) {
         </div>
 
     </div>
-
 </div>
-
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-(() => {
-
+(function () {
     'use strict';
 
-    const deleteModal =
-        new bootstrap.Modal(
-            document.getElementById(
-                'deleteStockModal'
-            )
-        );
+    const deleteModalEl = document.getElementById('deleteStockModal');
+    const adjustModalEl = document.getElementById('adjustStockModal');
 
-    const adjustModal =
-        new bootstrap.Modal(
-            document.getElementById(
-                'adjustStockModal'
-            )
-        );
+    const deleteModal = deleteModalEl
+        ? new bootstrap.Modal(deleteModalEl)
+        : null;
 
+    const adjustModal = adjustModalEl
+        ? new bootstrap.Modal(adjustModalEl)
+        : null;
 
-    function escapeHtml(value) {
+    async function sendStockAction(action, values) {
 
-        return String(value ?? '')
-            .replace(
-                /[&<>"']/g,
-                function (character) {
+        const formData = new FormData();
+        formData.append('action', action);
 
-                    return {
-                        '&': '&amp;',
-                        '<': '&lt;',
-                        '>': '&gt;',
-                        '"': '&quot;',
-                        "'": '&#039;'
-                    }[character];
+        Object.keys(values || {}).forEach(function (key) {
+            formData.append(key, values[key]);
+        });
 
-                }
-            );
+        const response = await fetch('pharmacy_stock.php', {
+            method: 'POST',
+            body: formData,
+            credentials: 'same-origin',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json'
+            }
+        });
 
-    }
-
-
-    async function sendAction(
-        action,
-        values = {}
-    ) {
-
-        const formData =
-            new FormData();
-
-        formData.append(
-            'action',
-            action
-        );
-
-        Object.entries(values)
-            .forEach(
-                ([key, value]) => {
-
-                    formData.append(
-                        key,
-                        value
-                    );
-
-                }
-            );
-
-        const response =
-            await fetch(
-                'pharmacy_stock.php',
-                {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'same-origin',
-                    headers: {
-                        'X-Requested-With':
-                            'XMLHttpRequest',
-                        'Accept':
-                            'application/json'
-                    }
-                }
-            );
-
-        const text =
-            await response.text();
+        const text = await response.text();
 
         let data;
 
         try {
-
-            data =
-                JSON.parse(text);
-
-        } catch (error) {
-
-            console.error(
-                'Invalid server response:',
-                text
-            );
-
-            throw new Error(
-                'The server returned an invalid response.'
-            );
-
+            data = JSON.parse(text);
+        } catch (e) {
+            console.error('Server response:', text);
+            throw new Error('The server returned an invalid response.');
         }
 
-        if (
-            !response.ok ||
-            data.status !== 'success'
-        ) {
-
-            throw new Error(
-                data.message ||
-                'The operation failed.'
-            );
-
+        if (!response.ok || data.status !== 'success') {
+            throw new Error(data.message || 'The operation failed.');
         }
 
         return data;
-
     }
 
+    document.querySelectorAll('.delete-stock-btn').forEach(function (button) {
 
-    /* ========================================================
-       DELETE
-    ======================================================== */
+        button.addEventListener('click', function () {
 
-    document
-        .querySelectorAll(
-            '.delete-stock-btn'
-        )
-        .forEach(
-            function (button) {
+            document.getElementById('delete-product-id').value =
+                this.dataset.id;
 
-                button.addEventListener(
-                    'click',
-                    function () {
+            document.getElementById('delete-product-name').textContent =
+                this.dataset.name;
 
-                        document
-                            .getElementById(
-                                'delete-product-id'
-                            )
-                            .value =
-                            this.dataset.id;
-
-                        document
-                            .getElementById(
-                                'delete-product-name'
-                            )
-                            .textContent =
-                            this.dataset.name;
-
-                        deleteModal.show();
-
-                    }
-                );
-
+            if (deleteModal) {
+                deleteModal.show();
             }
-        );
+        });
+    });
 
+    const confirmDelete = document.getElementById('confirm-delete-stock');
 
-    document
-        .getElementById(
-            'confirm-delete-stock'
-        )
-        .addEventListener(
-            'click',
-            async function () {
+    if (confirmDelete) {
 
-                const button = this;
+        confirmDelete.addEventListener('click', async function () {
 
-                const id =
-                    document
-                        .getElementById(
-                            'delete-product-id'
-                        )
-                        .value;
+            const id =
+                document.getElementById('delete-product-id').value;
 
-                if (!id) {
-                    return;
-                }
+            if (!id) return;
 
-                button.disabled = true;
+            const button = this;
 
-                button.innerHTML =
-                    '<i class="fas fa-spinner fa-spin me-1"></i>' +
-                    'Deleting...';
+            button.disabled = true;
+            button.innerHTML =
+                '<i class="fas fa-spinner fa-spin me-1"></i>Deleting...';
 
-                try {
+            try {
 
-                    await sendAction(
-                        'delete',
-                        {
-                            id: id
-                        }
-                    );
+                await sendStockAction('delete', { id: id });
 
+                if (deleteModal) {
                     deleteModal.hide();
-
-                    const row =
-                        document.querySelector(
-                            'tr[data-product-id="' +
-                            CSS.escape(String(id)) +
-                            '"]'
-                        );
-
-                    if (row) {
-
-                        row.style.transition =
-                            'opacity .25s ease';
-
-                        row.style.opacity = '0';
-
-                        setTimeout(
-                            function () {
-
-                                window.location.reload();
-
-                            },
-                            250
-                        );
-
-                    } else {
-
-                        window.location.reload();
-
-                    }
-
-                } catch (error) {
-
-                    alert(
-                        error.message ||
-                        'Unable to delete product.'
-                    );
-
-                } finally {
-
-                    button.disabled = false;
-
-                    button.innerHTML =
-                        '<i class="fas fa-trash-alt me-1"></i>' +
-                        'Delete Product';
-
                 }
 
-            }
-        );
+                window.location.reload();
 
+            } catch (error) {
 
-    /* ========================================================
-       STOCK ADJUSTMENT
-    ======================================================== */
+                alert(error.message || 'Unable to delete product.');
 
-    document
-        .querySelectorAll(
-            '.adjust-stock-btn'
-        )
-        .forEach(
-            function (button) {
+            } finally {
 
-                button.addEventListener(
-                    'click',
-                    function () {
-
-                        document
-                            .getElementById(
-                                'adjust-product-id'
-                            )
-                            .value =
-                            this.dataset.id;
-
-                        document
-                            .getElementById(
-                                'adjust-product-name'
-                            )
-                            .textContent =
-                            this.dataset.name;
-
-                        document
-                            .getElementById(
-                                'adjust-quantity'
-                            )
-                            .value =
-                            this.dataset.qty;
-
-                        document
-                            .getElementById(
-                                'adjust-error'
-                            )
-                            .classList.add(
-                                'd-none'
-                            );
-
-                        adjustModal.show();
-
-                    }
-                );
-
-            }
-        );
-
-
-    document
-        .getElementById(
-            'adjust-stock-form'
-        )
-        .addEventListener(
-            'submit',
-            async function (event) {
-
-                event.preventDefault();
-
-                const button =
-                    document.getElementById(
-                        'confirm-adjust-stock'
-                    );
-
-                const errorBox =
-                    document.getElementById(
-                        'adjust-error'
-                    );
-
-                const id =
-                    document.getElementById(
-                        'adjust-product-id'
-                    ).value;
-
-                const quantity =
-                    document.getElementById(
-                        'adjust-quantity'
-                    ).value;
-
-                errorBox.classList.add(
-                    'd-none'
-                );
-
-                button.disabled = true;
-
+                button.disabled = false;
                 button.innerHTML =
-                    '<i class="fas fa-spinner fa-spin me-1"></i>' +
-                    'Saving...';
+                    '<i class="fas fa-trash-alt me-1"></i>Delete Product';
+            }
+        });
+    }
 
-                try {
+    document.querySelectorAll('.adjust-stock-btn').forEach(function (button) {
 
-                    await sendAction(
-                        'adjust_stock',
-                        {
-                            id: id,
-                            quantity: quantity
-                        }
-                    );
+        button.addEventListener('click', function () {
 
+            document.getElementById('adjust-product-id').value =
+                this.dataset.id;
+
+            document.getElementById('adjust-product-name').textContent =
+                this.dataset.name;
+
+            document.getElementById('adjust-quantity').value =
+                this.dataset.qty;
+
+            document.getElementById('adjust-error').classList.add('d-none');
+
+            if (adjustModal) {
+                adjustModal.show();
+            }
+        });
+    });
+
+    const adjustForm = document.getElementById('adjust-stock-form');
+
+    if (adjustForm) {
+
+        adjustForm.addEventListener('submit', async function (event) {
+
+            event.preventDefault();
+
+            const button =
+                document.getElementById('confirm-adjust-stock');
+
+            const errorBox =
+                document.getElementById('adjust-error');
+
+            const id =
+                document.getElementById('adjust-product-id').value;
+
+            const quantity =
+                document.getElementById('adjust-quantity').value;
+
+            errorBox.classList.add('d-none');
+
+            button.disabled = true;
+            button.innerHTML =
+                '<i class="fas fa-spinner fa-spin me-1"></i>Saving...';
+
+            try {
+
+                await sendStockAction('adjust_stock', {
+                    id: id,
+                    quantity: quantity
+                });
+
+                if (adjustModal) {
                     adjustModal.hide();
-
-                    window.location.reload();
-
-                } catch (error) {
-
-                    errorBox.textContent =
-                        error.message ||
-                        'Unable to update quantity.';
-
-                    errorBox.classList.remove(
-                        'd-none'
-                    );
-
-                } finally {
-
-                    button.disabled = false;
-
-                    button.innerHTML =
-                        '<i class="fas fa-save me-1"></i>' +
-                        'Save Quantity';
-
                 }
 
+                window.location.reload();
+
+            } catch (error) {
+
+                errorBox.textContent =
+                    error.message || 'Unable to update stock.';
+
+                errorBox.classList.remove('d-none');
+
+            } finally {
+
+                button.disabled = false;
+                button.innerHTML =
+                    '<i class="fas fa-save me-1"></i>Save Quantity';
             }
-        );
-
-
-    /* ========================================================
-       AUTO SUBMIT SEARCH
-    ======================================================== */
-
-    const search =
-        document.getElementById(
-            'stock-search'
-        );
-
-    let searchTimer = null;
-
-    if (search) {
-
-        search.addEventListener(
-            'input',
-            function () {
-
-                clearTimeout(
-                    searchTimer
-                );
-
-                /*
-                 * Server-side search is used instead of the old
-                 * fetch_products.php AJAX replacement.
-                 */
-
-                searchTimer =
-                    setTimeout(
-                        function () {
-
-                            if (
-                                search.value.trim().length === 0 ||
-                                search.value.trim().length >= 2
-                            ) {
-
-                                document
-                                    .getElementById(
-                                        'stock-filter-form'
-                                    )
-                                    .submit();
-
-                            }
-
-                        },
-                        550
-                    );
-
-            }
-        );
-
+        });
     }
 
 })();
