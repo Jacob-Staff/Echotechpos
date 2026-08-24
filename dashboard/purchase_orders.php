@@ -53,12 +53,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $status        = $_POST['status'] ?? 'ordered';
     $items         = $_POST['items'] ?? [];
 
+    $allowed_statuses = ['ordered', 'draft'];
+    if (!in_array($status, $allowed_statuses, true)) {
+        $status = 'ordered';
+    }
+
     if ($supplier_id && !empty($items)) {
         $conn->begin_transaction();
         try {
             $po_date   = date('Y-m-d H:i:s');
             $user_id   = (int)($_SESSION['user_id'] ?? 0);
-            $po_number = 'PO-' . date('Ymd') . '-' . rand(1000, 9999);
+            $po_number = 'PO-' . date('Ymd-His') . '-' . strtoupper(substr(bin2hex(random_bytes(3)), 0, 6));
 
             // Calculate total cost
             $total_cost = 0.00;
@@ -85,9 +90,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $qty        = (int)($item['quantity'] ?? 0);
                 $unit_price = (float)($item['unit_price'] ?? 0);
 
-                if ($product_id > 0 && $qty > 0) {
-                    $item_stmt->bind_param("iiidii", $po_id, $product_id, $qty, $unit_price, $pharmacy_id, $branch_id);
-                    $item_stmt->execute();
+                if ($product_id <= 0 || $qty <= 0) {
+                    continue;
+                }
+
+                if ($unit_price < 0) {
+                    throw new Exception("Unit price cannot be negative.");
+                }
+
+                $verify_stmt = $conn->prepare(
+                    "SELECT id
+                     FROM store_items
+                     WHERE id = ?
+                       AND pharmacy_id = ?
+                       AND branch_id = ?
+                     LIMIT 1"
+                );
+
+                if (!$verify_stmt) {
+                    throw new Exception("Could not validate the selected product.");
+                }
+
+                $verify_stmt->bind_param("iii", $product_id, $pharmacy_id, $branch_id);
+                $verify_stmt->execute();
+                $verify_res = $verify_stmt->get_result();
+                $product_exists = $verify_res && $verify_res->num_rows > 0;
+                $verify_stmt->close();
+
+                if (!$product_exists) {
+                    throw new Exception("One of the selected products is invalid for this branch.");
+                }
+
+                $item_stmt->bind_param(
+                    "iiidii",
+                    $po_id,
+                    $product_id,
+                    $qty,
+                    $unit_price,
+                    $pharmacy_id,
+                    $branch_id
+                );
+
+                if (!$item_stmt->execute()) {
+                    throw new Exception("Failed to add a purchase-order item.");
                 }
             }
             $item_stmt->close();
@@ -292,7 +337,7 @@ body {
                                                     <input type="number" name="items[0][quantity]" class="form-control" min="1" placeholder="Qty" required>
                                                 </td>
                                                 <td class="text-center">
-                                                    <button type="button" class="btn btn-sm btn-outline-danger remove-row">
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary remove-row">
                                                         <i class="fas fa-trash"></i>
                                                     </button>
                                                 </td>
@@ -336,14 +381,54 @@ $(document).ready(function(){
         row.find('.unit-price').val(cost);
     });
 
-    let rowIndex = 1;
-    $('#add-row').click(function() {
-        let optionsHtml = `<option value="">-- Select Product --</option>`;
-        <?php foreach ($products as $p): ?>
-            optionsHtml += `<option value="<?= $p['id'] ?>" data-stock="<?= $p['quantity'] ?>" data-cost="<?= $p['cost'] ?>"><?= htmlspecialchars(addslashes($p['item_name'] . ' (' . $p['strength'] . ')')) ?></option>`;
-        <?php endforeach; ?>
+    const productOptions = <?= json_encode(
+        array_map(
+            static function ($p) {
+                return [
+                    'id' => (int)$p['id'],
+                    'name' => (string)$p['item_name'],
+                    'strength' => (string)($p['strength'] ?? ''),
+                    'quantity' => (int)$p['quantity'],
+                    'cost' => (float)$p['cost']
+                ];
+            },
+            $products
+        ),
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+    ) ?>;
 
-        let newRow = `<tr>
+    let rowIndex = 1;
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function buildProductOptions() {
+        let html = '<option value="">-- Select Product --</option>';
+
+        productOptions.forEach(function (product) {
+            const label = product.name +
+                (product.strength ? ' (' + product.strength + ')' : '');
+
+            html += '<option value="' + product.id + '"' +
+                ' data-stock="' + product.quantity + '"' +
+                ' data-cost="' + product.cost.toFixed(2) + '">' +
+                escapeHtml(label) +
+                '</option>';
+        });
+
+        return html;
+    }
+
+    $('#add-row').click(function() {
+        const optionsHtml = buildProductOptions();
+
+        const newRow = `<tr>
             <td>
                 <select name="items[${rowIndex}][product_id]" class="form-select product-select" required>
                     ${optionsHtml}
@@ -351,16 +436,22 @@ $(document).ready(function(){
             </td>
             <td class="current-stock text-muted fw-bold">0</td>
             <td>
-                <input type="number" step="0.01" name="items[${rowIndex}][unit_price]" class="form-control unit-price" placeholder="0.00">
+                <input type="number" step="0.01" min="0"
+                       name="items[${rowIndex}][unit_price]"
+                       class="form-control unit-price"
+                       placeholder="0.00">
             </td>
             <td>
-                <input type="number" name="items[${rowIndex}][quantity]" class="form-control" min="1" placeholder="Qty" required>
+                <input type="number" name="items[${rowIndex}][quantity]"
+                       class="form-control" min="1" placeholder="Qty" required>
             </td>
             <td class="text-center">
-                <button type="button" class="btn btn-sm btn-outline-danger remove-row"><i class="fas fa-trash"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary remove-row" title="Remove row">
+                    <i class="fas fa-trash"></i>
+                </button>
             </td>
         </tr>`;
-        
+
         $('#products-body').append(newRow);
         rowIndex++;
     });
@@ -368,6 +459,31 @@ $(document).ready(function(){
     $(document).on('click', '.remove-row', function() {
         if ($('#products-body tr').length > 1) {
             $(this).closest('tr').remove();
+        }
+    });
+
+    // Prevent the same product from being added twice to one PO.
+    $(document).on('change', '.product-select', function () {
+        const current = this.value;
+
+        if (!current) {
+            return;
+        }
+
+        let duplicate = false;
+
+        $('.product-select').not(this).each(function () {
+            if (this.value === current) {
+                duplicate = true;
+                return false;
+            }
+        });
+
+        if (duplicate) {
+            alert('This product is already added to this purchase order.');
+            this.value = '';
+            $(this).closest('tr').find('.current-stock').text('0');
+            $(this).closest('tr').find('.unit-price').val('');
         }
     });
 });
