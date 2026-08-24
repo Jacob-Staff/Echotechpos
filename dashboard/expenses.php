@@ -2,31 +2,27 @@
 /**
  * ============================================================
  * PHARMANOVA POS
- * EXPENSES
+ * EXPENSES PAGE
  * ============================================================
  *
- * ONE SELF-CONTAINED PAGE
+ * Uses the EXISTING:
  *
- * Uses existing:
- *   ../includes/conn.php
- *   ../includes/auth.php
  *   ../includes/head.php
  *   ../includes/header.php
  *   ../includes/aside.php
  *   ../includes/footer.php
  *
- * Existing action files still used for:
- *   actions/add_expense.php
- *   actions/delete_expense.php
- *   actions/clear_expenses.php
+ * Expense backend:
  *
- * IMPORTANT:
- * We DO NOT use fetch_expenses.php anymore.
- * Expenses are fetched directly in this page.
+ *   actions/expenses.php
+ *
+ * There is NO fetch_expenses.php anymore.
  * ============================================================
  */
 
-ini_set('display_errors', 0);
+declare(strict_types=1);
+
+ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -37,23 +33,132 @@ date_default_timezone_set('Africa/Lusaka');
 
 
 /* ============================================================
-   DATABASE
+   DATABASE + AUTH
 ============================================================ */
 
-require_once "../includes/conn.php";
-require_once "../includes/auth.php";
+require_once '../includes/conn.php';
+require_once '../includes/auth.php';
 
 
 /* ============================================================
    SESSION
 ============================================================ */
 
-$pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
-$branch_id   = (int)($_SESSION['branch_id'] ?? 0);
+$pharmacy_id =
+    (int)($_SESSION['pharmacy_id'] ?? 0);
 
-if ($pharmacy_id <= 0 || $branch_id <= 0) {
-    header("Location: ../login.php?error=session_expired");
-    exit();
+$branch_id =
+    (int)($_SESSION['branch_id'] ?? 0);
+
+
+if (
+    $pharmacy_id <= 0 ||
+    $branch_id <= 0
+) {
+
+    header(
+        'Location: ../login.php?error=session_expired'
+    );
+
+    exit;
+}
+
+
+/* ============================================================
+   PHARMACY NAME
+============================================================ */
+
+$pharmacy_name =
+    'PHARMANOVA';
+
+
+$branch_name =
+    'Main Branch';
+
+
+$stmt =
+    $conn->prepare(
+        'SELECT name
+         FROM pharmacies
+         WHERE id = ?
+         LIMIT 1'
+    );
+
+
+if ($stmt) {
+
+    $stmt->bind_param(
+        'i',
+        $pharmacy_id
+    );
+
+    if ($stmt->execute()) {
+
+        $stmt->bind_result(
+            $db_pharmacy_name
+        );
+
+        if ($stmt->fetch()) {
+
+            if (
+                !empty(
+                    $db_pharmacy_name
+                )
+            ) {
+
+                $pharmacy_name =
+                    $db_pharmacy_name;
+            }
+        }
+    }
+
+    $stmt->close();
+}
+
+
+/* ============================================================
+   BRANCH NAME
+============================================================ */
+
+$stmt =
+    $conn->prepare(
+        'SELECT branch_name
+         FROM branches
+         WHERE id = ?
+           AND pharmacy_id = ?
+         LIMIT 1'
+    );
+
+
+if ($stmt) {
+
+    $stmt->bind_param(
+        'ii',
+        $branch_id,
+        $pharmacy_id
+    );
+
+    if ($stmt->execute()) {
+
+        $stmt->bind_result(
+            $db_branch_name
+        );
+
+        if ($stmt->fetch()) {
+
+            if (
+                !empty(
+                    $db_branch_name
+                )
+            ) {
+
+                $branch_name =
+                    $db_branch_name;
+            }
+        }
+    }
+
+    $stmt->close();
 }
 
 
@@ -62,131 +167,35 @@ if ($pharmacy_id <= 0 || $branch_id <= 0) {
 ============================================================ */
 
 $categories = [
+
     'General',
+
     'Utilities',
+
     'Staff Welfare',
+
     'Logistics',
+
     'Stock/Supplies',
+
     'Other'
+
 ];
 
 
 /* ============================================================
-   FETCH EXPENSES DIRECTLY
+   EXISTING HEAD
 ============================================================ */
 
-$expenses = [];
-$total_expenses = 0.00;
-
-$expense_sql = "
-    SELECT
-        id,
-        name,
-        amount,
-        expense_date,
-        category,
-        recorded_by,
-        created_at
-    FROM expenses
-    WHERE pharmacy_id = ?
-      AND branch_id = ?
-    ORDER BY expense_date DESC, id DESC
-";
-
-$expense_stmt = $conn->prepare($expense_sql);
-
-if ($expense_stmt) {
-
-    $expense_stmt->bind_param(
-        "ii",
-        $pharmacy_id,
-        $branch_id
-    );
-
-    if ($expense_stmt->execute()) {
-
-        $expense_result = $expense_stmt->get_result();
-
-        while ($row = $expense_result->fetch_assoc()) {
-
-            $amount = (float)($row['amount'] ?? 0);
-
-            $total_expenses += $amount;
-
-            $expenses[] = [
-                'id'           => (int)$row['id'],
-                'name'         => $row['name'] ?? '',
-                'amount'       => $amount,
-                'expense_date' => $row['expense_date'] ?? '',
-                'category'     => $row['category'] ?? 'General',
-                'recorded_by'  => $row['recorded_by'] ?? '',
-                'created_at'   => $row['created_at'] ?? ''
-            ];
-        }
-
-    }
-
-    $expense_stmt->close();
-}
-
-
-/* ============================================================
-   CURRENT MONTH TOTAL
-============================================================ */
-
-$month_total = 0.00;
-
-$month_sql = "
-    SELECT COALESCE(SUM(amount), 0) AS total
-    FROM expenses
-    WHERE pharmacy_id = ?
-      AND branch_id = ?
-      AND MONTH(expense_date) = MONTH(CURDATE())
-      AND YEAR(expense_date) = YEAR(CURDATE())
-";
-
-$month_stmt = $conn->prepare($month_sql);
-
-if ($month_stmt) {
-
-    $month_stmt->bind_param(
-        "ii",
-        $pharmacy_id,
-        $branch_id
-    );
-
-    if ($month_stmt->execute()) {
-
-        $month_result = $month_stmt->get_result();
-
-        if ($month_row = $month_result->fetch_assoc()) {
-            $month_total = (float)$month_row['total'];
-        }
-    }
-
-    $month_stmt->close();
-}
-
-
-/* ============================================================
-   RECORD COUNT
-============================================================ */
-
-$expense_count = count($expenses);
-
-
-/* ============================================================
-   COMMON HEAD
-============================================================ */
-
-require_once "../includes/head.php";
+require_once '../includes/head.php';
 
 ?>
+
 
 <style>
 
 /* ============================================================
-   EXPENSE PAGE
+   EXPENSES PAGE
 ============================================================ */
 
 .expenses-page {
@@ -197,123 +206,131 @@ require_once "../includes/head.php";
 
     padding: 1.25rem;
 
-    color: #212529;
+    color: #1e293b;
 }
 
 
-/* ------------------------------------------------------------
-   PAGE HEADER
------------------------------------------------------------- */
+/* ============================================================
+   PAGE TITLE
+============================================================ */
 
-.expenses-page-title {
+.expense-title-icon {
 
-    font-size: 1.35rem;
+    width: 42px;
 
-    font-weight: 700;
-
-    color: #172033;
-
-    margin: 0;
-}
-
-.expenses-page-subtitle {
-
-    color: #6c757d;
-
-    font-size: 0.82rem;
-
-    margin-top: 3px;
-}
-
-
-/* ------------------------------------------------------------
-   STAT CARDS
------------------------------------------------------------- */
-
-.expense-stat {
-
-    background: #ffffff;
-
-    border: 1px solid #e3e7ec;
-
-    border-radius: 12px;
-
-    padding: 1rem;
-
-    height: 100%;
-
-    box-shadow: 0 2px 7px rgba(0,0,0,.035);
-}
-
-.expense-stat-label {
-
-    color: #6c757d;
-
-    font-size: .72rem;
-
-    font-weight: 600;
-
-    text-transform: uppercase;
-}
-
-.expense-stat-value {
-
-    font-size: 1.35rem;
-
-    font-weight: 800;
-
-    color: #198754;
-
-    margin-top: 3px;
-}
-
-.expense-stat-icon {
-
-    width: 40px;
-
-    height: 40px;
+    height: 42px;
 
     border-radius: 10px;
 
-    display: flex;
+    display: inline-flex;
 
     align-items: center;
 
     justify-content: center;
 
-    background: #e8f7ee;
+    background: #eaf2ff;
 
-    color: #198754;
+    color: #0d6efd;
 
-    font-size: 17px;
 }
 
 
-/* ------------------------------------------------------------
-   CARDS
------------------------------------------------------------- */
+.expense-title {
+
+    font-size: 1.35rem;
+
+    font-weight: 700;
+
+    margin: 0;
+
+    color: #172033;
+}
+
+
+.expense-subtitle {
+
+    font-size: .78rem;
+
+    color: #6c757d;
+
+    margin-top: 3px;
+}
+
+
+/* ============================================================
+   STAT CARDS
+============================================================ */
+
+.expense-stat {
+
+    background: #ffffff;
+
+    border: 1px solid #e2e8f0;
+
+    border-radius: 12px;
+
+    box-shadow:
+        0 2px 8px
+        rgba(15, 23, 42, .05);
+
+}
+
+
+.expense-stat .card-body {
+
+    padding: 1rem;
+}
+
+
+.expense-stat-label {
+
+    font-size: .72rem;
+
+    color: #6c757d;
+
+    font-weight: 700;
+
+    text-transform: uppercase;
+}
+
+
+.expense-stat-value {
+
+    font-size: 1.45rem;
+
+    font-weight: 800;
+
+    margin-top: 3px;
+}
+
+
+/* ============================================================
+   MAIN CARDS
+============================================================ */
 
 .expense-card {
 
     background: #ffffff;
 
-    border: 1px solid #e2e7ed;
+    border: 1px solid #e2e8f0;
 
     border-radius: 12px;
 
-    box-shadow: 0 2px 7px rgba(15,23,42,.035);
+    box-shadow:
+        0 2px 8px
+        rgba(15, 23, 42, .05);
 
     overflow: hidden;
 }
 
+
 .expense-card-header {
 
-    padding: 1rem 1.1rem;
-
-    border-bottom: 1px solid #e6e9ee;
-
     background: #ffffff;
+
+    border-bottom: 1px solid #e2e8f0;
 }
+
 
 .expense-card-title {
 
@@ -322,302 +339,219 @@ require_once "../includes/head.php";
     font-weight: 700;
 
     color: #172033;
-
-    margin: 0;
 }
+
 
 .expense-card-subtitle {
 
     color: #6c757d;
 
     font-size: .78rem;
-
-    margin-top: 2px;
 }
 
 
-/* ------------------------------------------------------------
+/* ============================================================
    FORM
------------------------------------------------------------- */
+============================================================ */
 
-.expense-form {
-
-    padding: 1.1rem;
-}
-
-.expense-form .form-label {
+#expenseForm .form-label {
 
     font-size: .82rem;
 
-    font-weight: 600;
-
     color: #172033;
 
-    margin-bottom: .4rem;
 }
 
-.expense-form .form-control,
-.expense-form .form-select {
+
+#expenseForm .form-control,
+#expenseForm .form-select {
 
     min-height: 44px;
 
-    border: 1px solid #d6dce4;
+    border-color: #d8dee7;
 
     border-radius: 7px;
-
-    background: #fff;
-
-    color: #212529;
 
     font-size: .85rem;
 }
 
-.expense-form .form-control:focus,
-.expense-form .form-select:focus {
+
+#expenseForm .form-control:focus,
+#expenseForm .form-select:focus {
 
     border-color: #0d6efd;
 
-    box-shadow: 0 0 0 .15rem rgba(13,110,253,.10);
+    box-shadow:
+        0 0 0 .15rem
+        rgba(13, 110, 253, .10);
 }
 
-
-/* ------------------------------------------------------------
-   SAVE BUTTON
------------------------------------------------------------- */
 
 #submitBtn {
 
     min-height: 44px;
 
-    border-radius: 7px;
-
-    background: #198754;
-
-    border: none;
-
-    color: #fff;
-
-    font-size: .82rem;
-
     font-weight: 700;
-}
 
-#submitBtn:hover {
-
-    background: #157347;
-}
-
-#submitBtn:disabled {
-
-    opacity: .75;
-
-    cursor: not-allowed;
+    border-radius: 7px;
 }
 
 
-/* ------------------------------------------------------------
+/* ============================================================
+   FILTER
+============================================================ */
+
+.expense-filter {
+
+    background: #f8fafc;
+
+    border: 1px solid #e2e8f0;
+
+    border-radius: 10px;
+}
+
+
+/* ============================================================
    TABLE
------------------------------------------------------------- */
+============================================================ */
 
-.expenses-table-wrapper {
+.expense-table {
 
-    overflow-x: auto;
-}
-
-.expenses-table {
+    margin-bottom: 0;
 
     width: 100%;
-
-    margin: 0;
-
-    border-collapse: collapse;
 }
 
-.expenses-table thead th {
 
-    background: #f5f7fa;
+.expense-table thead th {
 
-    color: #3d4652;
+    background: #f8fafc;
 
-    font-size: .71rem;
+    color: #334155;
 
-    font-weight: 700;
+    font-size: .72rem;
 
     text-transform: uppercase;
 
-    padding: 13px;
+    letter-spacing: .4px;
 
-    border-bottom: 2px solid #e1e5ea;
+    border-bottom: 2px solid #e2e8f0;
 
     white-space: nowrap;
 }
 
-.expenses-table tbody td {
 
-    padding: 12px 13px;
+.expense-table tbody td {
 
-    border-bottom: 1px solid #edf0f3;
+    padding: 12px;
 
-    color: #212529;
-
-    font-size: .82rem;
+    border-color: #f1f5f9;
 
     vertical-align: middle;
-}
 
-.expenses-table tbody tr:hover {
-
-    background: #f9fbfd;
+    font-size: .83rem;
 }
 
 
-/* ------------------------------------------------------------
+.expense-table tbody tr:hover {
+
+    background: #f8fafc;
+}
+
+
+/* ============================================================
    CATEGORY
------------------------------------------------------------- */
+============================================================ */
 
-.category-badge {
+.expense-category {
 
-    display: inline-block;
+    background: #f1f5f9;
 
-    padding: 4px 9px;
+    color: #334155;
 
-    border-radius: 20px;
-
-    background: #eef2f6;
-
-    color: #495057;
+    border: 1px solid #e2e8f0;
 
     font-size: .69rem;
 
     font-weight: 600;
-
-    white-space: nowrap;
 }
 
 
-/* ------------------------------------------------------------
+/* ============================================================
    AMOUNT
------------------------------------------------------------- */
+============================================================ */
 
 .expense-amount {
 
-    color: #198754;
+    color: #dc3545;
 
-    font-weight: 700;
+    font-weight: 800;
 
     white-space: nowrap;
 }
 
 
-/* ------------------------------------------------------------
-   DELETE
------------------------------------------------------------- */
+/* ============================================================
+   EMPTY
+============================================================ */
 
-.delete-expense {
+.expense-empty {
 
-    width: 32px;
+    padding: 45px !important;
 
-    height: 32px;
-
-    padding: 0;
-
-    border-radius: 6px;
-
-    display: inline-flex;
-
-    align-items: center;
-
-    justify-content: center;
-}
-
-
-/* ------------------------------------------------------------
-   EMPTY STATE
------------------------------------------------------------- */
-
-.empty-expenses {
+    color: #64748b;
 
     text-align: center;
-
-    padding: 45px 15px !important;
-
-    color: #6c757d;
 }
 
-.empty-expenses i {
+
+.expense-empty i {
+
+    font-size: 28px;
+
+    color: #cbd5e1;
 
     display: block;
 
-    font-size: 30px;
-
-    margin-bottom: 10px;
-
-    color: #ced4da;
+    margin-bottom: 8px;
 }
 
 
-/* ------------------------------------------------------------
-   ALERT
------------------------------------------------------------- */
-
-#expenseAlert {
-
-    display: none;
-
-    border-radius: 8px;
-
-    font-size: .82rem;
-}
-
-
-/* ------------------------------------------------------------
+/* ============================================================
    RESPONSIVE
------------------------------------------------------------- */
+============================================================ */
 
-@media (max-width: 991px) {
-
-    .expenses-page {
-
-        padding: 1rem;
-    }
-
-}
-
-@media (max-width: 575px) {
+@media (max-width: 768px) {
 
     .expenses-page {
 
         padding: .75rem;
     }
 
-    .expenses-table thead th,
-    .expenses-table tbody td {
+    .expense-table {
 
-        padding: 9px 8px;
+        min-width: 700px;
     }
 
 }
 
 
-/* ------------------------------------------------------------
+/* ============================================================
    PRINT
------------------------------------------------------------- */
+============================================================ */
 
 @media print {
 
-    .no-print,
-    #submitBtn,
-    .delete-expense,
-    .clear-records-btn {
+    .no-print {
 
         display: none !important;
     }
 
     .expenses-page {
 
-        background: #fff !important;
-
         padding: 0 !important;
+
+        background: #fff !important;
     }
 
     .expense-card,
@@ -627,6 +561,7 @@ require_once "../includes/head.php";
 
         border: 1px solid #ccc !important;
     }
+
 }
 
 </style>
@@ -641,125 +576,95 @@ require_once "../includes/head.php";
 
     <?php
 
-    if (file_exists("../includes/header.php")) {
-        require_once "../includes/header.php";
+    if (
+        file_exists(
+            '../includes/header.php'
+        )
+    ) {
+
+        require_once
+            '../includes/header.php';
     }
 
     ?>
 
 
     <!-- ========================================================
-         EXISTING SIDEBAR
+         EXISTING ASIDE
     ========================================================= -->
 
     <?php
 
-    if (file_exists("../includes/aside.php")) {
-        require_once "../includes/aside.php";
+    if (
+        file_exists(
+            '../includes/aside.php'
+        )
+    ) {
+
+        require_once
+            '../includes/aside.php';
     }
 
     ?>
 
 
     <!-- ========================================================
-         PAGE
+         PAGE WRAPPER
     ========================================================= -->
 
     <div class="page-wrapper expenses-page">
 
-        <div class="container-fluid p-0">
+        <div class="container-fluid">
 
 
             <!-- ==================================================
-                 PAGE HEADER
-            =================================================== -->
-
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
-
-                <div>
-
-                    <h4 class="expenses-page-title">
-
-                        <i class="fas fa-receipt text-primary me-2"></i>
-
-                        Expenses
-
-                    </h4>
-
-                    <div class="expenses-page-subtitle">
-
-                        Record and manage expenses for this branch
-
-                    </div>
-
-                </div>
-
-
-                <div class="no-print">
-
-                    <button
-                        type="button"
-                        class="btn btn-outline-secondary btn-sm"
-                        onclick="window.print();"
-                    >
-
-                        <i class="fas fa-print me-1"></i>
-
-                        Print
-
-                    </button>
-
-                </div>
-
-            </div>
-
-
-            <!-- ==================================================
-                 ALERT
+                 TITLE
             =================================================== -->
 
             <div
-                id="expenseAlert"
-                class="alert"
-                role="alert"
-            ></div>
+                class="d-flex flex-column flex-md-row
+                       justify-content-between
+                       align-items-md-center
+                       gap-3 mb-4"
+            >
+
+                <div
+                    class="d-flex
+                           align-items-center
+                           gap-3"
+                >
+
+                    <div class="expense-title-icon">
+
+                        <i class="fas fa-receipt"></i>
+
+                    </div>
 
 
-            <!-- ==================================================
-                 SUMMARY CARDS
-            =================================================== -->
+                    <div>
 
-            <div class="row g-3 mb-4">
+                        <h3 class="expense-title">
+
+                            Expenses
+
+                        </h3>
 
 
-                <!-- TOTAL -->
-                <div class="col-md-4">
+                        <div class="expense-subtitle">
 
-                    <div class="expense-stat">
+                            <?= htmlspecialchars(
+                                $pharmacy_name,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ); ?>
 
-                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="mx-1">•</span>
 
-                            <div>
-
-                                <div class="expense-stat-label">
-                                    Total Expenses
-                                </div>
-
-                                <div class="expense-stat-value">
-
-                                    K<span id="total_display">
-                                        <?= number_format($total_expenses, 2); ?>
-                                    </span>
-
-                                </div>
-
-                            </div>
-
-                            <div class="expense-stat-icon">
-
-                                <i class="fas fa-money-bill-wave"></i>
-
-                            </div>
+                            <?= htmlspecialchars(
+                                $branch_name,
+                                ENT_QUOTES,
+                                'UTF-8'
+                            ); ?>
 
                         </div>
 
@@ -768,35 +673,125 @@ require_once "../includes/head.php";
                 </div>
 
 
-                <!-- THIS MONTH -->
+                <button
+                    type="button"
+                    class="btn btn-outline-dark
+                           fw-bold no-print"
+                    onclick="window.print();"
+                >
+
+                    <i class="fas fa-print me-1"></i>
+
+                    Print
+
+                </button>
+
+            </div>
+
+
+            <!-- ==================================================
+                 SUMMARY
+            =================================================== -->
+
+            <div class="row g-3 mb-4">
+
+
+                <!-- TOTAL -->
+
                 <div class="col-md-4">
 
-                    <div class="expense-stat">
+                    <div
+                        class="card
+                               expense-stat
+                               h-100"
+                    >
 
-                        <div class="d-flex justify-content-between align-items-center">
+                        <div
+                            class="card-body
+                                   d-flex
+                                   justify-content-between
+                                   align-items-center"
+                        >
 
                             <div>
 
                                 <div class="expense-stat-label">
+
+                                    Total Expenses
+
+                                </div>
+
+                                <div
+                                    id="total_display"
+                                    class="expense-stat-value
+                                           text-danger"
+                                >
+
+                                    K0.00
+
+                                </div>
+
+                            </div>
+
+
+                            <i
+                                class="fas
+                                       fa-money-bill-wave
+                                       fa-lg
+                                       text-danger"
+                            ></i>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- MONTH -->
+
+                <div class="col-md-4">
+
+                    <div
+                        class="card
+                               expense-stat
+                               h-100"
+                    >
+
+                        <div
+                            class="card-body
+                                   d-flex
+                                   justify-content-between
+                                   align-items-center"
+                        >
+
+                            <div>
+
+                                <div class="expense-stat-label">
+
                                     This Month
+
                                 </div>
 
-                                <div class="expense-stat-value">
+                                <div
+                                    id="month_display"
+                                    class="expense-stat-value
+                                           text-warning"
+                                >
 
-                                    K<?= number_format($month_total, 2); ?>
+                                    K0.00
 
                                 </div>
 
                             </div>
 
-                            <div
-                                class="expense-stat-icon"
-                                style="background:#fff5dd;color:#c58a00;"
-                            >
 
-                                <i class="fas fa-calendar-alt"></i>
-
-                            </div>
+                            <i
+                                class="fas
+                                       fa-calendar-alt
+                                       fa-lg
+                                       text-warning"
+                            ></i>
 
                         </div>
 
@@ -806,37 +801,49 @@ require_once "../includes/head.php";
 
 
                 <!-- RECORDS -->
+
                 <div class="col-md-4">
 
-                    <div class="expense-stat">
+                    <div
+                        class="card
+                               expense-stat
+                               h-100"
+                    >
 
-                        <div class="d-flex justify-content-between align-items-center">
+                        <div
+                            class="card-body
+                                   d-flex
+                                   justify-content-between
+                                   align-items-center"
+                        >
 
                             <div>
 
                                 <div class="expense-stat-label">
+
                                     Records
+
                                 </div>
 
                                 <div
-                                    class="expense-stat-value"
-                                    style="color:#0d6efd;"
+                                    id="count_display"
+                                    class="expense-stat-value
+                                           text-primary"
                                 >
 
-                                    <?= number_format($expense_count); ?>
+                                    0
 
                                 </div>
 
                             </div>
 
-                            <div
-                                class="expense-stat-icon"
-                                style="background:#e9f1ff;color:#0d6efd;"
-                            >
 
-                                <i class="fas fa-list"></i>
-
-                            </div>
+                            <i
+                                class="fas
+                                       fa-list-ol
+                                       fa-lg
+                                       text-primary"
+                            ></i>
 
                         </div>
 
@@ -848,7 +855,7 @@ require_once "../includes/head.php";
 
 
             <!-- ==================================================
-                 MAIN CONTENT
+                 CONTENT
             =================================================== -->
 
             <div class="row g-4">
@@ -862,26 +869,34 @@ require_once "../includes/head.php";
 
                     <div class="expense-card">
 
-                        <div class="expense-card-header">
+                        <div class="expense-card-header p-3">
 
                             <div class="expense-card-title">
 
-                                <i class="fas fa-plus-circle text-primary me-2"></i>
+                                <i
+                                    class="fas
+                                           fa-plus-circle
+                                           text-primary
+                                           me-2"
+                                ></i>
 
                                 Record Expense
 
                             </div>
 
-                            <div class="expense-card-subtitle">
+                            <div
+                                class="expense-card-subtitle"
+                            >
 
-                                Record a business expense for this branch.
+                                Record a business expense
+                                for this branch.
 
                             </div>
 
                         </div>
 
 
-                        <div class="expense-form">
+                        <div class="card-body p-3 p-lg-4">
 
                             <form
                                 id="expenseForm"
@@ -894,19 +909,23 @@ require_once "../includes/head.php";
                                 <div class="mb-3">
 
                                     <label
-                                        for="expense_name"
-                                        class="form-label"
+                                        class="form-label
+                                               fw-semibold"
+                                        for="expenseName"
                                     >
+
                                         Description
+
                                     </label>
+
 
                                     <input
                                         type="text"
-                                        id="expense_name"
+                                        id="expenseName"
                                         name="name"
                                         class="form-control"
-                                        placeholder="e.g. Electricity bill"
                                         maxlength="255"
+                                        placeholder="e.g. Electricity bill"
                                         required
                                     >
 
@@ -918,26 +937,36 @@ require_once "../includes/head.php";
                                 <div class="mb-3">
 
                                     <label
-                                        for="expense_amount"
-                                        class="form-label"
+                                        class="form-label
+                                               fw-semibold"
+                                        for="expenseAmount"
                                     >
+
                                         Amount (K)
+
                                     </label>
+
 
                                     <div class="input-group">
 
-                                        <span class="input-group-text">
+                                        <span
+                                            class="input-group-text
+                                                   fw-bold"
+                                        >
+
                                             K
+
                                         </span>
+
 
                                         <input
                                             type="number"
-                                            id="expense_amount"
+                                            id="expenseAmount"
                                             name="amount"
                                             class="form-control"
-                                            placeholder="0.00"
                                             min="0.01"
                                             step="0.01"
+                                            placeholder="0.00"
                                             required
                                         >
 
@@ -951,26 +980,45 @@ require_once "../includes/head.php";
                                 <div class="mb-3">
 
                                     <label
-                                        for="expense_category"
-                                        class="form-label"
+                                        class="form-label
+                                               fw-semibold"
+                                        for="expenseCategory"
                                     >
+
                                         Category
+
                                     </label>
 
+
                                     <select
-                                        id="expense_category"
+                                        id="expenseCategory"
                                         name="category"
                                         class="form-select"
                                         required
                                     >
 
-                                        <?php foreach ($categories as $category): ?>
+                                        <?php
+
+                                        foreach (
+                                            $categories
+                                            as $category
+                                        ):
+
+                                        ?>
 
                                             <option
-                                                value="<?= htmlspecialchars($category, ENT_QUOTES, 'UTF-8'); ?>"
+                                                value="<?= htmlspecialchars(
+                                                    $category,
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ); ?>"
                                             >
 
-                                                <?= htmlspecialchars($category, ENT_QUOTES, 'UTF-8'); ?>
+                                                <?= htmlspecialchars(
+                                                    $category,
+                                                    ENT_QUOTES,
+                                                    'UTF-8'
+                                                ); ?>
 
                                             </option>
 
@@ -986,15 +1034,19 @@ require_once "../includes/head.php";
                                 <div class="mb-3">
 
                                     <label
-                                        for="expense_date"
-                                        class="form-label"
+                                        class="form-label
+                                               fw-semibold"
+                                        for="expenseDate"
                                     >
+
                                         Expense Date
+
                                     </label>
+
 
                                     <input
                                         type="date"
-                                        id="expense_date"
+                                        id="expenseDate"
                                         name="date"
                                         class="form-control"
                                         value="<?= date('Y-m-d'); ?>"
@@ -1009,10 +1061,17 @@ require_once "../includes/head.php";
                                 <button
                                     type="submit"
                                     id="submitBtn"
-                                    class="btn w-100"
+                                    class="btn btn-primary
+                                           w-100
+                                           fw-bold
+                                           py-2"
                                 >
 
-                                    <i class="fas fa-save me-1"></i>
+                                    <i
+                                        class="fas
+                                               fa-save
+                                               me-1"
+                                    ></i>
 
                                     SAVE EXPENSE
 
@@ -1028,7 +1087,7 @@ require_once "../includes/head.php";
 
 
                 <!-- =================================================
-                     EXPENSE HISTORY
+                     HISTORY
                 ================================================== -->
 
                 <div class="col-lg-8">
@@ -1038,21 +1097,40 @@ require_once "../includes/head.php";
 
                         <!-- HEADER -->
 
-                        <div class="expense-card-header">
+                        <div
+                            class="expense-card-header
+                                   p-3"
+                        >
 
-                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div
+                                class="d-flex
+                                       flex-column
+                                       flex-md-row
+                                       justify-content-between
+                                       gap-3"
+                            >
 
                                 <div>
 
-                                    <div class="expense-card-title">
+                                    <div
+                                        class="expense-card-title"
+                                    >
 
-                                        <i class="fas fa-history text-primary me-2"></i>
+                                        <i
+                                            class="fas
+                                                   fa-history
+                                                   text-primary
+                                                   me-2"
+                                        ></i>
 
                                         Expense History
 
                                     </div>
 
-                                    <div class="expense-card-subtitle">
+
+                                    <div
+                                        class="expense-card-subtitle"
+                                    >
 
                                         Branch expense records
 
@@ -1063,35 +1141,54 @@ require_once "../includes/head.php";
 
                                 <!-- CLEAR -->
 
-                                <div class="dropdown no-print">
+                                <div
+                                    class="dropdown
+                                           no-print"
+                                >
 
                                     <button
                                         type="button"
-                                        class="btn btn-outline-danger btn-sm dropdown-toggle clear-records-btn"
+                                        class="btn
+                                               btn-sm
+                                               btn-outline-danger
+                                               dropdown-toggle
+                                               fw-bold"
                                         data-bs-toggle="dropdown"
                                         aria-expanded="false"
                                     >
 
-                                        <i class="fas fa-trash-alt me-1"></i>
+                                        <i
+                                            class="fas
+                                                   fa-trash-alt
+                                                   me-1"
+                                        ></i>
 
                                         CLEAR RECORDS
 
                                     </button>
 
 
-                                    <ul class="dropdown-menu dropdown-menu-end">
+                                    <ul
+                                        class="dropdown-menu
+                                               dropdown-menu-end"
+                                    >
 
                                         <li>
 
                                             <a
                                                 href="#"
-                                                class="dropdown-item clear-btn"
+                                                class="dropdown-item
+                                                       clear-btn"
                                                 data-type="month"
                                             >
 
-                                                <i class="fas fa-calendar-alt me-2 text-warning"></i>
+                                                <i
+                                                    class="fas
+                                                           fa-calendar-alt
+                                                           me-2"
+                                                ></i>
 
-                                                This Month
+                                                Clear This Month
 
                                             </a>
 
@@ -1102,13 +1199,19 @@ require_once "../includes/head.php";
 
                                             <a
                                                 href="#"
-                                                class="dropdown-item clear-btn text-danger"
+                                                class="dropdown-item
+                                                       clear-btn
+                                                       text-danger"
                                                 data-type="year"
                                             >
 
-                                                <i class="fas fa-calendar-times me-2"></i>
+                                                <i
+                                                    class="fas
+                                                           fa-calendar-times
+                                                           me-2"
+                                                ></i>
 
-                                                This Year
+                                                Clear This Year
 
                                             </a>
 
@@ -1123,190 +1226,221 @@ require_once "../includes/head.php";
                         </div>
 
 
-                        <!-- TABLE -->
+                        <!-- BODY -->
 
-                        <div class="expenses-table-wrapper">
-
-                            <table class="table expenses-table">
-
-                                <thead>
-
-                                    <tr>
-
-                                        <th>
-                                            Description
-                                        </th>
-
-                                        <th>
-                                            Category
-                                        </th>
-
-                                        <th>
-                                            Date
-                                        </th>
-
-                                        <th class="text-end">
-                                            Amount
-                                        </th>
-
-                                        <th class="text-center no-print">
-                                            Action
-                                        </th>
-
-                                    </tr>
-
-                                </thead>
+                        <div class="card-body p-3">
 
 
-                                <tbody id="expenses_list">
+                            <!-- FILTER -->
+
+                            <div
+                                class="expense-filter
+                                       p-3
+                                       mb-3
+                                       no-print"
+                            >
+
+                                <div class="row g-2">
 
 
-                                <?php if (empty($expenses)): ?>
+                                    <div class="col-md-5">
 
-
-                                    <tr>
-
-                                        <td
-                                            colspan="5"
-                                            class="empty-expenses"
+                                        <label
+                                            class="small
+                                                   fw-semibold"
                                         >
 
-                                            <i class="fas fa-receipt"></i>
+                                            Search
 
-                                            No expenses recorded for this branch.
-
-                                        </td>
-
-                                    </tr>
+                                        </label>
 
 
-                                <?php else: ?>
+                                        <input
+                                            type="text"
+                                            id="expenseSearch"
+                                            class="form-control"
+                                            placeholder="Description..."
+                                        >
+
+                                    </div>
 
 
-                                    <?php foreach ($expenses as $expense): ?>
+                                    <div class="col-md-3">
+
+                                        <label
+                                            class="small
+                                                   fw-semibold"
+                                        >
+
+                                            Category
+
+                                        </label>
 
 
-                                        <tr>
+                                        <select
+                                            id="filterCategory"
+                                            class="form-select"
+                                        >
 
-                                            <!-- DESCRIPTION -->
+                                            <option value="">
 
-                                            <td>
+                                                All Categories
 
-                                                <?= htmlspecialchars(
-                                                    $expense['name'],
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                ); ?>
-
-                                            </td>
+                                            </option>
 
 
-                                            <!-- CATEGORY -->
+                                            <?php
 
-                                            <td>
+                                            foreach (
+                                                $categories
+                                                as $category
+                                            ):
 
-                                                <span class="category-badge">
+                                            ?>
 
-                                                    <?= htmlspecialchars(
-                                                        $expense['category'],
-                                                        ENT_QUOTES,
-                                                        'UTF-8'
-                                                    ); ?>
-
-                                                </span>
-
-                                            </td>
-
-
-                                            <!-- DATE -->
-
-                                            <td>
-
-                                                <?php
-
-                                                $formatted_date = '';
-
-                                                if (!empty($expense['expense_date'])) {
-
-                                                    $timestamp = strtotime(
-                                                        $expense['expense_date']
-                                                    );
-
-                                                    if ($timestamp !== false) {
-
-                                                        $formatted_date =
-                                                            date(
-                                                                'd M Y',
-                                                                $timestamp
-                                                            );
-
-                                                    }
-
-                                                }
-
-                                                echo htmlspecialchars(
-                                                    $formatted_date,
-                                                    ENT_QUOTES,
-                                                    'UTF-8'
-                                                );
-
-                                                ?>
-
-                                            </td>
-
-
-                                            <!-- AMOUNT -->
-
-                                            <td class="text-end">
-
-                                                <span
-                                                    class="expense-amount amt-val"
-                                                    data-amt="<?= htmlspecialchars(
-                                                        (string)$expense['amount'],
+                                                <option
+                                                    value="<?= htmlspecialchars(
+                                                        $category,
                                                         ENT_QUOTES,
                                                         'UTF-8'
                                                     ); ?>"
                                                 >
 
-                                                    K<?= number_format(
-                                                        $expense['amount'],
-                                                        2
+                                                    <?= htmlspecialchars(
+                                                        $category,
+                                                        ENT_QUOTES,
+                                                        'UTF-8'
                                                     ); ?>
 
-                                                </span>
+                                                </option>
 
-                                            </td>
+                                            <?php endforeach; ?>
+
+                                        </select>
+
+                                    </div>
 
 
-                                            <!-- ACTION -->
+                                    <div class="col-md-2">
 
-                                            <td class="text-center no-print">
+                                        <label
+                                            class="small
+                                                   fw-semibold"
+                                        >
 
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm btn-outline-danger delete-expense"
-                                                    data-id="<?= (int)$expense['id']; ?>"
-                                                    title="Delete expense"
-                                                >
+                                            From
 
-                                                    <i class="fas fa-trash"></i>
+                                        </label>
 
-                                                </button>
+
+                                        <input
+                                            type="date"
+                                            id="filterStart"
+                                            class="form-control"
+                                        >
+
+                                    </div>
+
+
+                                    <div class="col-md-2">
+
+                                        <label
+                                            class="small
+                                                   fw-semibold"
+                                        >
+
+                                            To
+
+                                        </label>
+
+
+                                        <input
+                                            type="date"
+                                            id="filterEnd"
+                                            class="form-control"
+                                        >
+
+                                    </div>
+
+                                </div>
+
+                            </div>
+
+
+                            <!-- TABLE -->
+
+                            <div class="table-responsive">
+
+                                <table
+                                    class="table
+                                           table-hover
+                                           expense-table"
+                                >
+
+                                    <thead>
+
+                                        <tr>
+
+                                            <th>
+                                                Description
+                                            </th>
+
+                                            <th>
+                                                Category
+                                            </th>
+
+                                            <th>
+                                                Date
+                                            </th>
+
+                                            <th class="text-end">
+                                                Amount
+                                            </th>
+
+                                            <th
+                                                class="text-center
+                                                       no-print"
+                                            >
+
+                                                Action
+
+                                            </th>
+
+                                        </tr>
+
+                                    </thead>
+
+
+                                    <tbody
+                                        id="expenses_list"
+                                    >
+
+                                        <tr>
+
+                                            <td
+                                                colspan="5"
+                                                class="text-center
+                                                       py-4"
+                                            >
+
+                                                <i
+                                                    class="fas
+                                                           fa-spinner
+                                                           fa-spin
+                                                           me-2"
+                                                ></i>
+
+                                                Loading expenses...
 
                                             </td>
 
                                         </tr>
 
+                                    </tbody>
 
-                                    <?php endforeach; ?>
+                                </table>
 
-
-                                <?php endif; ?>
-
-
-                                </tbody>
-
-                            </table>
+                            </div>
 
                         </div>
 
@@ -1327,8 +1461,14 @@ require_once "../includes/head.php";
 
     <?php
 
-    if (file_exists("../includes/footer.php")) {
-        require_once "../includes/footer.php";
+    if (
+        file_exists(
+            '../includes/footer.php'
+        )
+    ) {
+
+        require_once
+            '../includes/footer.php';
     }
 
     ?>
@@ -1336,46 +1476,555 @@ require_once "../includes/head.php";
 </div>
 
 
-<!-- ============================================================
-     JAVASCRIPT
-============================================================ -->
-
 <script>
+
+/* ============================================================
+   EXPENSE PAGE JAVASCRIPT
+============================================================ */
+
 (function () {
 
-    "use strict";
+    'use strict';
+
+
+    let allExpenses = [];
 
 
     /* ========================================================
-       SHOW ALERT
+       TODAY
     ======================================================== */
 
-    function showExpenseAlert(type, message) {
+    function today() {
 
-        const alertBox =
-            document.getElementById('expenseAlert');
+        const d =
+            new Date();
 
-        if (!alertBox) {
-            return;
+        const year =
+            d.getFullYear();
+
+        const month =
+            String(
+                d.getMonth() + 1
+            ).padStart(
+                2,
+                '0'
+            );
+
+        const day =
+            String(
+                d.getDate()
+            ).padStart(
+                2,
+                '0'
+            );
+
+        return (
+            year +
+            '-' +
+            month +
+            '-' +
+            day
+        );
+    }
+
+
+    /* ========================================================
+       ESCAPE HTML
+    ======================================================== */
+
+    function escapeHtml(value) {
+
+        return String(
+            value ?? ''
+        )
+        .replace(
+            /&/g,
+            '&amp;'
+        )
+        .replace(
+            /</g,
+            '&lt;'
+        )
+        .replace(
+            />/g,
+            '&gt;'
+        )
+        .replace(
+            /"/g,
+            '&quot;'
+        )
+        .replace(
+            /'/g,
+            '&#039;'
+        );
+    }
+
+
+    /* ========================================================
+       MONEY
+    ======================================================== */
+
+    function money(value) {
+
+        return Number(
+            value || 0
+        ).toLocaleString(
+            undefined,
+            {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }
+        );
+    }
+
+
+    /* ========================================================
+       FILTER
+    ======================================================== */
+
+    function getFilteredExpenses() {
+
+        const search =
+            (
+                document.getElementById(
+                    'expenseSearch'
+                ).value || ''
+            )
+            .trim()
+            .toLowerCase();
+
+
+        const category =
+            document.getElementById(
+                'filterCategory'
+            ).value;
+
+
+        const start =
+            document.getElementById(
+                'filterStart'
+            ).value;
+
+
+        const end =
+            document.getElementById(
+                'filterEnd'
+            ).value;
+
+
+        return allExpenses.filter(
+            function (expense) {
+
+                const name =
+                    String(
+                        expense.name || ''
+                    )
+                    .toLowerCase();
+
+
+                const categoryMatch =
+                    !category ||
+                    expense.category ===
+                    category;
+
+
+                const searchMatch =
+                    !search ||
+                    name.includes(
+                        search
+                    );
+
+
+                const startMatch =
+                    !start ||
+                    expense.expense_date >=
+                    start;
+
+
+                const endMatch =
+                    !end ||
+                    expense.expense_date <=
+                    end;
+
+
+                return (
+                    searchMatch &&
+                    categoryMatch &&
+                    startMatch &&
+                    endMatch
+                );
+
+            }
+        );
+    }
+
+
+    /* ========================================================
+       RENDER
+    ======================================================== */
+
+    function renderExpenses() {
+
+        const rows =
+            getFilteredExpenses();
+
+
+        let html = '';
+
+        let filteredTotal =
+            0;
+
+
+        rows.forEach(
+            function (expense) {
+
+                const amount =
+                    Number(
+                        expense.amount || 0
+                    );
+
+
+                filteredTotal +=
+                    amount;
+
+
+                html += `
+
+                    <tr>
+
+                        <td class="fw-bold">
+
+                            ${escapeHtml(
+                                expense.name
+                            )}
+
+                        </td>
+
+
+                        <td>
+
+                            <span
+                                class="badge
+                                       expense-category"
+                            >
+
+                                ${escapeHtml(
+                                    expense.category ||
+                                    'General'
+                                )}
+
+                            </span>
+
+                        </td>
+
+
+                        <td class="text-muted">
+
+                            ${escapeHtml(
+                                expense.expense_date
+                            )}
+
+                        </td>
+
+
+                        <td class="text-end">
+
+                            <span
+                                class="expense-amount"
+                            >
+
+                                K${money(amount)}
+
+                            </span>
+
+                        </td>
+
+
+                        <td
+                            class="text-center
+                                   no-print"
+                        >
+
+                            <button
+                                type="button"
+                                class="btn
+                                       btn-sm
+                                       btn-outline-danger
+                                       delete-expense"
+                                data-id="${Number(
+                                    expense.id
+                                )}"
+                                title="Delete expense"
+                            >
+
+                                <i
+                                    class="fas
+                                           fa-trash-alt"
+                                ></i>
+
+                            </button>
+
+                        </td>
+
+                    </tr>
+
+                `;
+
+            }
+        );
+
+
+        if (!html) {
+
+            html = `
+
+                <tr>
+
+                    <td
+                        colspan="5"
+                        class="expense-empty"
+                    >
+
+                        <i
+                            class="fas
+                                   fa-receipt"
+                        ></i>
+
+                        No expenses found.
+
+                    </td>
+
+                </tr>
+
+            `;
         }
 
-        alertBox.className =
-            'alert alert-' + type;
 
-        alertBox.innerHTML =
-            message;
-
-        alertBox.style.display =
-            'block';
+        document.getElementById(
+            'expenses_list'
+        ).innerHTML =
+            html;
 
 
-        setTimeout(function () {
+        /*
+         * When filters are active, display
+         * the filtered total.
+         */
 
-            alertBox.style.display =
-                'none';
+        document.getElementById(
+            'total_display'
+        ).textContent =
+            'K' +
+            money(
+                filteredTotal
+            );
 
-        }, 4500);
 
+        document.getElementById(
+            'count_display'
+        ).textContent =
+            rows.length;
+    }
+
+
+    /* ========================================================
+       LOAD
+    ======================================================== */
+
+    function loadExpenses() {
+
+        const table =
+            document.getElementById(
+                'expenses_list'
+            );
+
+
+        table.innerHTML = `
+
+            <tr>
+
+                <td
+                    colspan="5"
+                    class="text-center
+                           py-4"
+                >
+
+                    <i
+                        class="fas
+                               fa-spinner
+                               fa-spin
+                               me-2"
+                    ></i>
+
+                    Loading expenses...
+
+                </td>
+
+            </tr>
+
+        `;
+
+
+        fetch(
+            'actions/expenses.php?action=list',
+            {
+                method: 'GET',
+
+                credentials: 'same-origin',
+
+                cache: 'no-store',
+
+                headers: {
+                    'Accept':
+                        'application/json'
+                }
+            }
+        )
+
+        .then(
+            function (response) {
+
+                return response.text()
+                    .then(
+                        function (text) {
+
+                            let data;
+
+                            try {
+
+                                data =
+                                    JSON.parse(
+                                        text
+                                    );
+
+                            } catch (error) {
+
+                                console.error(
+                                    'Invalid expense JSON:',
+                                    text
+                                );
+
+                                throw new Error(
+                                    'The expense server returned an invalid response.'
+                                );
+                            }
+
+
+                            if (
+                                !response.ok
+                            ) {
+
+                                throw new Error(
+                                    data.message ||
+                                    'Unable to load expenses.'
+                                );
+                            }
+
+
+                            return data;
+
+                        }
+                    );
+
+            }
+        )
+
+        .then(
+            function (data) {
+
+                if (
+                    data.status !==
+                    'success'
+                ) {
+
+                    throw new Error(
+                        data.message ||
+                        'Unable to load expenses.'
+                    );
+                }
+
+
+                allExpenses =
+                    Array.isArray(
+                        data.expenses
+                    )
+                    ? data.expenses
+                    : [];
+
+
+                /*
+                 * Initial totals from database.
+                 */
+
+                document.getElementById(
+                    'total_display'
+                ).textContent =
+                    'K' +
+                    money(
+                        data.total
+                    );
+
+
+                document.getElementById(
+                    'month_display'
+                ).textContent =
+                    'K' +
+                    money(
+                        data.month_total
+                    );
+
+
+                document.getElementById(
+                    'count_display'
+                ).textContent =
+                    data.count ||
+                    allExpenses.length;
+
+
+                renderExpenses();
+
+            }
+        )
+
+        .catch(
+            function (error) {
+
+                console.error(
+                    'Expense loading error:',
+                    error
+                );
+
+
+                table.innerHTML = `
+
+                    <tr>
+
+                        <td
+                            colspan="5"
+                            class="text-center
+                                   text-danger
+                                   py-4"
+                        >
+
+                            <i
+                                class="fas
+                                       fa-exclamation-triangle
+                                       me-2"
+                            ></i>
+
+                            ${escapeHtml(
+                                error.message ||
+                                'Unable to load expenses.'
+                            )}
+
+                        </td>
+
+                    </tr>
+
+                `;
+
+            }
+        );
     }
 
 
@@ -1383,144 +2032,188 @@ require_once "../includes/head.php";
        ADD EXPENSE
     ======================================================== */
 
-    const expenseForm =
-        document.getElementById('expenseForm');
+    document.getElementById(
+        'expenseForm'
+    ).addEventListener(
+        'submit',
+        function (event) {
 
-    if (expenseForm) {
-
-        expenseForm.addEventListener(
-            'submit',
-            function (event) {
-
-                event.preventDefault();
+            event.preventDefault();
 
 
-                const submitButton =
-                    document.getElementById('submitBtn');
+            const button =
+                document.getElementById(
+                    'submitBtn'
+                );
 
 
-                submitButton.disabled =
-                    true;
-
-                submitButton.innerHTML =
-                    '<i class="fas fa-spinner fa-spin me-1"></i> SAVING...';
+            const formData =
+                new FormData(this);
 
 
-                const formData =
-                    new FormData(expenseForm);
+            formData.append(
+                'action',
+                'add'
+            );
 
 
-                fetch(
-                    'actions/add_expense.php',
-                    {
-                        method: 'POST',
-                        body: formData,
-                        credentials: 'same-origin'
+            button.disabled =
+                true;
+
+
+            button.innerHTML = `
+
+                <i
+                    class="fas
+                           fa-spinner
+                           fa-spin
+                           me-1"
+                ></i>
+
+                SAVING...
+
+            `;
+
+
+            fetch(
+                'actions/expenses.php',
+                {
+                    method: 'POST',
+
+                    body: formData,
+
+                    credentials: 'same-origin',
+
+                    headers: {
+                        'Accept':
+                            'application/json'
                     }
-                )
+                }
+            )
 
-                .then(function (response) {
+            .then(
+                function (response) {
 
-                    return response.text();
+                    return response.text()
+                        .then(
+                            function (text) {
 
-                })
+                                let data;
 
-                .then(function (text) {
+                                try {
 
-                    let data = null;
+                                    data =
+                                        JSON.parse(
+                                            text
+                                        );
 
-                    try {
+                                } catch (error) {
 
-                        data =
-                            JSON.parse(text);
+                                    console.error(
+                                        text
+                                    );
 
-                    } catch (error) {
+                                    throw new Error(
+                                        'Invalid server response while saving expense.'
+                                    );
+                                }
 
-                        console.error(
-                            'Invalid JSON from add_expense.php:',
-                            text
+
+                                if (
+                                    !response.ok
+                                ) {
+
+                                    throw new Error(
+                                        data.message ||
+                                        'Unable to save expense.'
+                                    );
+                                }
+
+
+                                return data;
+
+                            }
                         );
 
-                        throw new Error(
-                            'Invalid server response.'
-                        );
+                }
+            )
 
-                    }
-
+            .then(
+                function (data) {
 
                     if (
-                        data &&
-                        data.status === 'success'
+                        data.status !==
+                        'success'
                     ) {
 
-                        showExpenseAlert(
-                            'success',
-                            data.message ||
-                            'Expense saved successfully.'
-                        );
-
-
-                        /*
-                         * Reload page.
-                         *
-                         * This is deliberate.
-                         * The expense list is server-rendered,
-                         * so we don't need fetch_expenses.php.
-                         */
-                        setTimeout(
-                            function () {
-
-                                window.location.reload();
-
-                            },
-                            500
-                        );
-
-
-                    } else {
-
                         throw new Error(
-                            data &&
-                            data.message
-                                ? data.message
-                                : 'Unable to save expense.'
+                            data.message ||
+                            'Unable to save expense.'
                         );
-
                     }
 
-                })
 
-                .catch(function (error) {
+                    document.getElementById(
+                        'expenseForm'
+                    ).reset();
+
+
+                    document.getElementById(
+                        'expenseDate'
+                    ).value =
+                        today();
+
+
+                    loadExpenses();
+
+                }
+            )
+
+            .catch(
+                function (error) {
 
                     console.error(
-                        'Expense save error:',
+                        'Save expense error:',
                         error
                     );
 
 
-                    showExpenseAlert(
-                        'danger',
+                    alert(
                         error.message ||
                         'Unable to save expense.'
                     );
 
+                }
+            )
 
-                    submitButton.disabled =
+            .finally(
+                function () {
+
+                    button.disabled =
                         false;
 
-                    submitButton.innerHTML =
-                        '<i class="fas fa-save me-1"></i> SAVE EXPENSE';
 
-                });
+                    button.innerHTML = `
 
-            }
-        );
+                        <i
+                            class="fas
+                                   fa-save
+                                   me-1"
+                        ></i>
 
-    }
+                        SAVE EXPENSE
+
+                    `;
+
+                }
+            );
+
+        }
+    );
 
 
     /* ========================================================
-       DELETE EXPENSE
+       DELETE
     ======================================================== */
 
     document.addEventListener(
@@ -1538,133 +2231,119 @@ require_once "../includes/head.php";
             }
 
 
-            event.preventDefault();
-
-
-            const expenseId =
-                button.getAttribute(
-                    'data-id'
+            const id =
+                Number(
+                    button.getAttribute(
+                        'data-id'
+                    )
                 );
 
 
-            if (!expenseId) {
-
-                showExpenseAlert(
-                    'danger',
-                    'Invalid expense record.'
-                );
-
-                return;
-
-            }
-
-
-            const confirmed =
-                confirm(
-                    'Are you sure you want to delete this expense?'
-                );
-
-
-            if (!confirmed) {
+            if (!id) {
                 return;
             }
 
 
-            button.disabled =
-                true;
+            if (
+                !confirm(
+                    'Delete this expense record? This action cannot be undone.'
+                )
+            ) {
 
-            button.innerHTML =
-                '<i class="fas fa-spinner fa-spin"></i>';
+                return;
+            }
 
 
             const formData =
                 new FormData();
 
+
             formData.append(
-                'id',
-                expenseId
+                'action',
+                'delete'
             );
 
 
+            formData.append(
+                'id',
+                String(id)
+            );
+
+
+            button.disabled =
+                true;
+
+
             fetch(
-                'actions/delete_expense.php',
+                'actions/expenses.php',
                 {
                     method: 'POST',
+
                     body: formData,
-                    credentials: 'same-origin'
+
+                    credentials: 'same-origin',
+
+                    headers: {
+                        'Accept':
+                            'application/json'
+                    }
                 }
             )
 
-            .then(function (response) {
+            .then(
+                function (response) {
 
-                return response.text();
+                    return response.json();
 
-            })
+                }
+            )
 
-            .then(function (responseText) {
+            .then(
+                function (data) {
 
-                const result =
-                    responseText.trim();
+                    if (
+                        data.status !==
+                        'success'
+                    ) {
+
+                        throw new Error(
+                            data.message ||
+                            'Unable to delete expense.'
+                        );
+                    }
 
 
-                if (result === 'success') {
+                    loadExpenses();
 
-                    showExpenseAlert(
-                        'success',
-                        'Expense deleted successfully.'
+                }
+            )
+
+            .catch(
+                function (error) {
+
+                    console.error(
+                        error
                     );
 
 
-                    setTimeout(
-                        function () {
-
-                            window.location.reload();
-
-                        },
-                        400
-                    );
-
-
-                } else {
-
-                    throw new Error(
-                        result ||
+                    alert(
+                        error.message ||
                         'Unable to delete expense.'
                     );
 
+
+                    button.disabled =
+                        false;
+
                 }
-
-            })
-
-            .catch(function (error) {
-
-                console.error(
-                    'Delete expense error:',
-                    error
-                );
-
-
-                button.disabled =
-                    false;
-
-                button.innerHTML =
-                    '<i class="fas fa-trash"></i>';
-
-
-                showExpenseAlert(
-                    'danger',
-                    error.message ||
-                    'Unable to delete expense.'
-                );
-
-            });
+            );
 
         }
     );
 
 
     /* ========================================================
-       CLEAR EXPENSES
+       CLEAR MONTH / YEAR
     ======================================================== */
 
     document.addEventListener(
@@ -1691,123 +2370,170 @@ require_once "../includes/head.php";
                 );
 
 
-            if (
-                type !== 'month' &&
-                type !== 'year'
-            ) {
-
-                return;
-
-            }
+            const action =
+                type === 'month'
+                    ? 'clear_month'
+                    : 'clear_year';
 
 
-            let confirmationMessage;
-
-
-            if (type === 'month') {
-
-                confirmationMessage =
-                    'Are you sure you want to clear ALL expenses for this month?';
-
-            } else {
-
-                confirmationMessage =
-                    'Are you sure you want to clear ALL expenses for this year?';
-
-            }
+            const label =
+                type === 'month'
+                    ? 'this month'
+                    : 'this year';
 
 
             if (
                 !confirm(
-                    confirmationMessage
+                    'Clear all expense records for ' +
+                    label +
+                    ' for this branch? This cannot be undone.'
                 )
             ) {
 
                 return;
-
             }
 
 
             const formData =
                 new FormData();
 
+
             formData.append(
-                'type',
-                type
+                'action',
+                action
             );
 
 
             fetch(
-                'actions/clear_expenses.php',
+                'actions/expenses.php',
                 {
                     method: 'POST',
+
                     body: formData,
-                    credentials: 'same-origin'
+
+                    credentials: 'same-origin',
+
+                    headers: {
+                        'Accept':
+                            'application/json'
+                    }
                 }
             )
 
-            .then(function (response) {
+            .then(
+                function (response) {
 
-                return response.text();
+                    return response.json();
 
-            })
+                }
+            )
 
-            .then(function (responseText) {
+            .then(
+                function (data) {
 
-                const result =
-                    responseText.trim();
+                    if (
+                        data.status !==
+                        'success'
+                    ) {
+
+                        throw new Error(
+                            data.message ||
+                            'Unable to clear expenses.'
+                        );
+                    }
 
 
-                if (result === 'success') {
+                    loadExpenses();
 
-                    showExpenseAlert(
-                        'success',
-                        type === 'month'
-                            ? 'This month\'s expenses have been cleared.'
-                            : 'This year\'s expenses have been cleared.'
+                }
+            )
+
+            .catch(
+                function (error) {
+
+                    console.error(
+                        error
                     );
 
 
-                    setTimeout(
-                        function () {
-
-                            window.location.reload();
-
-                        },
-                        400
-                    );
-
-
-                } else {
-
-                    throw new Error(
-                        result ||
+                    alert(
+                        error.message ||
                         'Unable to clear expenses.'
                     );
 
                 }
-
-            })
-
-            .catch(function (error) {
-
-                console.error(
-                    'Clear expenses error:',
-                    error
-                );
-
-
-                showExpenseAlert(
-                    'danger',
-                    error.message ||
-                    'Unable to clear expenses.'
-                );
-
-            });
+            );
 
         }
     );
 
 
+    /* ========================================================
+       FILTER EVENTS
+    ======================================================== */
+
+    document.getElementById(
+        'expenseSearch'
+    ).addEventListener(
+        'input',
+        renderExpenses
+    );
+
+
+    document.getElementById(
+        'filterCategory'
+    ).addEventListener(
+        'change',
+        renderExpenses
+    );
+
+
+    document.getElementById(
+        'filterStart'
+    ).addEventListener(
+        'change',
+        renderExpenses
+    );
+
+
+    document.getElementById(
+        'filterEnd'
+    ).addEventListener(
+        'change',
+        renderExpenses
+    );
+
+
+    /* ========================================================
+       DEFAULT DATE FILTER
+    ======================================================== */
+
+    const currentDate =
+        today();
+
+
+    document.getElementById(
+        'filterStart'
+    ).value =
+        currentDate.substring(
+            0,
+            8
+        ) + '01';
+
+
+    document.getElementById(
+        'filterEnd'
+    ).value =
+        currentDate;
+
+
+    /* ========================================================
+       INITIAL LOAD
+    ======================================================== */
+
+    loadExpenses();
+
+
 })();
+
 </script>
