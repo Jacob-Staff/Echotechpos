@@ -77,9 +77,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // FETCH CURRENT ACTIVE SHIFT
 // -------------------------------------------------------------------------
 $active_shift = null;
-$active_stmt = $conn->prepare("SELECT * FROM shift_logs WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
+$active_stmt = $conn->prepare(
+    "SELECT * FROM shift_logs
+     WHERE user_id = ? AND pharmacy_id = ? AND branch_id = ? AND status = 'active'
+     ORDER BY id DESC LIMIT 1"
+);
 if ($active_stmt) {
-    $active_stmt->bind_param("i", $user_id);
+    $active_stmt->bind_param("iii", $user_id, $pharmacy_id, $branch_id);
     $active_stmt->execute();
     $active_shift = $active_stmt->get_result()->fetch_assoc();
     $active_stmt->close();
@@ -133,12 +137,24 @@ if ($logs_stmt) {
 }
 
 function get_shift_duration($start, $end) {
-    if (!$end) return '-';
-    $d1 = new DateTime($start);
-    $d2 = new DateTime($end);
-    $diff = $d1->diff($d2);
-    $hours = $diff->h + ($diff->days * 24);
-    return "{$hours} hrs {$diff->i} mins";
+    if (!$end || !$start) return 'In progress';
+
+    try {
+        $d1 = new DateTime($start);
+        $d2 = new DateTime($end);
+        if ($d2 < $d1) return '-';
+
+        $diff = $d1->diff($d2);
+        $parts = [];
+
+        if ($diff->days > 0) $parts[] = $diff->days . ' day' . ($diff->days === 1 ? '' : 's');
+        if ($diff->h > 0) $parts[] = $diff->h . ' hr' . ($diff->h === 1 ? '' : 's');
+        if ($diff->i > 0) $parts[] = $diff->i . ' min' . ($diff->i === 1 ? '' : 's');
+
+        return !empty($parts) ? implode(' ', $parts) : '0 mins';
+    } catch (Exception $e) {
+        return '-';
+    }
 }
 
 require_once "../includes/head.php";
@@ -282,15 +298,28 @@ if (file_exists("../includes/aside.php")) require_once "../includes/aside.php";
         <!-- DUTY LOGS TABLE CARD -->
         <div class="table-card">
             <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-                <h5 class="fw-bold text-dark mb-0">
-                    <i class="fas fa-clipboard-list text-secondary me-2"></i>Duty Reporting Logs
-                </h5>
+                <div>
+                    <h5 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-clipboard-list text-secondary me-2"></i>Duty Reporting Logs
+                    </h5>
+                    <div class="small text-muted mt-1" id="shiftCount">Showing all records</div>
+                </div>
 
-                <form method="GET" class="d-flex gap-2 align-items-center">
-                    <input type="date" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date) ?>">
-                    <button type="submit" class="btn btn-primary btn-sm fw-bold"><i class="fas fa-filter me-1"></i> Filter</button>
-                    <a href="?" class="btn btn-outline-secondary btn-sm fw-bold">Reset</a>
-                </form>
+                <div class="shift-filters d-flex gap-2 align-items-center flex-wrap">
+                    <div class="input-group input-group-sm filter-search">
+                        <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted"></i></span>
+                        <input type="search" id="shiftSearch" class="form-control border-start-0" placeholder="Search staff, branch, shift...">
+                    </div>
+                    <input type="date" id="filterDateLive" name="filter_date" class="form-control form-control-sm" value="<?= htmlspecialchars($filter_date) ?>">
+                    <select id="statusLive" class="form-select form-select-sm">
+                        <option value="all">All statuses</option>
+                        <option value="active">Active</option>
+                        <option value="completed">Completed</option>
+                    </select>
+                    <button type="button" id="clearFilters" class="btn btn-outline-secondary btn-sm fw-bold">
+                        <i class="fas fa-undo me-1"></i>Reset
+                    </button>
+                </div>
             </div>
 
             <div class="table-responsive">
@@ -309,7 +338,9 @@ if (file_exists("../includes/aside.php")) require_once "../includes/aside.php";
                     <tbody>
                         <?php if ($logs_res && $logs_res->num_rows > 0): ?>
                             <?php while ($row = $logs_res->fetch_assoc()): ?>
-                                <tr>
+                                <tr class="shift-log-row"
+                                    data-date="<?= htmlspecialchars(date('Y-m-d', strtotime($row['clock_in']))) ?>"
+                                    data-status="<?= htmlspecialchars(strtolower($row['status'])) ?>">
                                     <td>
                                         <div class="fw-bold text-dark"><?= htmlspecialchars($row['staff_name']) ?></div>
                                         <div class="text-muted small"><?= htmlspecialchars($row['role']) ?></div>
@@ -369,24 +400,137 @@ if (file_exists("../includes/aside.php")) require_once "../includes/aside.php";
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-function updateClock() {
-    const now = new Date();
-    let hours = now.getHours();
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    document.getElementById('liveClock').textContent = `${hours}:${minutes}:${seconds} ${ampm}`;
-}
-setInterval(updateClock, 1000);
-updateClock();
+(function () {
+    const liveClock = document.getElementById('liveClock');
+    const search = document.getElementById('shiftSearch');
+    const dateFilter = document.getElementById('filterDateLive');
+    const statusFilter = document.getElementById('statusLive');
+    const count = document.getElementById('shiftCount');
+    const clearBtn = document.getElementById('clearFilters');
 
-function openShiftModal() {
-    document.getElementById('shiftModal').style.display = 'flex';
-}
-function closeShiftModal() {
-    document.getElementById('shiftModal').style.display = 'none';
-}
+    // Zambia uses CAT (UTC+02:00). Display the POS standard timezone
+    // regardless of the workstation's local timezone.
+    function updateClock() {
+        if (!liveClock) return;
+
+        const now = new Date();
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Africa/Lusaka',
+            hour: 'numeric',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+        }).formatToParts(now);
+
+        const get = key => (parts.find(p => p.type === key) || {}).value || '';
+        liveClock.textContent =
+            `${get('hour')}:${get('minute')}:${get('second')} ${get('dayPeriod')}`;
+    }
+
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    window.openShiftModal = function () {
+        document.getElementById('shiftModal').style.display = 'flex';
+        document.body.classList.add('modal-open');
+    };
+
+    window.closeShiftModal = function () {
+        document.getElementById('shiftModal').style.display = 'none';
+        document.body.classList.remove('modal-open');
+    };
+
+    document.getElementById('shiftModal')?.addEventListener('click', function (e) {
+        if (e.target === this) window.closeShiftModal();
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') window.closeShiftModal();
+    });
+
+    function applyLiveFilters() {
+        const q = (search?.value || '').trim().toLowerCase();
+        const selectedDate = dateFilter?.value || '';
+        const selectedStatus = statusFilter?.value || 'all';
+
+        const rows = Array.from(document.querySelectorAll('.shift-log-row'));
+        let visible = 0;
+
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            const rowDate = row.dataset.date || '';
+            const rowStatus = row.dataset.status || '';
+
+            const matchesSearch = !q || text.includes(q);
+            const matchesDate = !selectedDate || rowDate === selectedDate;
+            const matchesStatus = selectedStatus === 'all' || rowStatus === selectedStatus;
+
+            const show = matchesSearch && matchesDate && matchesStatus;
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+
+        let empty = document.getElementById('liveNoResults');
+        if (!empty) {
+            empty = document.createElement('tr');
+            empty.id = 'liveNoResults';
+            empty.innerHTML =
+                '<td colspan="7" class="text-center py-5 text-muted">' +
+                '<i class="fas fa-search d-block mb-2" style="font-size:1.5rem;color:#cbd5e1"></i>' +
+                'No shift logs match the selected filters.</td>';
+            document.querySelector('table tbody')?.appendChild(empty);
+        }
+
+        empty.style.display = (rows.length && visible === 0) ? '' : 'none';
+
+        if (count) {
+            count.textContent = `Showing ${visible} record${visible === 1 ? '' : 's'}`;
+        }
+    }
+
+    search?.addEventListener('input', applyLiveFilters);
+    dateFilter?.addEventListener('change', applyLiveFilters);
+    statusFilter?.addEventListener('change', applyLiveFilters);
+
+    clearBtn?.addEventListener('click', function () {
+        if (search) search.value = '';
+        if (dateFilter) dateFilter.value = '';
+        if (statusFilter) statusFilter.value = 'all';
+        applyLiveFilters();
+    });
+
+    // Confirm clock-out and prevent double submission.
+    document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', function (e) {
+            const action = form.querySelector('input[name="action"]')?.value;
+
+            if (action === 'clock_out') {
+                if (!window.confirm('Are you sure you want to clock out of your current shift?')) {
+                    e.preventDefault();
+                    return;
+                }
+            }
+
+            if (action === 'clock_in') {
+                const button = form.querySelector('button[type="submit"]');
+                if (button) {
+                    button.disabled = true;
+                    button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Clocking In...';
+                }
+            }
+
+            if (action === 'clock_out') {
+                const button = form.querySelector('button[type="submit"]');
+                if (button) {
+                    button.disabled = true;
+                    button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Clocking Out...';
+                }
+            }
+        });
+    });
+
+    applyLiveFilters();
+})();
 </script>
 </body>
 </html>
