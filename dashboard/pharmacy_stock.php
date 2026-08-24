@@ -2,7 +2,7 @@
 /**
  * ============================================================
  * PHARMANOVA POS
- * PHARMACY STOCK — FINAL CONSOLIDATED PAGE
+ * PHARMACY STOCK â€” FINAL CONSOLIDATED PAGE
  * ============================================================
  *
  * This page displays ONLY stock with current value:
@@ -651,6 +651,44 @@ require_once "../includes/head.php";
     font-size: 24px;
 }
 
+
+/* ============================================================
+   LIVE FILTERS
+   Select filters apply immediately. Search is debounced.
+   ============================================================ */
+.ps-filter.is-loading {
+    opacity: .72;
+    pointer-events: none;
+}
+
+.ps-filter .auto-filter {
+    cursor: pointer;
+}
+
+.ps-live-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #6c7a89;
+    margin-top: 7px;
+}
+
+.ps-live-status i {
+    font-size: 10px;
+}
+
+.ps-live-status.loading {
+    color: #4299cf;
+}
+
+.ps-filter .form-control:focus,
+.ps-filter .form-select:focus {
+    border-color: #4299cf;
+    box-shadow: 0 0 0 .15rem rgba(66,153,207,.12);
+}
+
 @media (max-width: 768px) {
     .pharmacy-stock-page {
         padding: 10px;
@@ -709,7 +747,7 @@ if (file_exists("../includes/aside.php")) {
 
                 <div class="small text-muted">
                     <strong><?= ps_h(strtoupper($pharmacy_name)) ?></strong>
-                    <span class="mx-1">•</span>
+                    <span class="mx-1">â€¢</span>
                     <?= ps_h($branch_name) ?>
                 </div>
 
@@ -842,7 +880,7 @@ if (file_exists("../includes/aside.php")) {
                 <div class="col-12 col-md-4 col-lg-2">
                     <label class="ps-label">Category</label>
 
-                    <select name="category" class="form-select">
+                    <select name="category" class="form-select auto-filter">
                         <option value="">All Categories</option>
 
                         <?php foreach ($categories as $cat): ?>
@@ -859,7 +897,7 @@ if (file_exists("../includes/aside.php")) {
                 <div class="col-12 col-md-4 col-lg-2">
                     <label class="ps-label">Stock Level</label>
 
-                    <select name="stock" class="form-select">
+                    <select name="stock" class="form-select auto-filter">
                         <option value="all" <?= $stock_filter === 'all' ? 'selected' : '' ?>>
                             All Stock
                         </option>
@@ -877,7 +915,7 @@ if (file_exists("../includes/aside.php")) {
                 <div class="col-12 col-md-4 col-lg-2">
                     <label class="ps-label">Expiry</label>
 
-                    <select name="expiry" class="form-select">
+                    <select name="expiry" class="form-select auto-filter">
                         <option value="all" <?= $expiry_filter === 'all' ? 'selected' : '' ?>>
                             All Valid
                         </option>
@@ -901,12 +939,17 @@ if (file_exists("../includes/aside.php")) {
                 </div>
 
                 <div class="col-12 col-lg-2">
-                    <button type="submit" class="btn btn-primary w-100 fw-bold">
+                    <button type="submit" class="btn btn-primary w-100 fw-bold" id="manual-filter-btn">
                         <i class="fas fa-filter me-1"></i>
-                        Apply
+                        Filter
                     </button>
                 </div>
 
+            </div>
+
+            <div class="ps-live-status" id="filter-status" aria-live="polite">
+                <i class="fas fa-bolt"></i>
+                Filters update automatically
             </div>
 
             <?php if ($search !== '' || $category !== '' || $stock_filter !== 'all' || $expiry_filter !== 'all'): ?>
@@ -1016,7 +1059,7 @@ if (file_exists("../includes/aside.php")) {
                                         <?= ps_h($row['barcode']) ?>
                                     </span>
                                 <?php else: ?>
-                                    <span class="text-muted">—</span>
+                                    <span class="text-muted">â€”</span>
                                 <?php endif; ?>
                             </td>
 
@@ -1358,6 +1401,92 @@ if (file_exists("../includes/footer.php")) {
 <script>
 (function () {
     'use strict';
+
+    /* ============================================================
+       LIVE FILTERING
+       - Category / Stock / Expiry: apply immediately on change.
+       - Search: apply automatically after the user pauses typing.
+       - Page is reset to 1 whenever filters change.
+       ============================================================ */
+    const filterForm = document.getElementById('stock-filter-form');
+    const searchInput = document.getElementById('stock-search');
+    const filterPanel = document.querySelector('.ps-filter');
+    const filterStatus = document.getElementById('filter-status');
+    const manualFilterButton = document.getElementById('manual-filter-btn');
+
+    let searchTimer = null;
+
+    function submitLiveFilters() {
+        if (!filterForm) return;
+
+        const pageInput = filterForm.querySelector('input[name="page"]');
+        if (pageInput) {
+            pageInput.remove();
+        }
+
+        if (filterPanel) {
+            filterPanel.classList.add('is-loading');
+        }
+
+        if (filterStatus) {
+            filterStatus.classList.add('loading');
+            filterStatus.innerHTML =
+                '<i class="fas fa-spinner fa-spin"></i> Updating stock...';
+        }
+
+        if (manualFilterButton) {
+            manualFilterButton.disabled = true;
+            manualFilterButton.innerHTML =
+                '<i class="fas fa-spinner fa-spin me-1"></i>Loading...';
+        }
+
+        filterForm.submit();
+    }
+
+    document.querySelectorAll('.auto-filter').forEach(function (select) {
+        select.addEventListener('change', function () {
+            submitLiveFilters();
+        });
+    });
+
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            clearTimeout(searchTimer);
+
+            const value = this.value.trim();
+
+            /* Search immediately when cleared. */
+            if (value === '') {
+                submitLiveFilters();
+                return;
+            }
+
+            /* Avoid a page reload on every keystroke. */
+            searchTimer = setTimeout(function () {
+                submitLiveFilters();
+            }, 450);
+        });
+
+        /* Enter still works immediately. */
+        searchInput.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                clearTimeout(searchTimer);
+                submitLiveFilters();
+            }
+        });
+    }
+
+    /* Prevent accidental double-submit from the Filter button. */
+    if (filterForm) {
+        filterForm.addEventListener('submit', function () {
+            if (filterPanel) {
+                filterPanel.classList.add('is-loading');
+            }
+        });
+    }
+
+    const deleteModalEl = document.getElementById('deleteStockModal');
 
     const deleteModalEl = document.getElementById('deleteStockModal');
     const adjustModalEl = document.getElementById('adjustStockModal');
