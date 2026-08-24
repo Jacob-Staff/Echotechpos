@@ -22,15 +22,38 @@ if (!$pharmacy_id || !$branch_id) {
 
 // Filter Status
 $status_filter = $_GET['status'] ?? 'all';
+$allowed_statuses = ['all', 'ordered', 'partial', 'received', 'draft', 'cancelled'];
+
+if (!in_array($status_filter, $allowed_statuses, true)) {
+    $status_filter = 'all';
+}
+
+$search = trim((string)($_GET['search'] ?? ''));
 
 $where_clause = "po.pharmacy_id = ? AND po.branch_id = ?";
 $params = [$pharmacy_id, $branch_id];
 $types = "ii";
 
-if (!empty($status_filter) && $status_filter !== 'all') {
+if ($status_filter !== 'all') {
     $where_clause .= " AND po.status = ?";
     $params[] = $status_filter;
     $types .= "s";
+}
+
+if ($search !== '') {
+    $where_clause .= " AND (
+        po.po_number LIKE ?
+        OR s.name LIKE ?
+        OR u.full_name LIKE ?
+        OR po.status LIKE ?
+    )";
+
+    $search_like = '%' . $search . '%';
+    $params[] = $search_like;
+    $params[] = $search_like;
+    $params[] = $search_like;
+    $params[] = $search_like;
+    $types .= "ssss";
 }
 
 $sql = "SELECT po.id, po.po_number, po.po_date, po.expected_date, po.status, po.total_cost,
@@ -65,6 +88,28 @@ body { background-color: var(--bg-page) !important; font-family: 'Inter', system
 .badge-partial { background-color: #fef3c7; color: #b45309; }
 .badge-received { background-color: #dcfce7; color: #15803d; }
 .badge-cancelled { background-color: #fee2e2; color: #b91c1c; }
+
+.po-table thead th {
+    white-space: nowrap;
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: #475569;
+}
+
+.po-table tbody td {
+    vertical-align: middle;
+}
+
+.po-empty {
+    padding: 4rem 1rem !important;
+}
+
+@media (max-width: 768px) {
+    .po-list-wrapper {
+        padding: 1rem .75rem;
+    }
+}
 </style>
 
 <div id="main-wrapper">
@@ -97,22 +142,55 @@ body { background-color: var(--bg-page) !important; font-family: 'Inter', system
                 </div>
             <?php endif; ?>
 
-            <!-- Status Filters -->
+            <!-- Live Filters -->
             <div class="card border-0 shadow-sm mb-4">
-                <div class="card-body p-3 d-flex flex-wrap align-items-center gap-2">
-                    <span class="fw-bold text-muted small me-2">Filter Status:</span>
-                    <a href="purchase_orders_list.php?status=all" class="btn btn-sm <?= $status_filter === 'all' ? 'btn-dark' : 'btn-outline-secondary' ?>">All</a>
-                    <a href="purchase_orders_list.php?status=ordered" class="btn btn-sm <?= $status_filter === 'ordered' ? 'btn-info text-white' : 'btn-outline-info' ?>">Ordered</a>
-                    <a href="purchase_orders_list.php?status=partial" class="btn btn-sm <?= $status_filter === 'partial' ? 'btn-warning text-dark' : 'btn-outline-warning' ?>">Partial</a>
-                    <a href="purchase_orders_list.php?status=received" class="btn btn-sm <?= $status_filter === 'received' ? 'btn-success' : 'btn-outline-success' ?>">Received</a>
-                    <a href="purchase_orders_list.php?status=draft" class="btn btn-sm <?= $status_filter === 'draft' ? 'btn-secondary' : 'btn-outline-secondary' ?>">Draft</a>
+                <div class="card-body p-3">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-12 col-lg-7">
+                            <label for="po-search" class="form-label fw-bold text-muted small mb-1">
+                                Search Purchase Orders
+                            </label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-white">
+                                    <i class="fas fa-search text-muted"></i>
+                                </span>
+                                <input
+                                    type="search"
+                                    id="po-search"
+                                    class="form-control"
+                                    value="<?= htmlspecialchars($search, ENT_QUOTES, 'UTF-8') ?>"
+                                    placeholder="PO number, supplier, creator or status..."
+                                    autocomplete="off"
+                                >
+                                <?php if ($search !== ''): ?>
+                                    <button type="button" id="clear-po-search" class="btn btn-outline-secondary">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                        <div class="col-12 col-lg-5">
+                            <label for="po-status" class="form-label fw-bold text-muted small mb-1">
+                                Filter Status
+                            </label>
+                            <select id="po-status" class="form-select">
+                                <option value="all" <?= $status_filter === 'all' ? 'selected' : '' ?>>All Statuses</option>
+                                <option value="ordered" <?= $status_filter === 'ordered' ? 'selected' : '' ?>>Ordered</option>
+                                <option value="partial" <?= $status_filter === 'partial' ? 'selected' : '' ?>>Partial</option>
+                                <option value="received" <?= $status_filter === 'received' ? 'selected' : '' ?>>Received</option>
+                                <option value="draft" <?= $status_filter === 'draft' ? 'selected' : '' ?>>Draft</option>
+                                <option value="cancelled" <?= $status_filter === 'cancelled' ? 'selected' : '' ?>>Cancelled</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <!-- Orders Table -->
             <div class="card-table overflow-hidden">
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
+                    <table class="table table-hover align-middle mb-0 po-table" id="purchase-orders-table">
                         <thead class="table-light">
                             <tr>
                                 <th>PO Ref #</th>
@@ -165,7 +243,7 @@ body { background-color: var(--bg-page) !important; font-family: 'Inter', system
                                 <?php endwhile; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="8" class="text-center py-5 text-muted">
+                                    <td colspan="8" class="text-center py-5 text-muted po-empty">
                                         <i class="fas fa-file-invoice fa-2x mb-3 d-block text-secondary"></i>
                                         No purchase orders found matching this criteria.
                                     </td>
@@ -186,5 +264,73 @@ body { background-color: var(--bg-page) !important; font-family: 'Inter', system
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+(function () {
+    'use strict';
+
+    const searchInput = document.getElementById('po-search');
+    const statusSelect = document.getElementById('po-status');
+    const clearButton = document.getElementById('clear-po-search');
+
+    let searchTimer = null;
+
+    function applyFilters() {
+        const params = new URLSearchParams();
+        const status = statusSelect ? statusSelect.value : 'all';
+        const search = searchInput ? searchInput.value.trim() : '';
+
+        if (status && status !== 'all') {
+            params.set('status', status);
+        }
+
+        if (search !== '') {
+            params.set('search', search);
+        }
+
+        params.set('page', '1');
+
+        const query = params.toString();
+        window.location.href = 'purchase_orders_list.php' + (query ? '?' + query : '');
+    }
+
+    if (statusSelect) {
+        statusSelect.addEventListener('change', applyFilters);
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            clearTimeout(searchTimer);
+
+            searchTimer = setTimeout(function () {
+                applyFilters();
+            }, 400);
+        });
+
+        searchInput.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                clearTimeout(searchTimer);
+                applyFilters();
+            }
+
+            if (event.key === 'Escape') {
+                clearTimeout(searchTimer);
+                searchInput.value = '';
+                applyFilters();
+            }
+        });
+    }
+
+    if (clearButton) {
+        clearButton.addEventListener('click', function () {
+            if (searchInput) {
+                searchInput.value = '';
+            }
+            applyFilters();
+        });
+    }
+})();
+</script>
 </body>
 </html>
