@@ -1,12 +1,14 @@
 <?php
-ini_set('display_errors', 0);
+declare(strict_types=1);
+
+ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 
 require_once "../../includes/conn.php";
 require_once "../../includes/auth.php";
@@ -17,123 +19,266 @@ $pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
 $branch_id   = (int)($_SESSION['branch_id'] ?? 0);
 
 if (!$pharmacy_id || !$branch_id) {
+    http_response_code(401);
     echo json_encode([
+        'status' => 'error',
+        'message' => 'Session expired.',
         'labels' => [],
         'totals' => [],
         'counts' => [],
         'total_revenue' => 0,
         'total_transactions' => 0
     ]);
-    exit();
+    exit;
 }
 
-// Extract Inputs
-$search         = trim($_POST['search'] ?? '');
-$category       = trim($_POST['category'] ?? '');
-$payment_method = trim($_POST['payment_method'] ?? '');
-$startDate      = trim($_POST['startDate'] ?? date('Y-m-d', strtotime('-6 months')));
-$endDate        = trim($_POST['endDate'] ?? date('Y-m-d'));
-$trendType      = trim($_POST['trendType'] ?? 'weekly');
+$search         = trim((string)($_POST['search'] ?? ''));
+$category       = trim((string)($_POST['category'] ?? ''));
+$payment_method = trim((string)($_POST['payment_method'] ?? ''));
+$startDate      = trim((string)($_POST['startDate'] ?? date('Y-m-d', strtotime('-6 months'))));
+$endDate        = trim((string)($_POST['endDate'] ?? date('Y-m-d')));
+$trendType      = trim((string)($_POST['trendType'] ?? 'weekly'));
 
-// Grouping Logic
+$validDate = static function (string $date): bool {
+    $d = DateTime::createFromFormat('Y-m-d', $date);
+    return $d !== false && $d->format('Y-m-d') === $date;
+};
+
+if (!$validDate($startDate)) {
+    $startDate = date('Y-m-d', strtotime('-6 months'));
+}
+if (!$validDate($endDate)) {
+    $endDate = date('Y-m-d');
+}
+if ($startDate > $endDate) {
+    [$startDate, $endDate] = [$endDate, $startDate];
+}
+
+if (!in_array($trendType, ['daily', 'weekly', 'monthly', 'yearly'], true)) {
+    $trendType = 'weekly';
+}
+
+/*
+ * IMPORTANT:
+ * The database uses:
+ *   sales.invoice          (not invoice_no)
+ *   sales.total_amount    (final sale amount)
+ *   sales.payment_method
+ *   sales_items.quantity
+ *   sales_items.unit_price
+ *   store_items.item_name/category
+ *
+ * The trend endpoint therefore never references the non-existent
+ * sales_items.total_price or sales.invoice_no columns.
+ */
+
 switch ($trendType) {
     case 'daily':
-        $group_by = "DATE(s.sale_date)";
-        $label_format = "DATE_FORMAT(s.sale_date, '%d %b %Y')";
+        $groupBy = "DATE(s.sale_date)";
+        $labelSql = "DATE_FORMAT(s.sale_date, '%d %b %Y')";
         break;
+
     case 'monthly':
-        $group_by = "YEAR(s.sale_date), MONTH(s.sale_date)";
-        $label_format = "DATE_FORMAT(s.sale_date, '%b %Y')";
+        $groupBy = "YEAR(s.sale_date), MONTH(s.sale_date)";
+        $labelSql = "DATE_FORMAT(s.sale_date, '%b %Y')";
         break;
+
     case 'yearly':
-        $group_by = "YEAR(s.sale_date)";
-        $label_format = "YEAR(s.sale_date)";
+        $groupBy = "YEAR(s.sale_date)";
+        $labelSql = "CAST(YEAR(s.sale_date) AS CHAR)";
         break;
+
     case 'weekly':
     default:
-        $group_by = "YEAR(s.sale_date), WEEK(s.sale_date, 1)";
-        $label_format = "CONCAT('Wk ', WEEK(s.sale_date, 1), ' ', YEAR(s.sale_date))";
+        $groupBy = "YEARWEEK(s.sale_date, 1)";
+        $labelSql = "CONCAT('Week ', LPAD(WEEK(s.sale_date, 1), 2, '0'), ' ', YEAR(s.sale_date))";
         break;
 }
 
-// Build Base Query Filters
-$where_clauses = ["s.pharmacy_id = ?", "s.branch_id = ?", "DATE(s.sale_date) BETWEEN ? AND ?"];
+$where = [
+    "s.pharmacy_id = ?",
+    "s.branch_id = ?",
+    "DATE(s.sale_date) BETWEEN ? AND ?"
+];
+
 $params = [$pharmacy_id, $branch_id, $startDate, $endDate];
 $types  = "iiss";
 
-// Optional Joins Flag (if category or product search is used)
-$needs_items_join = false;
+/*
+ * We use EXISTS for item/category/search filters.
+ * This avoids multiplying a sale when an invoice contains several items.
+ */
+if ($category !== '' || $search !== '') {
+    $exists = [
+        "si.sale_id = s.id",
+        "si.pharmacy_id = s.pharmacy_id",
+        "si.branch_id = s.branch_id",
+        "st.id = si.product_id"
+    ];
 
-if (!empty($category)) {
-    $needs_items_join = true;
-    $where_clauses[] = "si.category = ?";
-    $params[] = $category;
-    $types .= "s";
+    if ($category !== '') {
+        $exists[] = "st.category = ?";
+        $params[] = $category;
+        $types .= "s";
+    }
+
+    if ($search !== '') {
+        $exists[] = "(s.invoice LIKE ? OR st.item_name LIKE ? OR st.barcode LIKE ?)";
+        $searchParam = "%{$search}%";
+        $params[] = $searchParam;
+        $params[] = $searchParam;
+        $params[] = $searchParam;
+        $types .= "sss";
+    }
+
+    $where[] = "EXISTS (
+        SELECT 1
+        FROM sales_items si
+        INNER JOIN store_items st ON st.id = si.product_id
+        WHERE " . implode(" AND ", $exists) . "
+    )";
 }
 
-if (!empty($payment_method)) {
-    $where_clauses[] = "s.payment_method = ?";
+if ($payment_method !== '') {
+    $where[] = "s.payment_method = ?";
     $params[] = $payment_method;
     $types .= "s";
 }
 
-if (!empty($search)) {
-    $needs_items_join = true;
-    $where_clauses[] = "(s.invoice_no LIKE ? OR si.item_name LIKE ?)";
-    $search_param = "%{$search}%";
-    $params[] = $search_param;
-    $params[] = $search_param;
+$whereSql = implode(" AND ", $where);
+
+/*
+ * When a category/product filter is active, revenue is calculated from
+ * the matching sale lines. Otherwise the authoritative sale total is used.
+ */
+$hasItemFilter = ($category !== '' || $search !== '');
+
+if ($hasItemFilter) {
+    $sql = "
+        SELECT
+            {$labelSql} AS sale_label,
+            COALESCE(SUM(si.quantity * COALESCE(si.unit_price, st.price)), 0) AS total_sales,
+            COUNT(DISTINCT s.id) AS transactions
+        FROM sales s
+        INNER JOIN sales_items si
+            ON si.sale_id = s.id
+           AND si.pharmacy_id = s.pharmacy_id
+           AND si.branch_id = s.branch_id
+        INNER JOIN store_items st
+            ON st.id = si.product_id
+        WHERE {$whereSql}
+          AND (
+              ? = ''
+              OR st.category = ?
+          )
+          AND (
+              ? = ''
+              OR s.invoice LIKE ?
+              OR st.item_name LIKE ?
+              OR st.barcode LIKE ?
+          )
+        GROUP BY {$groupBy}
+        ORDER BY MIN(s.sale_date) ASC
+    ";
+
+    /*
+     * The EXISTS filter above determines which sales qualify, while these
+     * additional conditions determine which line values contribute to the
+     * filtered revenue.
+     */
+    $params[] = $category;
+    $params[] = $category;
     $types .= "ss";
-}
 
-$where_sql = implode(" AND ", $where_clauses);
-
-// Build SQL Query
-if ($needs_items_join) {
-    $sql = "SELECT $label_format AS sale_label, 
-                   SUM(si_items.total_price) as total_sales, 
-                   COUNT(DISTINCT s.id) as transactions
-            FROM sales s
-            JOIN sales_items si_items ON s.id = si_items.sale_id
-            JOIN store_items si ON si_items.item_id = si.id
-            WHERE $where_sql
-            GROUP BY $group_by
-            ORDER BY MIN(s.sale_date) ASC";
+    $params[] = $search;
+    $searchParam = "%{$search}%";
+    $params[] = $searchParam;
+    $params[] = $searchParam;
+    $params[] = $searchParam;
+    $types .= "ssss";
 } else {
-    $sql = "SELECT $label_format AS sale_label, 
-                   SUM(s.total_amount) as total_sales, 
-                   COUNT(s.id) as transactions
-            FROM sales s
-            WHERE $where_sql
-            GROUP BY $group_by
-            ORDER BY MIN(s.sale_date) ASC";
+    $sql = "
+        SELECT
+            {$labelSql} AS sale_label,
+            COALESCE(SUM(COALESCE(s.total_amount, s.total, 0)), 0) AS total_sales,
+            COUNT(s.id) AS transactions
+        FROM sales s
+        WHERE {$whereSql}
+        GROUP BY {$groupBy}
+        ORDER BY MIN(s.sale_date) ASC
+    ";
 }
 
 $stmt = $conn->prepare($sql);
+
+if (!$stmt) {
+    http_response_code(500);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'Unable to prepare trend query.',
+        'labels' => [],
+        'totals' => [],
+        'counts' => [],
+        'total_revenue' => 0,
+        'total_transactions' => 0
+    ]);
+    exit;
+}
+
 $stmt->bind_param($types, ...$params);
-$stmt->execute();
+
+if (!$stmt->execute()) {
+    http_response_code(500);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'Unable to load sales trend data.',
+        'labels' => [],
+        'totals' => [],
+        'counts' => [],
+        'total_revenue' => 0,
+        'total_transactions' => 0
+    ]);
+    $stmt->close();
+    exit;
+}
+
 $result = $stmt->get_result();
 
-$sales_labels = [];
-$sales_totals = [];
-$sales_counts = [];
-$total_revenue = 0;
-$total_transactions = 0;
+$labels = [];
+$totals = [];
+$counts = [];
+$totalRevenue = 0.0;
+$totalTransactions = 0;
 
 while ($row = $result->fetch_assoc()) {
-    $sales_labels[] = $row['sale_label'];
-    $sales_totals[] = (float)$row['total_sales'];
-    $sales_counts[] = (int)$row['transactions'];
-    $total_revenue += (float)$row['total_sales'];
-    $total_transactions += (int)$row['transactions'];
+    $amount = (float)$row['total_sales'];
+    $count  = (int)$row['transactions'];
+
+    $labels[] = $row['sale_label'];
+    $totals[] = round($amount, 2);
+    $counts[] = $count;
+
+    $totalRevenue += $amount;
+    $totalTransactions += $count;
 }
+
 $stmt->close();
 
 echo json_encode([
-    'labels'             => $sales_labels,
-    'totals'             => $sales_totals,
-    'counts'             => $sales_counts,
-    'total_revenue'      => $total_revenue,
-    'total_transactions' => $total_transactions
-]);
-exit();
+    'status' => 'success',
+    'filters' => [
+        'start_date' => $startDate,
+        'end_date' => $endDate,
+        'search' => $search,
+        'category' => $category,
+        'payment_method' => $payment_method,
+        'trend_type' => $trendType
+    ],
+    'labels' => $labels,
+    'totals' => $totals,
+    'counts' => $counts,
+    'total_revenue' => round($totalRevenue, 2),
+    'total_transactions' => $totalTransactions
+], JSON_UNESCAPED_UNICODE);
+
+exit;
