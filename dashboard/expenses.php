@@ -875,7 +875,7 @@ require_once '../includes/head.php';
                                 'UTF-8'
                             ); ?>
 
-                            <span class="mx-1">â€¢</span>
+                            <span class="mx-1">•</span>
 
                             <?= htmlspecialchars(
                                 $branch_name,
@@ -1693,6 +1693,8 @@ require_once '../includes/head.php';
 </div>
 
 
+<script>
+
 <!-- ============================================================
      CUSTOM CONFIRMATION MODAL
 ============================================================ -->
@@ -1802,8 +1804,6 @@ require_once '../includes/head.php';
     </div>
 
 </div>
-
-<script>
 
 /* ============================================================
    EXPENSE PAGE JAVASCRIPT
@@ -2851,18 +2851,15 @@ document.addEventListener(
                     const formData =
                         new FormData();
 
-
                     formData.append(
                         'action',
                         'delete'
                     );
 
-
                     formData.append(
                         'id',
                         String(id)
                     );
-
 
                     return fetch(
                         'actions/expenses.php',
@@ -2903,7 +2900,6 @@ document.addEventListener(
                                 );
                             }
 
-
                             loadExpenses();
 
                         }
@@ -2917,7 +2913,6 @@ document.addEventListener(
                                 error
                             );
 
-
                             alert(
                                 error.message ||
                                 'Unable to delete expense.'
@@ -2928,11 +2923,10 @@ document.addEventListener(
 
                 }
 
-        );
+            });
 
     }
 );
-
 
 /* ============================================================
    CLEAR MONTH / YEAR
