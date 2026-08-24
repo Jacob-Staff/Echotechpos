@@ -612,7 +612,7 @@ $sql = "
         si.cost,
         si.quantity,
         si.expiry_date,
-        si.image,
+        si.image_path AS image,
         si.is_active
     FROM store_items si
     WHERE {$where_sql}
