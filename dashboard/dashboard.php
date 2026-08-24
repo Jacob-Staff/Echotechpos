@@ -143,11 +143,9 @@ $expired_res = safe_query(
     WHERE pharmacy_id = {$pharmacy_id}
       AND branch_id = {$branch_id}
       AND expiry_date IS NOT NULL
-      AND expiry_date <> ''
       AND expiry_date < '{$pos_today}'
     "
 );
-
 $expired_data = $expired_res
     ? mysqli_fetch_assoc($expired_res)
     : ['expired' => 0];
