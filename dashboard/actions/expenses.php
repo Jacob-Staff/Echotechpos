@@ -9,22 +9,26 @@
  * dashboard/actions/expenses.php
  *
  * Handles:
- *   action=list
- *   action=add
- *   action=delete
- *   action=clear_month
- *   action=clear_year
+ *   GET  ?action=list
+ *   POST action=add
+ *   POST action=delete
+ *   POST action=clear_month
+ *   POST action=clear_year
  *
- * Database:
- *   expenses
- *
- * Multi-tenant:
+ * Uses:
  *   pharmacy_id
  *   branch_id
+ *
+ * IMPORTANT:
+ * This endpoint returns JSON ONLY.
  * ============================================================
  */
 
 declare(strict_types=1);
+
+/* ============================================================
+   ERROR HANDLING
+============================================================ */
 
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
@@ -37,24 +41,24 @@ date_default_timezone_set('Africa/Lusaka');
 
 header('Content-Type: application/json; charset=utf-8');
 
-
 /* ============================================================
-   DATABASE + AUTH
+   DATABASE
 ============================================================ */
 
 require_once '../../includes/conn.php';
-require_once '../../includes/auth.php';
-
 
 /* ============================================================
-   JSON RESPONSE HELPER
+   JSON RESPONSE
 ============================================================ */
 
 function expense_response(
     string $status,
     string $message = '',
-    array $extra = []
+    array $extra = [],
+    int $http_code = 200
 ): void {
+
+    http_response_code($http_code);
 
     $response = array_merge(
         [
@@ -73,6 +77,21 @@ function expense_response(
     exit;
 }
 
+/* ============================================================
+   DATABASE CONNECTION CHECK
+============================================================ */
+
+if (
+    !isset($conn) ||
+    !($conn instanceof mysqli)
+) {
+    expense_response(
+        'error',
+        'Database connection is unavailable.',
+        [],
+        500
+    );
+}
 
 /* ============================================================
    SESSION
@@ -82,32 +101,28 @@ $pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
 $branch_id   = (int)($_SESSION['branch_id'] ?? 0);
 $user_id     = (int)($_SESSION['user_id'] ?? 0);
 
+/*
+ * Do NOT include auth.php here.
+ *
+ * This is an AJAX/JSON endpoint.
+ * If auth.php redirects to login or prints HTML,
+ * fetch() receives HTML instead of JSON.
+ *
+ * We therefore validate the required session values directly.
+ */
 
-if ($pharmacy_id <= 0 || $branch_id <= 0) {
-
-    http_response_code(401);
-
-    expense_response(
-        'error',
-        'Your session has expired. Please log in again.'
-    );
-}
-
-
-/* ============================================================
-   CONNECTION CHECK
-============================================================ */
-
-if (!isset($conn) || !($conn instanceof mysqli)) {
-
-    http_response_code(500);
+if (
+    $pharmacy_id <= 0 ||
+    $branch_id <= 0
+) {
 
     expense_response(
         'error',
-        'Database connection is unavailable.'
+        'Your session has expired. Please log in again.',
+        [],
+        401
     );
 }
-
 
 /* ============================================================
    ACTION
@@ -118,7 +133,6 @@ $action = strtolower(
         (string)($_REQUEST['action'] ?? '')
     )
 );
-
 
 /* ============================================================
    ALLOWED CATEGORIES
@@ -133,7 +147,6 @@ $allowed_categories = [
     'Other'
 ];
 
-
 /* ============================================================
    LIST EXPENSES
 ============================================================ */
@@ -143,11 +156,14 @@ if ($action === 'list') {
     $expenses = [];
 
     $total_expenses = 0.00;
-
-    $month_total = 0.00;
+    $month_total    = 0.00;
 
     $current_month = date('Y-m');
 
+    /*
+     * Only retrieve records belonging to the
+     * currently logged-in pharmacy and branch.
+     */
 
     $sql = "
         SELECT
@@ -166,20 +182,22 @@ if ($action === 'list') {
             id DESC
     ";
 
-
     $stmt = $conn->prepare($sql);
-
 
     if (!$stmt) {
 
-        http_response_code(500);
+        error_log(
+            'Expense LIST prepare failed: ' .
+            $conn->error
+        );
 
         expense_response(
             'error',
-            'Unable to prepare the expense list.'
+            'Unable to prepare the expense list.',
+            [],
+            500
         );
     }
-
 
     $stmt->bind_param(
         'ii',
@@ -187,23 +205,25 @@ if ($action === 'list') {
         $branch_id
     );
 
-
     if (!$stmt->execute()) {
+
+        error_log(
+            'Expense LIST execute failed: ' .
+            $stmt->error
+        );
 
         $stmt->close();
 
-        http_response_code(500);
-
         expense_response(
             'error',
-            'Unable to load expenses.'
+            'Unable to load expenses.',
+            [],
+            500
         );
     }
 
-
     /*
-     * Use bind_result instead of get_result().
-     * This avoids requiring mysqlnd.
+     * bind_result() works without mysqlnd.
      */
 
     $stmt->bind_result(
@@ -216,7 +236,6 @@ if ($action === 'list') {
         $created_at
     );
 
-
     while ($stmt->fetch()) {
 
         $amount_value = (float)$amount;
@@ -224,27 +243,28 @@ if ($action === 'list') {
         $expense_date_value =
             (string)$expense_date;
 
+        $category_value =
+            (
+                $category !== null &&
+                trim((string)$category) !== ''
+            )
+                ? (string)$category
+                : 'General';
 
         $expenses[] = [
-
             'id' => (int)$id,
 
             'name' =>
                 (string)$name,
 
             'amount' =>
-                $amount_value,
+                round($amount_value, 2),
 
             'expense_date' =>
                 $expense_date_value,
 
             'category' =>
-                (string)(
-                    $category !== null &&
-                    $category !== ''
-                        ? $category
-                        : 'General'
-                ),
+                $category_value,
 
             'recorded_by' =>
                 (int)$recorded_by,
@@ -253,10 +273,12 @@ if ($action === 'list') {
                 (string)($created_at ?? '')
         ];
 
-
         $total_expenses +=
             $amount_value;
 
+        /*
+         * Calculate current month.
+         */
 
         if (
             substr(
@@ -271,13 +293,11 @@ if ($action === 'list') {
         }
     }
 
-
     $stmt->close();
-
 
     expense_response(
         'success',
-        '',
+        'Expenses loaded successfully.',
         [
             'expenses' =>
                 $expenses,
@@ -300,21 +320,21 @@ if ($action === 'list') {
     );
 }
 
-
 /* ============================================================
-   ALL ACTIONS BELOW THIS POINT MUST BE POST
+   ALL WRITE ACTIONS MUST BE POST
 ============================================================ */
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-
-    http_response_code(405);
+if (
+    $_SERVER['REQUEST_METHOD'] !== 'POST'
+) {
 
     expense_response(
         'error',
-        'Invalid request method.'
+        'Invalid request method.',
+        [],
+        405
     );
 }
-
 
 /* ============================================================
    ADD EXPENSE
@@ -322,63 +342,73 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 if ($action === 'add') {
 
-    $name =
-        trim(
-            (string)($_POST['name'] ?? '')
-        );
+    $name = trim(
+        (string)(
+            $_POST['name'] ?? ''
+        )
+    );
 
+    $amount = (float)(
+        $_POST['amount'] ?? 0
+    );
 
-    $amount =
-        (float)(
-            $_POST['amount'] ?? 0
-        );
+    $expense_date = trim(
+        (string)(
+            $_POST['date'] ?? ''
+        )
+    );
 
-
-    $expense_date =
-        trim(
-            (string)($_POST['date'] ?? '')
-        );
-
-
-    $category =
-        trim(
-            (string)(
-                $_POST['category'] ??
-                'General'
-            )
-        );
-
+    $category = trim(
+        (string)(
+            $_POST['category'] ??
+            'General'
+        )
+    );
 
     /* --------------------------------------------------------
-       VALIDATION
+       VALIDATE NAME
     -------------------------------------------------------- */
 
     if ($name === '') {
 
         expense_response(
             'error',
-            'Please enter an expense description.'
+            'Please enter an expense description.',
+            [],
+            422
         );
     }
-
 
     if (mb_strlen($name) > 255) {
 
         expense_response(
             'error',
-            'Expense description is too long.'
+            'Expense description is too long.',
+            [],
+            422
         );
     }
 
+    /* --------------------------------------------------------
+       VALIDATE AMOUNT
+    -------------------------------------------------------- */
 
-    if (!is_finite($amount) || $amount <= 0) {
+    if (
+        !is_finite($amount) ||
+        $amount <= 0
+    ) {
 
         expense_response(
             'error',
-            'Please enter a valid expense amount.'
+            'Please enter a valid expense amount.',
+            [],
+            422
         );
     }
 
+    /* --------------------------------------------------------
+       VALIDATE DATE
+    -------------------------------------------------------- */
 
     if (
         !preg_match(
@@ -389,17 +419,17 @@ if ($action === 'add') {
 
         expense_response(
             'error',
-            'Please select a valid expense date.'
+            'Please select a valid expense date.',
+            [],
+            422
         );
     }
-
 
     $date_object =
         DateTime::createFromFormat(
             'Y-m-d',
             $expense_date
         );
-
 
     if (
         !$date_object ||
@@ -409,10 +439,15 @@ if ($action === 'add') {
 
         expense_response(
             'error',
-            'Invalid expense date.'
+            'Invalid expense date.',
+            [],
+            422
         );
     }
 
+    /* --------------------------------------------------------
+       CATEGORY
+    -------------------------------------------------------- */
 
     if (
         !in_array(
@@ -425,13 +460,10 @@ if ($action === 'add') {
         $category = 'General';
     }
 
-
-    $amount =
-        round(
-            $amount,
-            2
-        );
-
+    $amount = round(
+        $amount,
+        2
+    );
 
     /* --------------------------------------------------------
        INSERT
@@ -460,21 +492,33 @@ if ($action === 'add') {
         )
     ";
 
-
     $stmt =
         $conn->prepare($sql);
 
-
     if (!$stmt) {
 
-        http_response_code(500);
+        error_log(
+            'Expense INSERT prepare failed: ' .
+            $conn->error
+        );
 
         expense_response(
             'error',
-            'Unable to prepare the expense record.'
+            'Unable to prepare the expense record.',
+            [],
+            500
         );
     }
 
+    /*
+     * i = pharmacy_id
+     * i = branch_id
+     * s = name
+     * d = amount
+     * s = expense_date
+     * s = category
+     * i = recorded_by
+     */
 
     $stmt->bind_param(
         'iisdssi',
@@ -487,49 +531,39 @@ if ($action === 'add') {
         $user_id
     );
 
-
     if (!$stmt->execute()) {
-
-        $error =
-            $stmt->error;
-
-        $stmt->close();
 
         error_log(
             'Expense INSERT failed: ' .
-            $error
+            $stmt->error
         );
 
-
-        http_response_code(500);
+        $stmt->close();
 
         expense_response(
             'error',
-            'Unable to save the expense.'
+            'Unable to save the expense.',
+            [],
+            500
         );
     }
 
-
     $new_id =
-        $stmt->insert_id;
-
+        (int)$stmt->insert_id;
 
     $stmt->close();
-
 
     expense_response(
         'success',
         'Expense recorded successfully.',
         [
-            'id' =>
-                (int)$new_id
+            'id' => $new_id
         ]
     );
 }
 
-
 /* ============================================================
-   DELETE EXPENSE
+   DELETE ONE EXPENSE
 ============================================================ */
 
 if ($action === 'delete') {
@@ -539,15 +573,20 @@ if ($action === 'delete') {
             $_POST['id'] ?? 0
         );
 
-
     if ($expense_id <= 0) {
 
         expense_response(
             'error',
-            'Invalid expense record.'
+            'Invalid expense record.',
+            [],
+            422
         );
     }
 
+    /*
+     * Pharmacy + branch restrictions prevent
+     * deleting another tenant's expense.
+     */
 
     $sql = "
         DELETE FROM expenses
@@ -557,21 +596,23 @@ if ($action === 'delete') {
         LIMIT 1
     ";
 
-
     $stmt =
         $conn->prepare($sql);
 
-
     if (!$stmt) {
 
-        http_response_code(500);
+        error_log(
+            'Expense DELETE prepare failed: ' .
+            $conn->error
+        );
 
         expense_response(
             'error',
-            'Unable to prepare the delete operation.'
+            'Unable to prepare the delete operation.',
+            [],
+            500
         );
     }
-
 
     $stmt->bind_param(
         'iii',
@@ -580,51 +621,43 @@ if ($action === 'delete') {
         $branch_id
     );
 
-
     if (!$stmt->execute()) {
-
-        $error =
-            $stmt->error;
-
-        $stmt->close();
 
         error_log(
             'Expense DELETE failed: ' .
-            $error
+            $stmt->error
         );
 
-
-        http_response_code(500);
+        $stmt->close();
 
         expense_response(
             'error',
-            'Unable to delete the expense.'
+            'Unable to delete the expense.',
+            [],
+            500
         );
     }
 
-
     $affected =
-        $stmt->affected_rows;
-
+        (int)$stmt->affected_rows;
 
     $stmt->close();
-
 
     if ($affected < 1) {
 
         expense_response(
             'error',
-            'Expense not found or access denied.'
+            'Expense not found or access denied.',
+            [],
+            404
         );
     }
-
 
     expense_response(
         'success',
         'Expense deleted successfully.'
     );
 }
-
 
 /* ============================================================
    CLEAR THIS MONTH
@@ -635,7 +668,6 @@ if ($action === 'clear_month') {
     $start =
         date('Y-m-01');
 
-
     $next =
         date(
             'Y-m-d',
@@ -643,7 +675,6 @@ if ($action === 'clear_month') {
                 $start . ' +1 month'
             )
         );
-
 
     $sql = "
         DELETE FROM expenses
@@ -653,21 +684,23 @@ if ($action === 'clear_month') {
           AND expense_date < ?
     ";
 
-
     $stmt =
         $conn->prepare($sql);
 
-
     if (!$stmt) {
 
-        http_response_code(500);
+        error_log(
+            'Expense CLEAR MONTH prepare failed: ' .
+            $conn->error
+        );
 
         expense_response(
             'error',
-            'Unable to prepare the clear operation.'
+            'Unable to prepare the clear operation.',
+            [],
+            500
         );
     }
-
 
     $stmt->bind_param(
         'iiss',
@@ -677,46 +710,36 @@ if ($action === 'clear_month') {
         $next
     );
 
-
     if (!$stmt->execute()) {
 
-        $error =
-            $stmt->error;
+        error_log(
+            'Expense CLEAR MONTH failed: ' .
+            $stmt->error
+        );
 
         $stmt->close();
 
-        error_log(
-            'Expense clear month failed: ' .
-            $error
-        );
-
-
-        http_response_code(500);
-
         expense_response(
             'error',
-            'Unable to clear this month\'s expenses.'
+            'Unable to clear this month\'s expenses.',
+            [],
+            500
         );
     }
 
-
     $deleted =
-        $stmt->affected_rows;
-
+        (int)$stmt->affected_rows;
 
     $stmt->close();
-
 
     expense_response(
         'success',
         'This month\'s expense records were cleared.',
         [
-            'deleted' =>
-                (int)$deleted
+            'deleted' => $deleted
         ]
     );
 }
-
 
 /* ============================================================
    CLEAR THIS YEAR
@@ -727,7 +750,6 @@ if ($action === 'clear_year') {
     $start =
         date('Y-01-01');
 
-
     $next =
         date(
             'Y-m-d',
@@ -735,7 +757,6 @@ if ($action === 'clear_year') {
                 $start . ' +1 year'
             )
         );
-
 
     $sql = "
         DELETE FROM expenses
@@ -745,21 +766,23 @@ if ($action === 'clear_year') {
           AND expense_date < ?
     ";
 
-
     $stmt =
         $conn->prepare($sql);
 
-
     if (!$stmt) {
 
-        http_response_code(500);
+        error_log(
+            'Expense CLEAR YEAR prepare failed: ' .
+            $conn->error
+        );
 
         expense_response(
             'error',
-            'Unable to prepare the clear operation.'
+            'Unable to prepare the clear operation.',
+            [],
+            500
         );
     }
-
 
     $stmt->bind_param(
         'iiss',
@@ -769,54 +792,44 @@ if ($action === 'clear_year') {
         $next
     );
 
-
     if (!$stmt->execute()) {
 
-        $error =
-            $stmt->error;
+        error_log(
+            'Expense CLEAR YEAR failed: ' .
+            $stmt->error
+        );
 
         $stmt->close();
 
-        error_log(
-            'Expense clear year failed: ' .
-            $error
-        );
-
-
-        http_response_code(500);
-
         expense_response(
             'error',
-            'Unable to clear this year\'s expenses.'
+            'Unable to clear this year\'s expenses.',
+            [],
+            500
         );
     }
 
-
     $deleted =
-        $stmt->affected_rows;
-
+        (int)$stmt->affected_rows;
 
     $stmt->close();
-
 
     expense_response(
         'success',
         'This year\'s expense records were cleared.',
         [
-            'deleted' =>
-                (int)$deleted
+            'deleted' => $deleted
         ]
     );
 }
-
 
 /* ============================================================
    UNKNOWN ACTION
 ============================================================ */
 
-http_response_code(400);
-
 expense_response(
     'error',
-    'Unknown expense action.'
+    'Unknown expense action.',
+    [],
+    400
 );
