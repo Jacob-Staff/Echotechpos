@@ -52,11 +52,7 @@ function is_active_menu($page_name, $current_page) {
         <!-- Navigation Menu -->
         <nav class="sidebar-nav pt-2">
             <ul id="sidebarnav" class="list-unstyled mb-0">
-                <li class="sidebar-item mb-1">
-                    <a class="sidebar-link <?= is_active_menu('login_client.php', $current_page); ?>" href="../api/login_client.php">
-                        <i class="mdi mdi-plus-box-outline me-2"></i><span>Online App</span>
-                    </a> 
-                </li>
+
                 <li class="sidebar-item mb-1">
                     <a class="sidebar-link <?= is_active_menu('dashboard.php', $current_page); ?>" href="../dashboard/dashboard.php">
                         <i class="mdi mdi-view-dashboard me-2"></i><span>Dashboard</span>
@@ -91,6 +87,11 @@ function is_active_menu($page_name, $current_page) {
                     <a class="sidebar-link <?= is_active_menu('shift_log.php', $current_page); ?>" href="shift_log.php">
                         <i class="fas fa-user-clock me-2"></i><span>Duty & Shift Log</span>
                     </a>
+                </li>
+                                <li class="sidebar-item mb-1">
+                    <a class="sidebar-link <?= is_active_menu('login_client.php', $current_page); ?>" href="../api/login_client.php">
+                        <i class="mdi mdi-plus-box-outline me-2"></i><span>Online App</span>
+                    </a> 
                 </li>
             </ul>
         </nav>
