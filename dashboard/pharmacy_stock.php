@@ -235,7 +235,7 @@ try {
    IMPORTANT:
    Pharmacy Stock shows ONLY products that have:
      - quantity > 0
-     - price > 0
+     - selling price is used for stock valuation
      - not expired
 
    Expired and zero-stock products belong to their own pages.
@@ -245,7 +245,6 @@ $where = [
     "si.pharmacy_id = {$pharmacy_id}",
     "si.branch_id = {$branch_id}",
     "si.quantity > 0",
-    "si.is_active = 1",
     "(
         si.expiry_date IS NULL
         OR si.expiry_date = '0000-00-00'
@@ -397,7 +396,6 @@ try {
         WHERE pharmacy_id = {$pharmacy_id}
           AND branch_id = {$branch_id}
           AND quantity > 0
-          AND is_active = 1
           AND (
               expiry_date IS NULL
               OR expiry_date = '0000-00-00'
@@ -783,7 +781,7 @@ if (file_exists("../includes/aside.php")) {
                 </div>
 
                 <div class="small text-muted mt-1">
-                    Showing only products with available stock value. Expired and out-of-stock items are excluded.
+                    Showing only products with available stock. Expired and out-of-stock items are excluded.
                 </div>
             </div>
         </div>
