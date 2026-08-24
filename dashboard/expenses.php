@@ -875,7 +875,7 @@ require_once '../includes/head.php';
                                 'UTF-8'
                             ); ?>
 
-                            <span class="mx-1">•</span>
+                            <span class="mx-1">â€¢</span>
 
                             <?= htmlspecialchars(
                                 $branch_name,
@@ -1693,8 +1693,6 @@ require_once '../includes/head.php';
 </div>
 
 
-<script>
-
 <!-- ============================================================
      CUSTOM CONFIRMATION MODAL
 ============================================================ -->
@@ -1804,6 +1802,8 @@ require_once '../includes/head.php';
     </div>
 
 </div>
+
+<script>
 
 /* ============================================================
    EXPENSE PAGE JAVASCRIPT
