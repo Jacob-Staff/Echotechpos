@@ -220,6 +220,95 @@ html, body {
 .badge-status.active { background-color: #d1fae5; color: #065f46; }
 .badge-status.completed { background-color: #e2e8f0; color: #475569; }
 
+body.modal-open {
+    overflow: hidden;
+}
+
+.custom-confirm-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, .58);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.custom-confirm-card {
+    width: 100%;
+    max-width: 430px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, .22);
+    overflow: hidden;
+    animation: confirmModalIn .18s ease-out;
+}
+
+.custom-confirm-top {
+    padding: 24px;
+    display: flex;
+    align-items: flex-start;
+    gap: 15px;
+}
+
+.custom-confirm-icon {
+    width: 48px;
+    height: 48px;
+    flex: 0 0 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff7ed;
+    color: #ea580c;
+    font-size: 20px;
+}
+
+.custom-confirm-title {
+    margin: 0 0 5px;
+    font-size: 18px;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+.custom-confirm-message {
+    margin: 0;
+    color: #64748b;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.custom-confirm-actions {
+    padding: 16px 24px 22px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    background: #f8fafc;
+    border-top: 1px solid #eef2f7;
+}
+
+.custom-confirm-actions button {
+    min-width: 105px;
+    border-radius: 9px;
+    font-weight: 700;
+    padding: 9px 16px;
+}
+
+@keyframes confirmModalIn {
+    from { opacity: 0; transform: translateY(8px) scale(.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 480px) {
+    .custom-confirm-card { max-width: 100%; border-radius: 15px; }
+    .custom-confirm-actions { flex-direction: column-reverse; }
+    .custom-confirm-actions button { width: 100%; }
+}
+
 .modal-overlay {
     display: none;
     position: fixed;
@@ -374,6 +463,30 @@ if (file_exists("../includes/aside.php")) require_once "../includes/aside.php";
 
 <?php if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"; ?>
 
+<!-- CUSTOM CLOCK-OUT CONFIRMATION MODAL -->
+<div class="custom-confirm-overlay" id="clockOutConfirmModal" role="dialog" aria-modal="true" aria-labelledby="clockOutConfirmTitle">
+    <div class="custom-confirm-card">
+        <div class="custom-confirm-top">
+            <div class="custom-confirm-icon">
+                <i class="fas fa-sign-out-alt"></i>
+            </div>
+            <div>
+                <h5 class="custom-confirm-title" id="clockOutConfirmTitle">Clock Out Shift?</h5>
+                <p class="custom-confirm-message">
+                    Are you sure you want to clock out of your current shift?
+                    Your shift will be marked as completed.
+                </p>
+            </div>
+        </div>
+        <div class="custom-confirm-actions">
+            <button type="button" class="btn btn-light border" onclick="closeClockOutConfirm()">Cancel</button>
+            <button type="button" class="btn btn-danger" id="confirmClockOutBtn">
+                <i class="fas fa-check me-1"></i> Yes, Clock Out
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- CLOCK IN MODAL -->
 <div class="modal-overlay" id="shiftModal">
     <div class="modal-card">
@@ -445,7 +558,10 @@ if (file_exists("../includes/aside.php")) require_once "../includes/aside.php";
     });
 
     document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') window.closeShiftModal();
+        if (e.key === 'Escape') {
+            window.closeShiftModal();
+            window.closeClockOutConfirm();
+        }
     });
 
     function applyLiveFilters() {
@@ -499,16 +615,54 @@ if (file_exists("../includes/aside.php")) require_once "../includes/aside.php";
         applyLiveFilters();
     });
 
-    // Confirm clock-out and prevent double submission.
+    // Custom POS confirmation modal â€” no browser confirm() dialogs.
+    let pendingClockOutForm = null;
+
+    window.openClockOutConfirm = function (form) {
+        pendingClockOutForm = form;
+        const modal = document.getElementById('clockOutConfirmModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            document.body.classList.add('modal-open');
+        }
+    };
+
+    window.closeClockOutConfirm = function () {
+        const modal = document.getElementById('clockOutConfirmModal');
+        if (modal) {
+            modal.style.display = 'none';
+            document.body.classList.remove('modal-open');
+        }
+        pendingClockOutForm = null;
+    };
+
+    document.getElementById('clockOutConfirmModal')?.addEventListener('click', function (e) {
+        if (e.target === this) window.closeClockOutConfirm();
+    });
+
+    document.getElementById('confirmClockOutBtn')?.addEventListener('click', function () {
+        if (!pendingClockOutForm) return;
+
+        this.disabled = true;
+        this.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Clocking Out...';
+
+        const form = pendingClockOutForm;
+        const confirmed = document.createElement('input');
+        confirmed.type = 'hidden';
+        confirmed.name = 'confirmed_clock_out';
+        confirmed.value = '1';
+        form.appendChild(confirmed);
+        form.submit();
+    });
+
     document.querySelectorAll('form').forEach(form => {
         form.addEventListener('submit', function (e) {
             const action = form.querySelector('input[name="action"]')?.value;
 
-            if (action === 'clock_out') {
-                if (!window.confirm('Are you sure you want to clock out of your current shift?')) {
-                    e.preventDefault();
-                    return;
-                }
+            if (action === 'clock_out' && !form.querySelector('[name="confirmed_clock_out"]')) {
+                e.preventDefault();
+                openClockOutConfirm(form);
+                return;
             }
 
             if (action === 'clock_in') {
@@ -516,14 +670,6 @@ if (file_exists("../includes/aside.php")) require_once "../includes/aside.php";
                 if (button) {
                     button.disabled = true;
                     button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Clocking In...';
-                }
-            }
-
-            if (action === 'clock_out') {
-                const button = form.querySelector('button[type="submit"]');
-                if (button) {
-                    button.disabled = true;
-                    button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Clocking Out...';
                 }
             }
         });
