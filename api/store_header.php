@@ -58,6 +58,7 @@ $online_store_url = ($store_web_dir === '/')
     ? '/online_store.php'
     : $store_web_dir . '/online_store.php';
 $store_base_url = ($store_web_dir === '/') ? '/' : rtrim($store_web_dir, '/') . '/';
+$store_switch_url = ($store_web_dir === '/') ? '/switch_branch.php' : $store_web_dir . '/switch_branch.php';
 
 
 /*
@@ -273,6 +274,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['store_action'] ?? '') === 
 html,body{overflow-x:hidden!important;width:100%!important;background:#f8f9fa;font-family:'IBM Plex Sans',Arial,sans-serif;margin:0;padding:0}
 .tier-1-utility{background:#fff;border-bottom:1px solid #eee;padding:8px 0;width:100%;position:relative;z-index:1050}
 .location-selector{font-size:12px;color:var(--store-teal);font-weight:600;cursor:pointer}
+.branch-switch-form{margin:0;padding:0}
+.branch-switch-label{display:inline-flex;align-items:center;gap:4px;color:var(--store-teal);font-size:12px;font-weight:700;margin:0;cursor:pointer}
+.branch-switch-label>i{font-size:16px}
+.branch-switch-select{border:0;background:transparent;color:#0d6efd;font-size:12px;font-weight:700;padding:2px 18px 2px 0;outline:0;cursor:pointer;max-width:190px}
+.branch-switch-select:focus{box-shadow:none}
 .apollo-nav-pill{color:#555;text-decoration:none;font-weight:700;font-size:13px;margin-right:15px;transition:.2s;white-space:nowrap}
 .apollo-nav-pill:hover,.apollo-nav-pill.active{color:var(--store-teal);border-bottom:3px solid var(--store-green);padding-bottom:2px}
 .tier-2-strip{background:var(--store-teal);padding:8px 0;overflow-x:auto;white-space:nowrap;width:100%;-webkit-overflow-scrolling:touch;scrollbar-width:none}
@@ -307,16 +313,20 @@ html,body{overflow-x:hidden!important;width:100%!important;background:#f8f9fa;fo
 <div class="container-fluid px-2 px-md-4 d-flex justify-content-between align-items-center gap-2">
 <div class="d-flex align-items-center flex-wrap gap-2">
 <h3 class="fw-bold mb-0 brand-header-text" style="color:var(--store-teal)"><?php echo htmlspecialchars($pharmacy_name); ?></h3>
-<div class="dropdown">
-<div class="location-selector dropdown-toggle" data-bs-toggle="dropdown" role="button" aria-label="Switch pharmacy branch"><i class="mdi mdi-map-marker-outline fs-6"></i> <span class="text-primary"><?php echo htmlspecialchars($branch_name); ?></span></div>
-<ul class="dropdown-menu shadow border-0">
-<li class="dropdown-header small text-uppercase fw-bold text-muted">Switch Branch</li>
-<?php if ($parent_pharmacy_id > 0 && ($stmt_br=$conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1 ORDER BY branch_name ASC"))):
-$stmt_br->bind_param('i',$parent_pharmacy_id);$stmt_br->execute();$br_list=$stmt_br->get_result();while($bl=$br_list->fetch_assoc()): ?>
-<li><a class="dropdown-item <?php echo ((int)$bl['id']===$branch_id)?'active':''; ?>" href="<?php echo htmlspecialchars($online_store_url, ENT_QUOTES, 'UTF-8'); ?>?bid=<?php echo (int)$bl['id']; ?>"><?php echo htmlspecialchars($bl['branch_name']); ?></a></li>
-<?php endwhile;$stmt_br->close();endif; ?>
-</ul>
-</div>
+<form class="branch-switch-form" method="get" action="<?php echo htmlspecialchars($store_switch_url, ENT_QUOTES, 'UTF-8'); ?>">
+    <label class="branch-switch-label" aria-label="Switch pharmacy branch">
+        <i class="mdi mdi-map-marker-outline"></i>
+        <select name="bid" class="branch-switch-select" onchange="if(this.value){this.form.submit();}" aria-label="Switch branch">
+            <?php if ($parent_pharmacy_id > 0 && ($stmt_br=$conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1 ORDER BY branch_name ASC"))): ?>
+                <?php $stmt_br->bind_param('i',$parent_pharmacy_id); $stmt_br->execute(); $br_list=$stmt_br->get_result(); while($bl=$br_list->fetch_assoc()): ?>
+                    <option value="<?php echo (int)$bl['id']; ?>" <?php echo ((int)$bl['id'] === $branch_id) ? 'selected' : ''; ?>><?php echo htmlspecialchars($bl['branch_name']); ?></option>
+                <?php endwhile; $stmt_br->close(); ?>
+            <?php else: ?>
+                <option value="<?php echo (int)$branch_id; ?>" selected><?php echo htmlspecialchars($branch_name); ?></option>
+            <?php endif; ?>
+        </select>
+    </label>
+</form>
 </div>
 
 <div class="d-flex align-items-center gap-2">
