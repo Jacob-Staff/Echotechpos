@@ -57,6 +57,8 @@ $store_web_dir = '/' . trim($store_web_dir, '/');
 $online_store_url = ($store_web_dir === '/')
     ? '/online_store.php'
     : $store_web_dir . '/online_store.php';
+$store_base_url = ($store_web_dir === '/') ? '/' : rtrim($store_web_dir, '/') . '/';
+
 
 /*
  * ---------------------------------------------------------------
@@ -173,6 +175,11 @@ $logo_web_path = file_exists($logo_local_path)
     ? $store_web_prefix . 'uploads/logos/' . rawurlencode($logo_filename)
     : $store_web_prefix . 'uploads/logos/default_logo.png';
 
+// Safe filter context for shared header usage.
+$category_filter = trim($_GET['cat'] ?? '');
+$search_query = trim($_GET['q'] ?? '');
+$search_type = (($_GET['type'] ?? 'all') === 'rx') ? 'rx' : 'all';
+
 // Categories belong to the application catalogue. Products are still filtered
 // by pharmacy + branch in online_store.php.
 $cat_query = $conn->query("SELECT name FROM categories WHERE status = 1 ORDER BY name ASC LIMIT 12");
@@ -261,14 +268,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['store_action'] ?? '') === 
     exit;
 }
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title><?php echo htmlspecialchars($pharmacy_name); ?> | <?php echo htmlspecialchars($branch_name); ?></title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
 <style>
 :root{--store-teal:#003339;--store-green:#00b386;--store-blue:#1a4a7c;--store-light:#f5faff}
 html,body{overflow-x:hidden!important;width:100%!important;background:#f8f9fa;font-family:'IBM Plex Sans',Arial,sans-serif;margin:0;padding:0}
@@ -303,8 +302,6 @@ html,body{overflow-x:hidden!important;width:100%!important;background:#f8f9fa;fo
 .store-toast.error{border-left-color:#dc3545}.store-toast.info{border-left-color:#0d6efd}
 @media(max-width:576px){.brand-header-text{font-size:1.1rem!important}.tier-1-utility{padding:5px 0}.user-dropdown .btn{padding:4px 10px!important;font-size:11px!important}.nav-icon-grid{overflow-x:auto;justify-content:flex-start}.hng-nav-icon{flex:0 0 58px}.store-toast-container{top:65px;right:10px;width:calc(100vw - 20px)}}
 </style>
-</head>
-<body>
 
 <div class="tier-1-utility">
 <div class="container-fluid px-2 px-md-4 d-flex justify-content-between align-items-center gap-2">
@@ -326,12 +323,12 @@ $stmt_br->bind_param('i',$parent_pharmacy_id);$stmt_br->execute();$br_list=$stmt
 <nav class="d-none d-lg-flex align-items-center">
 <?php if(isset($_SESSION['client_id'])): ?>
 <a href="javascript:void(0)" class="apollo-nav-pill toggle-subscribe <?php echo $is_subscribed?'active':''; ?>" data-branch="<?php echo $branch_id; ?>"><?php echo $is_subscribed?'âœ“ Subscribed':'Subscribe'; ?></a>
-<?php else: ?><a href="login_client.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Login</a><?php endif; ?>
-<a href="pharmacist.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Pharmacists</a>
-<a href="upload_prescription.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Prescriptions</a>
+<?php else: ?><a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>login_client.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Login</a><?php endif; ?>
+<a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>pharmacist.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Pharmacists</a>
+<a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>upload_prescription.php?bid=<?php echo $branch_id; ?>" class="apollo-nav-pill">Prescriptions</a>
 </nav>
 
-<a href="view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none" aria-label="Cart">
+<a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>view_cart.php?bid=<?php echo $branch_id; ?>" class="text-dark position-relative text-decoration-none" aria-label="Cart">
 <i class="mdi mdi-cart-outline fs-4"></i><span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge cart-count" style="font-size:9px"><?php
 $cart_count=0;if(isset($_SESSION['carts'][$branch_id])&&is_array($_SESSION['carts'][$branch_id]))foreach($_SESSION['carts'][$branch_id] as $item)$cart_count+=isset($item['qty'])?(int)$item['qty']:1;echo $cart_count;?></span>
 </a>
@@ -342,11 +339,11 @@ $cart_count=0;if(isset($_SESSION['carts'][$branch_id])&&is_array($_SESSION['cart
 <div class="user-menu">
 <?php if(isset($_SESSION['client_id'])): ?>
 <h6><?php echo htmlspecialchars($user_data['full_name']??$client_name); ?></h6><p>User ID: #<?php echo str_pad((int)($_SESSION['client_id']??0),5,'0',STR_PAD_LEFT); ?></p><hr class="my-1">
-<a href="profile.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-account-outline"></i> Profile</a>
-<a href="client_orders.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
-<?php else: ?><h6>Guest Menu</h6><hr class="my-1"><a href="login_client.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a><?php endif; ?>
-<div class="d-lg-none"><hr class="my-1"><a href="pharmacist.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a><a href="upload_prescription.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a><?php if(isset($_SESSION['client_id'])):?><a href="javascript:void(0)" class="menu-link text-success fw-bold toggle-subscribe" data-branch="<?php echo $branch_id;?>"><i class="mdi mdi-bell-ring-outline"></i> <span class="subscribe-label"><?php echo $is_subscribed?'âœ“ Subscribed':'Subscribe';?></span></a><?php endif;?></div>
-<?php if(isset($_SESSION['client_id'])):?><hr class="my-1"><a href="logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a><?php endif;?>
+<a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>profile.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-account-outline"></i> Profile</a>
+<a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>client_orders.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
+<?php else: ?><h6>Guest Menu</h6><hr class="my-1"><a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>login_client.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-login"></i> Login / Register</a><?php endif; ?>
+<div class="d-lg-none"><hr class="my-1"><a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>pharmacist.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-account-group-outline"></i> Find Pharmacists</a><a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>upload_prescription.php?bid=<?php echo $branch_id;?>" class="menu-link"><i class="mdi mdi-prescription"></i> Upload Prescription</a><?php if(isset($_SESSION['client_id'])):?><a href="javascript:void(0)" class="menu-link text-success fw-bold toggle-subscribe" data-branch="<?php echo $branch_id;?>"><i class="mdi mdi-bell-ring-outline"></i> <span class="subscribe-label"><?php echo $is_subscribed?'âœ“ Subscribed':'Subscribe';?></span></a><?php endif;?></div>
+<?php if(isset($_SESSION['client_id'])):?><hr class="my-1"><a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a><?php endif;?>
 </div></div>
 </div></div></div>
 
@@ -358,11 +355,11 @@ $cart_count=0;if(isset($_SESSION['carts'][$branch_id])&&is_array($_SESSION['cart
 <div class="tier-3-action shadow-sm"><div class="container-fluid px-2 px-md-4"><div class="row align-items-center g-2">
 <div class="col-12 col-md-3"><div class="hng-logo-area"><img src="<?php echo htmlspecialchars($logo_web_path);?>" alt="Logo" style="height:38px;width:38px;object-fit:contain" onerror="this.onerror=null;this.src='<?php echo htmlspecialchars($store_web_prefix.'uploads/logos/default_logo.png');?>';"><div><h5 class="mb-0 fw-bold text-white" style="font-size:1rem;line-height:1.1"><?php echo htmlspecialchars($pharmacy_name);?></h5><small class="opacity-75" style="font-size:9px">Online Pharmacy</small></div></div></div>
 <div class="col-12 col-md-5"><form action="<?php echo htmlspecialchars($online_store_url, ENT_QUOTES, 'UTF-8'); ?>" method="GET" class="hng-search-container"><input type="hidden" name="bid" value="<?php echo $branch_id;?>"><select name="type"><option value="all" <?php echo (($_GET['type']??'all')!=='rx')?'selected':'';?>>All</option><option value="rx" <?php echo (($_GET['type']??'')==='rx')?'selected':'';?>>Rx</option></select><input type="search" name="q" value="<?php echo htmlspecialchars($_GET['q']??'');?>" placeholder="Search medicines in <?php echo htmlspecialchars($branch_name);?>..." autocomplete="off"><button type="submit" class="hng-search-btn" aria-label="Search"><i class="mdi mdi-magnify"></i></button></form></div>
-<div class="col-12 col-md-4 mt-2 mt-md-0"><div class="nav-icon-grid"><a href="<?php echo htmlspecialchars($online_store_url, ENT_QUOTES, 'UTF-8'); ?>?bid=<?php echo $branch_id;?>" class="hng-nav-icon"><i class="mdi mdi-home"></i>Home</a><a href="categories.php?bid=<?php echo $branch_id;?>" class="hng-nav-icon"><i class="mdi mdi-view-grid"></i>Category</a><a href="offers.php?bid=<?php echo $branch_id;?>" class="hng-nav-icon"><i class="mdi mdi-label-percent"></i>Offer</a><a href="help.php?bid=<?php echo $branch_id;?>" class="hng-nav-icon"><i class="mdi mdi-help-circle"></i>Help</a><a href="javascript:void(0)" onclick="openBankDetails()" class="hng-nav-icon"><i class="mdi mdi-bank"></i>Bank</a></div></div>
+<div class="col-12 col-md-4 mt-2 mt-md-0"><div class="nav-icon-grid"><a href="<?php echo htmlspecialchars($online_store_url, ENT_QUOTES, 'UTF-8'); ?>?bid=<?php echo $branch_id;?>" class="hng-nav-icon"><i class="mdi mdi-home"></i>Home</a><a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>categories.php?bid=<?php echo $branch_id;?>" class="hng-nav-icon"><i class="mdi mdi-view-grid"></i>Category</a><a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>offers.php?bid=<?php echo $branch_id;?>" class="hng-nav-icon"><i class="mdi mdi-label-percent"></i>Offer</a><a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>help.php?bid=<?php echo $branch_id;?>" class="hng-nav-icon"><i class="mdi mdi-help-circle"></i>Help</a><a href="javascript:void(0)" onclick="openBankDetails()" class="hng-nav-icon"><i class="mdi mdi-bank"></i>Bank</a></div></div>
 </div></div></div>
 
 <div class="modal fade" id="bankDetailsModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 shadow" style="border-radius:14px;overflow:hidden"><div class="modal-header bg-primary text-white border-0"><h5 class="modal-title fw-bold"><i class="mdi mdi-bank me-2"></i>Payment Details</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-3"><label class="small text-muted fw-bold">BANK TRANSFER</label><div class="bg-light rounded p-3" style="white-space:pre-wrap"><?php echo htmlspecialchars($bank_details!==''?$bank_details:'Bank details are not currently available.');?></div></div><div><label class="small text-muted fw-bold">MOBILE MONEY</label><div class="bg-light rounded p-3" style="white-space:pre-wrap"><?php echo htmlspecialchars($mobile_money_details!==''?$mobile_money_details:'Mobile money details are not currently available.');?></div></div></div><div class="modal-footer border-0"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div></div></div></div>
-<div class="modal fade" id="notificationModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 shadow" style="border-radius:14px"><div class="modal-header border-0"><h5 class="modal-title fw-bold"><i class="mdi mdi-bell-outline me-2"></i>Notifications</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="text-center py-3"><div class="display-6 mb-2">ðŸ””</div><?php if($response_count>0):?><h6 class="fw-bold">You have <?php echo $response_count;?> new response<?php echo $response_count===1?'':'s';?></h6><p class="text-muted small">The pharmacy has responded to one or more of your inquiries.</p><a href="help.php?bid=<?php echo $branch_id;?>" class="btn btn-success btn-sm">View Responses</a><?php else:?><h6 class="fw-bold">You're all caught up</h6><p class="text-muted mb-0">There are no new notifications.</p><?php endif;?></div></div></div></div></div>
+<div class="modal fade" id="notificationModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 shadow" style="border-radius:14px"><div class="modal-header border-0"><h5 class="modal-title fw-bold"><i class="mdi mdi-bell-outline me-2"></i>Notifications</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="text-center py-3"><div class="display-6 mb-2">ðŸ””</div><?php if($response_count>0):?><h6 class="fw-bold">You have <?php echo $response_count;?> new response<?php echo $response_count===1?'':'s';?></h6><p class="text-muted small">The pharmacy has responded to one or more of your inquiries.</p><a href="<?php echo htmlspecialchars($store_base_url, ENT_QUOTES, 'UTF-8'); ?>help.php?bid=<?php echo $branch_id;?>" class="btn btn-success btn-sm">View Responses</a><?php else:?><h6 class="fw-bold">You're all caught up</h6><p class="text-muted mb-0">There are no new notifications.</p><?php endif;?></div></div></div></div></div>
 <div class="store-toast-container" id="storeToastContainer" aria-live="polite"></div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
@@ -373,8 +370,6 @@ window.openBankDetails=function(){bootstrap.Modal.getOrCreateInstance(document.g
 window.openNotifications=function(){bootstrap.Modal.getOrCreateInstance(document.getElementById('notificationModal')).show()};
 $(function(){
 $('#userMenuButton').on('click',function(e){e.stopPropagation();$('#storeUserDropdown').toggleClass('open')});$(document).on('click',function(){$('#storeUserDropdown').removeClass('open')});$('.user-menu').on('click',function(e){e.stopPropagation()});
-$(document).on('click','.toggle-subscribe',function(e){e.preventDefault();const btn=$(this),branch=Number(btn.data('branch'));if(!branch)return;const old=btn.text();btn.css('pointer-events','none').text('Updating...');$.ajax({url:window.location.href.split('?')[0],method:'POST',dataType:'json',data:{store_action:'toggle_subscription',branch_id:branch},timeout:10000}).done(function(res){if(res.success){$('.toggle-subscribe').each(function(){$(this).toggleClass('active',!!res.subscribed);$(this).find('.subscribe-label').text(res.subscribed?'âœ“ Subscribed':'Subscribe');if($(this).find('.subscribe-label').length===0)$(this).text(res.subscribed?'âœ“ Subscribed':'Subscribe')});window.showStoreToast('success',res.subscribed?'Subscribed':'Unsubscribed',res.message||'Subscription updated.')}else{window.showStoreToast('error','Unable to update',res.message||'Please try again.')}}).fail(function(){window.showStoreToast('error','Connection error','Please try again.');}).always(function(){btn.css('pointer-events','auto')})});
+$(document).on('click','.toggle-subscribe',function(e){e.preventDefault();const btn=$(this),branch=Number(btn.data('branch'));if(!branch)return;const old=btn.text();btn.css('pointer-events','none').text('Updating...');$.ajax({url:<?php echo json_encode($online_store_url); ?>,method:'POST',dataType:'json',data:{store_action:'toggle_subscription',branch_id:branch},timeout:10000}).done(function(res){if(res.success){$('.toggle-subscribe').each(function(){$(this).toggleClass('active',!!res.subscribed);$(this).find('.subscribe-label').text(res.subscribed?'âœ“ Subscribed':'Subscribe');if($(this).find('.subscribe-label').length===0)$(this).text(res.subscribed?'âœ“ Subscribed':'Subscribe')});window.showStoreToast('success',res.subscribed?'Subscribed':'Unsubscribed',res.message||'Subscription updated.')}else{window.showStoreToast('error','Unable to update',res.message||'Please try again.')}}).fail(function(){window.showStoreToast('error','Connection error','Please try again.');}).always(function(){btn.css('pointer-events','auto')})});
 });
 </script>
-</body>
-</html>
