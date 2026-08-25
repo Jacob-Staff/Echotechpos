@@ -186,10 +186,10 @@ $p_stmt->bind_param($types, ...$params);
 $p_stmt->execute();
 $items = $p_stmt->get_result();
 
-function store_e($value): string {
+function online_store_e($value): string {
     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
 }
-function store_money($value): string {
+function online_store_money($value): string {
     return 'K ' . number_format((float)$value, 2);
 }
 ?>
@@ -228,7 +228,7 @@ function store_money($value): string {
     <div class="container mt-3 mt-md-4">
         <div class="row g-2 g-md-3">
             <div class="col-6 col-md-3">
-                <a href="<?php echo store_e($path_prefix); ?>upload_prescription.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none">
+                <a href="<?php echo online_store_e($path_prefix); ?>upload_prescription.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none">
                     <div class="feature-card d-flex align-items-center p-3 bg-white border rounded shadow-sm h-100 transition-hover">
                         <i class="mdi mdi-prescription text-success fs-2 me-3"></i>
                         <div><h6 class="feature-title mb-0 fw-bold text-dark">Upload Prescriptions</h6><small class="feature-sub text-muted">Easy &amp; Fast</small></div>
@@ -236,7 +236,7 @@ function store_money($value): string {
                 </a>
             </div>
             <div class="col-6 col-md-3">
-                <a href="<?php echo store_e($path_prefix); ?>lab_results.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none">
+                <a href="<?php echo online_store_e($path_prefix); ?>lab_results.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none">
                     <div class="feature-card d-flex align-items-center p-3 bg-white border rounded shadow-sm h-100 transition-hover">
                         <i class="mdi mdi-flask-outline text-primary fs-2 me-3"></i>
                         <div><h6 class="feature-title mb-0 fw-bold text-dark">Lab Test Results</h6><small class="feature-sub text-muted">Secure Access</small></div>
@@ -268,12 +268,12 @@ function store_money($value): string {
             <div>
                 <h4 class="fw-bold mb-1 fs-5 fs-md-4">Shop Medicines</h4>
                 <div class="store-result-count">
-                    <?php echo (int)$items->num_rows; ?> product<?php echo $items->num_rows === 1 ? '' : 's'; ?> available in <?php echo store_e($branch_name); ?>
-                    <?php if ($category_filter !== ''): ?> Â· <?php echo store_e($category_filter); ?><?php endif; ?>
-                    <?php if ($search_query !== ''): ?> Â· â€œ<?php echo store_e($search_query); ?>â€<?php endif; ?>
+                    <?php echo (int)$items->num_rows; ?> product<?php echo $items->num_rows === 1 ? '' : 's'; ?> available in <?php echo online_store_e($branch_name); ?>
+                    <?php if ($category_filter !== ''): ?> Â· <?php echo online_store_e($category_filter); ?><?php endif; ?>
+                    <?php if ($search_query !== ''): ?> Â· â€œ<?php echo online_store_e($search_query); ?>â€<?php endif; ?>
                 </div>
             </div>
-            <a href="<?php echo store_e($path_prefix); ?>all_products.php?bid=<?php echo $branch_id; ?>" class="text-primary fw-bold text-decoration-none small">VIEW ALL</a>
+            <a href="<?php echo online_store_e($path_prefix); ?>all_products.php?bid=<?php echo $branch_id; ?>" class="text-primary fw-bold text-decoration-none small">VIEW ALL</a>
         </div>
 
         <div class="row g-2 g-md-3" id="product-grid">
@@ -293,24 +293,24 @@ function store_money($value): string {
                 ?>
                     <div class="col-6 col-sm-4 col-md-3 col-lg-2">
                         <div class="product-card shadow-sm h-100 d-flex flex-column justify-content-between p-2 p-md-3 bg-white border rounded">
-                            <a href="<?php echo store_e($path_prefix); ?>product_details.php?id=<?php echo (int)$row['id']; ?>&bid=<?php echo $branch_id; ?>" class="product-link">
+                            <a href="<?php echo online_store_e($path_prefix); ?>product_details.php?id=<?php echo (int)$row['id']; ?>&bid=<?php echo $branch_id; ?>" class="product-link">
                                 <div class="position-relative mb-2">
                                     <?php if ($has_offer): ?><span class="badge bg-danger position-absolute top-0 start-0 offer-badge">OFFER</span><?php endif; ?>
                                     <div class="product-image-wrap">
-                                        <img src="<?php echo store_e($web_path); ?>" class="product-image" alt="<?php echo store_e($row['item_name']); ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo store_e($web_root_prefix . 'assets/img/default_med.png'); ?>';">
+                                        <img src="<?php echo online_store_e($web_path); ?>" class="product-image" alt="<?php echo online_store_e($row['item_name']); ?>" loading="lazy" onerror="this.onerror=null;this.src='<?php echo online_store_e($web_root_prefix . 'assets/img/default_med.png'); ?>';">
                                     </div>
                                 </div>
                                 <div>
                                     <div class="product-title fw-bold" style="font-size:13px;">
-                                        <?php echo store_e($row['item_name']); ?>
-                                        <?php if (!empty($row['strength'])): ?><br><span class="text-muted small fw-normal"><?php echo store_e($row['strength']); ?></span><?php endif; ?>
-                                        <?php if (!empty($row['category'])): ?><br><span class="text-muted small fw-normal"><?php echo store_e($row['category']); ?></span><?php endif; ?>
+                                        <?php echo online_store_e($row['item_name']); ?>
+                                        <?php if (!empty($row['strength'])): ?><br><span class="text-muted small fw-normal"><?php echo online_store_e($row['strength']); ?></span><?php endif; ?>
+                                        <?php if (!empty($row['category'])): ?><br><span class="text-muted small fw-normal"><?php echo online_store_e($row['category']); ?></span><?php endif; ?>
                                     </div>
                                     <?php if ($has_offer): ?>
-                                        <div class="product-price text-success fw-bold mt-1"><?php echo store_money($display_price); ?></div>
-                                        <div class="product-price-old text-muted text-decoration-line-through"><?php echo store_money($normal_price); ?></div>
+                                        <div class="product-price text-success fw-bold mt-1"><?php echo online_store_money($display_price); ?></div>
+                                        <div class="product-price-old text-muted text-decoration-line-through"><?php echo online_store_money($normal_price); ?></div>
                                     <?php else: ?>
-                                        <div class="product-price text-success fw-bold mt-1"><?php echo store_money($display_price); ?></div>
+                                        <div class="product-price text-success fw-bold mt-1"><?php echo online_store_money($display_price); ?></div>
                                     <?php endif; ?>
                                 </div>
                             </a>
