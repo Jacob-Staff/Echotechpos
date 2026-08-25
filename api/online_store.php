@@ -31,23 +31,6 @@ if (!isset($conn) || !($conn instanceof mysqli)) {
 date_default_timezone_set('Africa/Lusaka');
 $zambia_today = date('Y-m-d');
 
-// The header lives beside this file or inside /api/.
-$header_candidates = [
-    __DIR__ . '/store_header.php',
-    __DIR__ . '/api/store_header.php',
-];
-$header_loaded = false;
-foreach ($header_candidates as $header_file) {
-    if (file_exists($header_file)) {
-        require_once $header_file;
-        $header_loaded = true;
-        break;
-    }
-}
-if (!$header_loaded) {
-    die('Error: store_header.php could not be found.');
-}
-
 $is_in_api_folder = (basename(__DIR__) === 'api');
 $path_prefix = $is_in_api_folder ? '' : 'api/';
 $store_root = $is_in_api_folder ? dirname(__DIR__) : __DIR__;
@@ -138,10 +121,32 @@ if (!$branch_row) {
 $pharmacy_id = (int)$branch_row['pharmacy_id'];
 $branch_name = $branch_row['branch_name'];
 
-// Search + category filters.
 $category_filter = trim($_GET['cat'] ?? '');
 $search_query = trim($_GET['q'] ?? '');
-$search_type = ($_GET['type'] ?? 'all') === 'rx' ? 'rx' : 'all';
+$search_type = (($_GET['type'] ?? 'all') === 'rx') ? 'rx' : 'all';
+
+// Shared public-store header. Capture its markup so the page can emit a valid HTML document first.
+$header_candidates = [
+    __DIR__ . '/store_header.php',
+    __DIR__ . '/api/store_header.php',
+];
+$header_loaded = false;
+$store_header_markup = '';
+foreach ($header_candidates as $header_file) {
+    if (is_file($header_file)) {
+        ob_start();
+        require_once $header_file;
+        $store_header_markup = ob_get_clean();
+        $header_loaded = true;
+        break;
+    }
+}
+if (!$header_loaded) {
+    http_response_code(500);
+    die('Error: store_header.php could not be found.');
+}
+
+// Search + category filters are initialized before the shared header.
 
 // IMPORTANT: never compare a DATE column directly to '0000-00-00'.
 // The database contains legacy zero-dates and MySQL strict mode throws
@@ -213,6 +218,18 @@ function online_store_money($value): string {
     return 'K ' . number_format((float)$value, 2);
 }
 ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title><?php echo online_store_e($branch_name); ?> | Online Pharmacy</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
+</head>
+<body>
+<?php echo $store_header_markup; ?>
 
 <style>
     .store-main { min-height: 50vh; }
