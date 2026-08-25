@@ -137,6 +137,15 @@ foreach ($header_candidates as $header_file) {
         ob_start();
         require_once $header_file;
         $store_header_markup = ob_get_clean();
+
+        // The shared header must be a fragment. Strip document wrappers
+        // if an older deployed copy still contains them.
+        $store_header_markup = preg_replace('/<!DOCTYPE\s+html>/i', '', $store_header_markup);
+        $store_header_markup = preg_replace('/<\/?html[^>]*>/i', '', $store_header_markup);
+        $store_header_markup = preg_replace('/<head[^>]*>.*?<\/head>/is', '', $store_header_markup);
+        $store_header_markup = preg_replace('/<body[^>]*>/i', '', $store_header_markup);
+        $store_header_markup = preg_replace('/<\/body>/i', '', $store_header_markup);
+
         $header_loaded = true;
         break;
     }
