@@ -22,6 +22,17 @@ $b_id = (int)$_SESSION['branch_id'];
 $success = "";
 $error = "";
 
+function customer_ajax_response(string $status, string $message, array $extra = []): void {
+    if (isset($_POST['ajax_customer']) && $_POST['ajax_customer'] === '1') {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(array_merge([
+            'status' => $status,
+            'message' => $message
+        ], $extra));
+        exit;
+    }
+}
+
 /** 1. DATABASE OPERATIONS **/
 
 // ADD CUSTOMER
@@ -36,12 +47,15 @@ if (isset($_POST['add_customer'])) {
         mysqli_stmt_bind_param($stmt, "iissss", $p_id, $b_id, $name, $phone, $email, $location);
         if (mysqli_stmt_execute($stmt)) {
             $success = "Customer registered successfully!";
+            customer_ajax_response("success", $success);
         } else {
             $error = "Error adding customer: " . mysqli_error($conn);
+            customer_ajax_response("error", $error);
         }
         mysqli_stmt_close($stmt);
     } else {
         $error = "Customer name is required.";
+        customer_ajax_response("error", $error);
     }
 }
 
@@ -54,16 +68,19 @@ if (isset($_POST['edit_customer'])) {
     $location = trim($_POST['location'] ?? '');
 
     if ($id > 0 && !empty($name)) {
-        $stmt = mysqli_prepare($conn, "UPDATE customers SET name = ?, phone = ?, email = ?, address = ? WHERE id = ? AND branch_id = ?");
-        mysqli_stmt_bind_param($stmt, "ssssii", $name, $phone, $email, $location, $id, $b_id);
+        $stmt = mysqli_prepare($conn, "UPDATE customers SET name = ?, phone = ?, email = ?, address = ? WHERE id = ? AND pharmacy_id = ? AND branch_id = ?");
+        mysqli_stmt_bind_param($stmt, "ssssiii", $name, $phone, $email, $location, $id, $p_id, $b_id);
         if (mysqli_stmt_execute($stmt)) {
             $success = "Customer updated successfully!";
+            customer_ajax_response("success", $success);
         } else {
             $error = "Error updating customer: " . mysqli_error($conn);
+            customer_ajax_response("error", $error);
         }
         mysqli_stmt_close($stmt);
     } else {
         $error = "Invalid customer details.";
+        customer_ajax_response("error", $error);
     }
 }
 
@@ -71,12 +88,14 @@ if (isset($_POST['edit_customer'])) {
 if (isset($_POST['delete_customer'])) {
     $id = (int)($_POST['customer_id'] ?? 0);
     if ($id > 0) {
-        $stmt = mysqli_prepare($conn, "DELETE FROM customers WHERE id = ? AND branch_id = ?");
-        mysqli_stmt_bind_param($stmt, "ii", $id, $b_id);
+        $stmt = mysqli_prepare($conn, "DELETE FROM customers WHERE id = ? AND pharmacy_id = ? AND branch_id = ?");
+        mysqli_stmt_bind_param($stmt, "iii", $id, $p_id, $b_id);
         if (mysqli_stmt_execute($stmt)) {
             $success = "Customer removed from branch records.";
+            customer_ajax_response("success", $success, ["customer_id" => $id]);
         } else {
             $error = "Error deleting customer: " . mysqli_error($conn);
+            customer_ajax_response("error", $error);
         }
         mysqli_stmt_close($stmt);
     }
@@ -92,8 +111,8 @@ $info = mysqli_fetch_assoc($info_res);
 $display_pharm = $info['name'] ?? 'PHARMANOVA';
 $display_bran  = $info['branch_name'] ?? 'Main Branch';
 
-$cust_stmt = mysqli_prepare($conn, "SELECT * FROM customers WHERE branch_id = ? ORDER BY id DESC");
-mysqli_stmt_bind_param($cust_stmt, "i", $b_id);
+$cust_stmt = mysqli_prepare($conn, "SELECT * FROM customers WHERE pharmacy_id = ? AND branch_id = ? ORDER BY id DESC");
+mysqli_stmt_bind_param($cust_stmt, "ii", $p_id, $b_id);
 mysqli_stmt_execute($cust_stmt);
 $result = mysqli_stmt_get_result($cust_stmt);
 
@@ -170,6 +189,83 @@ require_once "../includes/head.php";
     box-shadow: 0 0 0 0.2rem rgba(25, 135, 84, 0.25);
 }
 
+/* =========================================================
+   CUSTOMER PAGE - MODERN POS UI
+========================================================= */
+
+.custom-toast-container {
+    position: fixed;
+    top: 82px;
+    right: 20px;
+    z-index: 3000;
+    width: min(390px, calc(100vw - 40px));
+    pointer-events: none;
+}
+.custom-toast {
+    pointer-events: auto;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-left: 4px solid #198754;
+    border-radius: 14px;
+    box-shadow: 0 18px 45px rgba(15,23,42,.15);
+    padding: 14px 16px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+    animation: customerToastIn .22s ease both;
+}
+.custom-toast.error { border-left-color: #dc3545; }
+.custom-toast.info { border-left-color: #0d6efd; }
+.custom-toast-icon {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex: 0 0 36px; background: #eaf7f0; color: #198754;
+}
+.custom-toast.error .custom-toast-icon { background:#fff0f1; color:#dc3545; }
+.custom-toast.info .custom-toast-icon { background:#eef5ff; color:#0d6efd; }
+.custom-toast-content { flex:1; min-width:0; }
+.custom-toast-title { font-weight:700; color:#212529; font-size:.92rem; }
+.custom-toast-message { color:#6c757d; font-size:.84rem; line-height:1.45; margin-top:2px; }
+.custom-toast-close {
+    border:0; background:transparent; color:#adb5bd; cursor:pointer; padding:2px 4px;
+}
+.custom-toast-close:hover { color:#495057; }
+
+.custom-confirm-backdrop {
+    position: fixed; inset: 0; background: rgba(15,23,42,.48);
+    backdrop-filter: blur(2px); z-index: 3050; display:none;
+    align-items:center; justify-content:center; padding:20px;
+}
+.custom-confirm-backdrop.show { display:flex; }
+.custom-confirm {
+    width:min(440px,100%); background:#fff; border-radius:18px;
+    box-shadow:0 25px 70px rgba(15,23,42,.25); overflow:hidden;
+    animation:customerConfirmIn .2s ease both;
+}
+.custom-confirm-header { padding:20px 22px 8px; display:flex; gap:13px; align-items:center; }
+.custom-confirm-icon {
+    width:44px; height:44px; border-radius:50%; background:#fff0f1; color:#dc3545;
+    display:flex; align-items:center; justify-content:center;
+}
+.custom-confirm-body { padding:4px 22px 20px; color:#6c757d; line-height:1.55; }
+.custom-confirm-footer { padding:14px 22px; background:#f8f9fa; display:flex; justify-content:flex-end; gap:8px; }
+
+@keyframes customerToastIn {
+    from { opacity:0; transform:translateY(-8px) translateX(8px); }
+    to { opacity:1; transform:translateY(0) translateX(0); }
+}
+@keyframes customerConfirmIn {
+    from { opacity:0; transform:scale(.96) translateY(8px); }
+    to { opacity:1; transform:scale(1) translateY(0); }
+}
+@media(max-width:767.98px) {
+    .report-wrapper { padding:1rem .75rem; }
+    .header-section { padding:1rem; flex-direction:column; align-items:stretch !important; }
+    .header-section .btn { width:100%; margin-top:12px; }
+    .custom-toast-container { top:70px; right:12px; width:calc(100vw - 24px); }
+}
+
 @media print {
     .no-print { display: none !important; }
     .report-wrapper { padding: 0 !important; }
@@ -177,6 +273,8 @@ require_once "../includes/head.php";
 </style>
 
 <div id="main-wrapper">
+
+    <div id="customToastContainer" class="custom-toast-container no-print" aria-live="polite"></div>
 
     <?php 
     if (file_exists("../includes/header.php")) require_once "../includes/header.php"; 
@@ -226,7 +324,7 @@ require_once "../includes/head.php";
                         <tbody id="customer-body">
                             <?php if ($total_count > 0): ?>
                                 <?php $i = 1; foreach ($customers as $row): ?>
-                                    <tr>
+                                    <tr id="customer-row-<?php echo (int)$row['id']; ?>">
                                         <td class="ps-3 text-muted fw-bold"><?php echo $i++; ?></td>
                                         <td>
                                             <div class="fw-bold text-dark"><?php echo htmlspecialchars($row['name']); ?></div>
@@ -262,12 +360,13 @@ require_once "../includes/head.php";
                                                 data-bs-toggle="modal" data-bs-target="#editModal" title="Edit Client">
                                                 <i class="fas fa-edit"></i>
                                             </button>
-                                            <form method="post" class="d-inline" onsubmit="return confirm('Delete this client record?');">
-                                                <input type="hidden" name="customer_id" value="<?php echo $row['id']; ?>">
-                                                <button type="submit" name="delete_customer" class="btn btn-sm btn-outline-danger" title="Delete Client">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
-                                            </form>
+                                            <button type="button"
+                                                class="btn btn-sm btn-outline-danger delete-btn"
+                                                data-id="<?php echo (int)$row['id']; ?>"
+                                                data-name="<?php echo htmlspecialchars($row['name'], ENT_QUOTES); ?>"
+                                                title="Delete Client">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -365,24 +464,178 @@ if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-    $(document).ready(function(){
-        // Populate edit modal fields
-        $('.edit-btn').on('click', function(){
-            $('#edit_id').val($(this).data('id'));
-            $('#edit_name').val($(this).data('name'));
-            $('#edit_phone').val($(this).data('phone'));
-            $('#edit_email').val($(this).data('email'));
-            $('#edit_location').val($(this).data('location'));
-        });
+$(document).ready(function(){
 
-        // Live client-side search
-        $('#search').on('keyup', function(){
-            var value = $(this).val().toLowerCase();
-            $("#customer-body tr").filter(function() {
-                $(this).toggle($(this).text().toLowerCase().indexOf(value) > -1);
-            });
+    function escapeHtml(value) {
+        return $('<div>').text(value == null ? '' : value).html();
+    }
+
+    function showToast(type, title, message, duration = 4200) {
+        const icons = {success:'fa-check-circle', error:'fa-exclamation-circle', info:'fa-info-circle'};
+        const id = 'customer-toast-' + Date.now() + Math.floor(Math.random()*1000);
+
+        $('#customToastContainer').append(`
+            <div class="custom-toast ${type}" id="${id}">
+                <div class="custom-toast-icon"><i class="fas ${icons[type] || icons.info}"></i></div>
+                <div class="custom-toast-content">
+                    <div class="custom-toast-title">${escapeHtml(title)}</div>
+                    <div class="custom-toast-message">${escapeHtml(message)}</div>
+                </div>
+                <button type="button" class="custom-toast-close"><i class="fas fa-times"></i></button>
+            </div>
+        `);
+
+        const $toast = $('#' + id);
+        $toast.find('.custom-toast-close').on('click', function(){
+            $toast.fadeOut(160, function(){ $(this).remove(); });
+        });
+        setTimeout(function(){
+            $toast.fadeOut(200, function(){ $(this).remove(); });
+        }, duration);
+    }
+
+    /* Populate edit modal */
+    $(document).on('click', '.edit-btn', function(){
+        const $btn = $(this);
+        $('#edit_id').val($btn.data('id'));
+        $('#edit_name').val($btn.data('name'));
+        $('#edit_phone').val($btn.data('phone'));
+        $('#edit_email').val($btn.data('email'));
+        $('#edit_location').val($btn.data('location'));
+    });
+
+    /* Add customer without full-page POST */
+    $('#addModal form').on('submit', function(e){
+        e.preventDefault();
+        const $form = $(this);
+        const $btn = $form.find('button[name="add_customer"]');
+        const original = $btn.html();
+
+        $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
+
+        $.ajax({
+            url:'customers.php', type:'POST',
+            data:$form.serialize()+'&ajax_customer=1', dataType:'json'
+        }).done(function(res){
+            if(res.status === 'success'){
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('addModal')).hide();
+                $form[0].reset();
+                showToast('success','Customer Added',res.message);
+                setTimeout(()=>window.location.reload(),650);
+            } else {
+                showToast('error','Unable to Add Customer',res.message);
+            }
+        }).fail(function(){
+            showToast('error','Connection Error','The customer could not be saved. Please try again.');
+        }).always(function(){
+            $btn.prop('disabled',false).html(original);
         });
     });
+
+    /* Edit customer without full-page POST */
+    $('#editModal form').on('submit', function(e){
+        e.preventDefault();
+        const $form = $(this);
+        const $btn = $form.find('button[name="edit_customer"]');
+        const original = $btn.html();
+
+        $btn.prop('disabled',true).html('<i class="fas fa-spinner fa-spin me-1"></i> Updating...');
+
+        $.ajax({
+            url:'customers.php', type:'POST',
+            data:$form.serialize()+'&ajax_customer=1', dataType:'json'
+        }).done(function(res){
+            if(res.status === 'success'){
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).hide();
+                showToast('success','Customer Updated',res.message);
+                setTimeout(()=>window.location.reload(),650);
+            } else {
+                showToast('error','Update Failed',res.message);
+            }
+        }).fail(function(){
+            showToast('error','Connection Error','The customer could not be updated. Please try again.');
+        }).always(function(){
+            $btn.prop('disabled',false).html(original);
+        });
+    });
+
+    /* Custom delete confirmation */
+    let pendingDeleteId = null;
+
+    $(document).on('click','.delete-btn',function(){
+        pendingDeleteId = $(this).data('id');
+        $('#deleteCustomerName').text($(this).data('name') || 'this customer');
+        $('#deleteConfirm').addClass('show');
+    });
+
+    function closeDeleteConfirm(){
+        pendingDeleteId = null;
+        $('#deleteConfirm').removeClass('show');
+    }
+
+    $('#cancelDeleteBtn').on('click',closeDeleteConfirm);
+    $('#deleteConfirm').on('click',function(e){
+        if(e.target === this) closeDeleteConfirm();
+    });
+    $(document).on('keydown',function(e){
+        if(e.key === 'Escape' && $('#deleteConfirm').hasClass('show')) closeDeleteConfirm();
+    });
+
+    $('#confirmDeleteBtn').on('click',function(){
+        if(!pendingDeleteId) return;
+
+        const id = pendingDeleteId;
+        const $btn = $(this);
+        const original = $btn.html();
+
+        $btn.prop('disabled',true).html('<i class="fas fa-spinner fa-spin me-1"></i> Deleting...');
+
+        $.ajax({
+            url:'customers.php', type:'POST',
+            data:{delete_customer:1,customer_id:id,ajax_customer:1},
+            dataType:'json'
+        }).done(function(res){
+            closeDeleteConfirm();
+
+            if(res.status === 'success'){
+                const $row = $('#customer-row-'+id);
+                $row.fadeOut(280,function(){
+                    $(this).remove();
+                    if($('#customer-body tr[id^="customer-row-"]').length === 0){
+                        $('#customer-body').html(`
+                            <tr><td colspan="5" class="text-center py-5 text-muted">
+                                No client records found for this branch.
+                            </td></tr>
+                        `);
+                    }
+                });
+
+                const $count = $('.header-section .text-success').first();
+                const count = parseInt($count.text(),10);
+                if(!isNaN(count)) $count.text(Math.max(0,count-1));
+
+                showToast('success','Customer Deleted',res.message);
+            } else {
+                showToast('error','Delete Failed',res.message);
+            }
+        }).fail(function(){
+            closeDeleteConfirm();
+            showToast('error','Connection Error','The customer could not be deleted. Please try again.');
+        }).always(function(){
+            $btn.prop('disabled',false).html(original);
+        });
+    });
+
+    /* Live search - updates immediately */
+    $('#search').on('input',function(){
+        const value = $(this).val().toLowerCase().trim();
+        $('#customer-body tr[id^="customer-row-"]').each(function(){
+            $(this).toggle($(this).text().toLowerCase().indexOf(value) !== -1);
+        });
+    });
+
+});
+</script>
 </script>
 </body>
 </html>
