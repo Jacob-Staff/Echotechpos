@@ -7,6 +7,10 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// BIGE/Pharmacy POS uses Zambia Standard Time (Africa/Lusaka).
+date_default_timezone_set('Africa/Lusaka');
+$zambia_today = date('Y-m-d');
+
 // The header lives beside this file or inside /api/.
 $header_candidates = [
     __DIR__ . '/store_header.php',
@@ -70,14 +74,23 @@ $category_filter = trim($_GET['cat'] ?? '');
 $search_query = trim($_GET['q'] ?? '');
 $search_type = ($_GET['type'] ?? 'all') === 'rx' ? 'rx' : 'all';
 
+// IMPORTANT: never compare a DATE column directly to '0000-00-00'.
+// The database contains legacy zero-dates and MySQL strict mode throws
+// #1525 when that literal is used in a DATE comparison. Convert the
+// stored value to text for the comparison instead. This also keeps the
+// storefront date aligned with Zambia Standard Time.
 $where = "WHERE si.pharmacy_id = ?
           AND si.branch_id = ?
           AND si.is_active = 1
           AND si.is_online = 1
           AND si.quantity > 0
-          AND (si.expiry_date IS NULL OR si.expiry_date = '0000-00-00' OR si.expiry_date >= CURDATE())";
-$params = [$pharmacy_id, $branch_id];
-$types = 'ii';
+          AND (
+              si.expiry_date IS NULL
+              OR LEFT(CAST(si.expiry_date AS CHAR), 10) = '0000-00-00'
+              OR LEFT(CAST(si.expiry_date AS CHAR), 10) >= ?
+          )";
+$params = [$pharmacy_id, $branch_id, $zambia_today];
+$types = 'iis';
 
 if ($category_filter !== '') {
     $where .= " AND si.category = ?";
