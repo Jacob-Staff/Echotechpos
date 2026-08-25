@@ -26,7 +26,7 @@ $branch_id   = (int)$_SESSION['branch_id'];
 $today       = date('Y-m-d');
 
 // ==============================
-// 🏢 FETCH BRANCH NAME FROM DB
+// ðŸ¢ FETCH BRANCH NAME FROM DB
 // ==============================
 $branch_name = "Unknown Branch";
 $branch_stmt = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ?");
@@ -41,13 +41,15 @@ if ($branch_stmt) {
 }
 
 // ==============================
-// 🔒 SAFE INPUT HANDLING
+// ðŸ”’ SAFE INPUT HANDLING
 // ==============================
 $search   = trim($_GET['search'] ?? '');
 $category = trim($_GET['category'] ?? '');
 
+$is_ajax_inventory = isset($_GET['ajax_inventory']) && $_GET['ajax_inventory'] === '1';
+
 // ==============================
-// 📦 FETCH CATEGORIES
+// ðŸ“¦ FETCH CATEGORIES
 // ==============================
 $cat_stmt = $conn->prepare("
     SELECT DISTINCT category 
@@ -60,7 +62,7 @@ $cat_stmt->execute();
 $cat_res = $cat_stmt->get_result();
 
 // ==============================
-// 🔔 NOTIFICATIONS
+// ðŸ”” NOTIFICATIONS
 // ==============================
 function getCount($conn, $table, $pharmacy_id, $branch_id) {
     $stmt = $conn->prepare("
@@ -79,7 +81,7 @@ $pending_labs = getCount($conn, "lab_results", $pharmacy_id, $branch_id);
 $pending_help = getCount($conn, "help_inquiries", $pharmacy_id, $branch_id);
 
 // ==============================
-// 🔍 BUILD FILTER QUERY
+// ðŸ” BUILD FILTER QUERY
 // ==============================
 $where = "WHERE pharmacy_id = ? AND branch_id = ? 
           AND quantity > 0 
@@ -103,7 +105,7 @@ if (!empty($category)) {
 }
 
 // ==============================
-// 📦 FETCH INVENTORY
+// ðŸ“¦ FETCH INVENTORY
 // ==============================
 $sql = "SELECT id, item_name, quantity, price, online_price, is_online, expiry_date, image, category 
         FROM store_items 
@@ -116,7 +118,7 @@ $stmt->execute();
 $res = $stmt->get_result();
 
 // ==============================
-// 🛠 HELPERS
+// ðŸ›  HELPERS
 // ==============================
 function e($v){ return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
 function money($v){ return "K".number_format((float)$v,2); }
@@ -188,6 +190,61 @@ require_once "../includes/head.php";
     padding: 10px;
 }
 
+
+/* =========================================================
+   ONLINE MANAGER - LIVE FILTERS + CUSTOM NOTIFICATIONS
+========================================================= */
+.inventory-filter-status {
+    min-height: 20px;
+}
+.inventory-row.inventory-hidden {
+    display: none;
+}
+.online-manager-toast-container {
+    position: fixed;
+    top: 82px;
+    right: 20px;
+    z-index: 4000;
+    width: min(390px, calc(100vw - 40px));
+}
+.online-manager-toast {
+    background:#fff;
+    border:1px solid #dee2e6;
+    border-left:4px solid #198754;
+    border-radius:14px;
+    box-shadow:0 18px 45px rgba(15,23,42,.16);
+    padding:13px 15px;
+    margin-bottom:10px;
+    display:flex;
+    align-items:flex-start;
+    gap:11px;
+    animation:omToastIn .2s ease both;
+}
+.online-manager-toast.error { border-left-color:#dc3545; }
+.online-manager-toast.info { border-left-color:#0d6efd; }
+.om-toast-icon {
+    width:35px;height:35px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    background:#eaf7f0;color:#198754;flex:0 0 35px;
+}
+.online-manager-toast.error .om-toast-icon {background:#fff0f1;color:#dc3545;}
+.online-manager-toast.info .om-toast-icon {background:#eef5ff;color:#0d6efd;}
+.om-toast-content {flex:1;}
+.om-toast-title {font-weight:700;font-size:.9rem;}
+.om-toast-message {font-size:.82rem;color:#6c757d;margin-top:2px;}
+.om-toast-close {border:0;background:transparent;color:#adb5bd;}
+.inventory-loading {
+    opacity:.62;
+    pointer-events:none;
+}
+@keyframes omToastIn {
+    from {opacity:0;transform:translateY(-8px) translateX(8px);}
+    to {opacity:1;transform:translateY(0) translateX(0);}
+}
+@media(max-width:767.98px){
+    .online-manager-toast-container {top:70px;right:12px;width:calc(100vw - 24px);}
+}
+
 @media (max-width: 767.98px) {
     .page-wrapper-full {
         padding: 0.75rem;
@@ -224,7 +281,7 @@ require_once "../includes/head.php";
                     <div>
                         <h2 class="fw-bold text-dark mb-0 page-title">ONLINE INVENTORY MANAGER</h2>
                         <span class="badge bg-light text-dark border mt-1">
-                            📍 <?php echo e($branch_name); ?>
+                            ðŸ“ <?php echo e($branch_name); ?>
                         </span>
                     </div>
 
@@ -256,12 +313,15 @@ require_once "../includes/head.php";
                     </div>
                 </div>
 
-                <form method="GET" class="row g-2">
+                <div class="row g-2" id="inventoryFilters">
                     <div class="col-12 col-md-5">
-                        <input type="text" name="search" class="form-control" placeholder="Search item or barcode..." value="<?php echo e($search); ?>">
+                        <div class="input-group">
+                            <span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span>
+                            <input type="text" id="inventorySearch" name="search" class="form-control" autocomplete="off" placeholder="Search item or barcode..." value="<?php echo e($search); ?>">
+                        </div>
                     </div>
                     <div class="col-12 col-md-4">
-                        <select name="category" class="form-select" onchange="this.form.submit()">
+                        <select id="inventoryCategory" name="category" class="form-select">
                             <option value="">All Categories</option>
                             <?php while($c = $cat_res->fetch_assoc()): ?>
                                 <option value="<?php echo e($c['category']); ?>" <?php if($category == $c['category']) echo 'selected'; ?>>
@@ -271,12 +331,18 @@ require_once "../includes/head.php";
                         </select>
                     </div>
                     <div class="col-12 col-md-3">
-                        <button type="submit" class="btn btn-primary w-100 fw-bold">Apply Filter</button>
+                        <button type="button" id="clearInventoryFilters" class="btn btn-light border w-100 fw-bold">
+                            <i class="fas fa-rotate-left me-1"></i> Clear
+                        </button>
                     </div>
-                </form>
+                </div>
             </div>
 
             <form method="POST" action="process_bulk_online.php" id="bulkForm">
+                <div class="inventory-filter-status small text-muted mb-2 px-1" id="inventoryFilterStatus">
+                    Showing current inventory
+                </div>
+
                 <div class="bulk-action-bar shadow-sm d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
                     <label class="mb-0 cursor-pointer fw-bold"><input type="checkbox" id="selectAll" class="me-2"> Select All Items</label>
                     <div class="w-100 w-sm-auto d-flex gap-2">
@@ -309,7 +375,10 @@ require_once "../includes/head.php";
                                         ? "../uploads/products/" . $row['image'] 
                                         : "dist/img/no-image.png";
                                 ?>
-                                <tr>
+                                <tr class="inventory-row"
+                                    data-name="<?php echo e(strtolower($row['item_name'])); ?>"
+                                    data-barcode="<?php echo e(strtolower($row['barcode'] ?? '')); ?>"
+                                    data-category="<?php echo e(strtolower($row['category'] ?? '')); ?>">
                                     <td><input type="checkbox" class="item-checkbox" name="item_ids[]" value="<?php echo $row['id']; ?>"></td>
                                     
                                     <td class="text-center">
@@ -426,7 +495,7 @@ require_once "../includes/head.php";
                             </div>
                             <div class="col-12">
                                 <label class="form-label fw-bold">Storage Info</label>
-                                <input type="text" name="storage_info" class="form-control" placeholder="e.g., Store below 30°C">
+                                <input type="text" name="storage_info" class="form-control" placeholder="e.g., Store below 30Â°C">
                             </div>
                         </div>
                     </div>
@@ -466,6 +535,50 @@ require_once "../includes/head.php";
     </div>
 </div>
 
+
+<!-- Custom Offer Modal -->
+<div class="modal fade" id="offerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow" style="border-radius:14px; overflow:hidden;">
+            <div class="modal-header bg-warning border-0">
+                <h5 class="modal-title fw-bold"><i class="fas fa-tag me-2"></i><span id="offerModalTitle">Product Offer</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div id="offerRemoveView" class="d-none">
+                    <p class="mb-1">Remove the current offer from:</p>
+                    <h6 class="fw-bold" id="offerRemoveName"></h6>
+                    <p class="text-muted small mb-0">The product will return to its normal selling price.</p>
+                </div>
+
+                <div id="offerSetView" class="d-none">
+                    <p class="text-muted small mb-2">Set an online offer price for:</p>
+                    <h6 class="fw-bold mb-3" id="offerSetName"></h6>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold">Original Price</label>
+                        <div class="form-control bg-light" id="offerOriginalPrice"></div>
+                    </div>
+                    <div>
+                        <label class="form-label fw-bold">Offer Price</label>
+                        <div class="input-group">
+                            <span class="input-group-text">K</span>
+                            <input type="number" step="0.01" min="0" class="form-control" id="offerPriceInput" placeholder="Enter lower price">
+                        </div>
+                        <div class="form-text">Offer price must be lower than the original price.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light border-0">
+                <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" id="confirmOfferBtn" class="btn btn-warning fw-bold">Continue</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Custom notification -->
+<div id="onlineManagerToastContainer" class="online-manager-toast-container" aria-live="polite"></div>
+
 <?php 
 if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"; 
 ?>
@@ -474,107 +587,304 @@ if (file_exists("../includes/footer.php")) require_once "../includes/footer.php"
 
 <script>
 $(document).ready(function() {
-    $('#selectAll').on('click', function(){
-        $('.item-checkbox').prop('checked', this.checked);
+
+    function esc(value) {
+        return $('<div>').text(value == null ? '' : value).html();
+    }
+
+    function showOMToast(type, title, message, duration = 4200) {
+        const icons = {success:'fa-check-circle', error:'fa-exclamation-circle', info:'fa-info-circle'};
+        const id = 'om-toast-' + Date.now() + Math.floor(Math.random() * 1000);
+
+        $('#onlineManagerToastContainer').append(`
+            <div class="online-manager-toast ${type}" id="${id}">
+                <div class="om-toast-icon"><i class="fas ${icons[type] || icons.info}"></i></div>
+                <div class="om-toast-content">
+                    <div class="om-toast-title">${esc(title)}</div>
+                    <div class="om-toast-message">${esc(message)}</div>
+                </div>
+                <button type="button" class="om-toast-close"><i class="fas fa-times"></i></button>
+            </div>
+        `);
+
+        const $toast = $('#' + id);
+        $toast.find('.om-toast-close').on('click', function(){
+            $toast.fadeOut(150, function(){ $(this).remove(); });
+        });
+        setTimeout(function(){
+            $toast.fadeOut(180, function(){ $(this).remove(); });
+        }, duration);
+    }
+
+    /* Select all */
+    $('#selectAll').on('change', function(){
+        $('.inventory-row:visible .item-checkbox').prop('checked', this.checked);
     });
 
+    /* Keep Select All accurate when individual items change */
+    $(document).on('change', '.item-checkbox', function(){
+        const $visible = $('.inventory-row:visible .item-checkbox');
+        const checked = $visible.length > 0 && $visible.filter(':checked').length === $visible.length;
+        $('#selectAll').prop('checked', checked);
+    });
+
+    /* =====================================================
+       TRUE LIVE FILTERING
+       Search and category update immediately â€” no Apply.
+    ===================================================== */
+    function applyLiveInventoryFilter() {
+        const search = ($('#inventorySearch').val() || '').toLowerCase().trim();
+        const category = ($('#inventoryCategory').val() || '').toLowerCase().trim();
+
+        let visible = 0;
+        const total = $('.inventory-row').length;
+
+        $('.inventory-row').each(function(){
+            const $row = $(this);
+            const name = String($row.data('name') || '');
+            const barcode = String($row.data('barcode') || '');
+            const rowCategory = String($row.data('category') || '');
+
+            const matchesSearch =
+                !search ||
+                name.indexOf(search) !== -1 ||
+                barcode.indexOf(search) !== -1;
+
+            const matchesCategory =
+                !category || rowCategory === category;
+
+            const matches = matchesSearch && matchesCategory;
+
+            $row.toggleClass('inventory-hidden', !matches);
+            if (matches) visible++;
+        });
+
+        $('#selectAll').prop('checked', false);
+
+        if (!search && !category) {
+            $('#inventoryFilterStatus').text('Showing all available inventory');
+        } else {
+            $('#inventoryFilterStatus').html(
+                '<strong>' + visible + '</strong> of <strong>' + total +
+                '</strong> products match the current filter'
+            );
+        }
+
+        let $empty = $('#liveFilterEmpty');
+        if (visible === 0 && total > 0) {
+            if (!$empty.length) {
+                $('table tbody').append(`
+                    <tr id="liveFilterEmpty">
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="fas fa-search fa-2x mb-2 d-block opacity-50"></i>
+                            No products match the current filter.
+                        </td>
+                    </tr>
+                `);
+            }
+        } else {
+            $empty.remove();
+        }
+    }
+
+    $('#inventorySearch').on('input', applyLiveInventoryFilter);
+    $('#inventoryCategory').on('change', applyLiveInventoryFilter);
+
+    $('#clearInventoryFilters').on('click', function(){
+        $('#inventorySearch').val('');
+        $('#inventoryCategory').val('');
+        applyLiveInventoryFilter();
+        $('#inventorySearch').trigger('focus');
+    });
+
+    /* =====================================================
+       HELP
+    ===================================================== */
     $('#helpModal').on('shown.bs.modal', function () {
         loadHelpMessages();
     });
 
+    /* =====================================================
+       CLINICAL INFORMATION
+    ===================================================== */
     $(document).on('submit', '#clinicalForm', function(e) {
         e.preventDefault();
         e.stopPropagation();
 
         const $form = $(this);
         const $btn = $form.find('button[type="submit"]');
-        
-        $btn.prop('disabled', true).text('Saving...');
+        const original = $btn.html();
+
+        $btn.prop('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
 
         $.ajax({
             url: 'actions/save_clinical_info.php',
             type: 'POST',
             data: $form.serialize(),
-            dataType: 'json',
-            success: function(res) {
-                if(res.success) {
-                    alert('Clinical information updated successfully!');
-                    $('#clinicalModal').modal('hide');
-                } else {
-                    alert('Error: ' + res.message);
-                }
-            },
-            error: function(xhr) {
-                console.error("Submission Error:", xhr.responseText);
-                alert('Server error occurred while saving.');
-            },
-            complete: function() {
-                $btn.prop('disabled', false).text('Save Changes');
+            dataType: 'json'
+        })
+        .done(function(res) {
+            if (res.success) {
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('clinicalModal')).hide();
+                showOMToast('success', 'Clinical Information Saved', 'Product information was updated successfully.');
+            } else {
+                showOMToast('error', 'Unable to Save', res.message || 'The clinical information could not be saved.');
             }
+        })
+        .fail(function(xhr) {
+            console.error('Clinical submission error:', xhr.responseText);
+            showOMToast('error', 'Server Error', 'The clinical information could not be saved.');
+        })
+        .always(function() {
+            $btn.prop('disabled', false).html(original);
         });
     });
+
+    /* =====================================================
+       CUSTOM OFFER MODAL
+    ===================================================== */
+    let offerAction = null;
+    let offerProductId = null;
+    let offerProductName = '';
+    let offerOriginalPrice = 0;
+
+    window.toggleOffer = function(id, name, price, isOffer) {
+        offerProductId = id;
+        offerProductName = name;
+        offerOriginalPrice = parseFloat(price) || 0;
+        offerAction = isOffer ? 'remove' : 'set';
+
+        if (offerAction === 'remove') {
+            $('#offerModalTitle').text('Remove Offer');
+            $('#offerRemoveName').text(name);
+            $('#offerRemoveView').removeClass('d-none');
+            $('#offerSetView').addClass('d-none');
+            $('#confirmOfferBtn')
+                .removeClass('btn-warning')
+                .addClass('btn-danger')
+                .html('<i class="fas fa-tag me-1"></i> Remove Offer');
+        } else {
+            $('#offerModalTitle').text('Set Online Offer');
+            $('#offerSetName').text(name);
+            $('#offerOriginalPrice').text('K' + offerOriginalPrice.toFixed(2));
+            $('#offerPriceInput').val('');
+            $('#offerRemoveView').addClass('d-none');
+            $('#offerSetView').removeClass('d-none');
+            $('#confirmOfferBtn')
+                .removeClass('btn-danger')
+                .addClass('btn-warning')
+                .html('<i class="fas fa-check me-1"></i> Set Offer');
+        }
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('offerModal')).show();
+
+        if (offerAction === 'set') {
+            setTimeout(function(){ $('#offerPriceInput').trigger('focus'); }, 250);
+        }
+    };
+
+    $('#confirmOfferBtn').on('click', function(){
+        const $btn = $(this);
+
+        if (offerAction === 'remove') {
+            window.location.href =
+                'process_offer.php?id=' + encodeURIComponent(offerProductId) +
+                '&action=remove';
+            return;
+        }
+
+        const value = parseFloat($('#offerPriceInput').val());
+
+        if (!value || isNaN(value) || value <= 0) {
+            showOMToast('error', 'Invalid Offer Price', 'Please enter a valid offer price.');
+            $('#offerPriceInput').trigger('focus');
+            return;
+        }
+
+        if (value >= offerOriginalPrice) {
+            showOMToast(
+                'error',
+                'Offer Price Too High',
+                'The offer price must be lower than K' + offerOriginalPrice.toFixed(2) + '.'
+            );
+            $('#offerPriceInput').trigger('focus');
+            return;
+        }
+
+        $btn.prop('disabled', true)
+            .html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
+
+        window.location.href =
+            'process_offer.php?id=' + encodeURIComponent(offerProductId) +
+            '&action=set&price=' + encodeURIComponent(value.toFixed(2));
+    });
+
+    /* =====================================================
+       IMAGE UPLOAD
+    ===================================================== */
+    window.openImageUpload = function(id){
+        $('#img_product_id').val(id);
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('uploadImageModal')).show();
+    };
+
+    /* =====================================================
+       CLINICAL MODAL
+    ===================================================== */
+    window.openClinicalModal = function(id, name) {
+        $('#clinicalProdName').text(name);
+        $('#clin_prod_id').val(id);
+
+        $('#clinicalForm')[0].reset();
+        $('#clin_fields').addClass('d-none');
+        $('#clin_loading').removeClass('d-none');
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('clinicalModal')).show();
+
+        $.getJSON('actions/get_clinical_info.php', { product_id: id })
+            .done(function(data) {
+                if(data.success && data.info) {
+                    const info = data.info;
+                    $('[name="about_text"]').val(info.about_text || '');
+                    $('[name="uses"]').val(info.uses || '');
+                    $('[name="directions"]').val(info.directions || '');
+                    $('[name="side_effects"]').val(info.side_effects || '');
+                    $('[name="how_it_works"]').val(info.how_it_works || '');
+                    $('[name="storage_info"]').val(info.storage_info || 'Store below 30Â°C');
+                }
+            })
+            .fail(function(){
+                showOMToast('error', 'Unable to Load', 'Clinical information could not be loaded.');
+            })
+            .always(function() {
+                $('#clin_loading').addClass('d-none');
+                $('#clin_fields').removeClass('d-none');
+            });
+    };
+
+    /* Run initial live filter so URL-loaded values still work. */
+    applyLiveInventoryFilter();
 });
 
 function loadHelpMessages() {
-    $('#helpContent').html('<div class="text-center p-4"><div class="spinner-border text-primary"></div><p class="mt-2 text-muted">Fetching inquiries...</p></div>');
+    $('#helpContent').html(
+        '<div class="text-center p-4"><div class="spinner-border text-primary"></div>' +
+        '<p class="mt-2 text-muted">Fetching inquiries...</p></div>'
+    );
+
     $.ajax({
         url: 'actions/fetch_help_messages.php',
         method: 'GET',
-        cache: false,
-        success: function(data) {
-            $('#helpContent').html(data);
-        },
-        error: function() {
-            $('#helpContent').html('<div class="alert alert-danger">Error loading inquiries.</div>');
-        }
+        cache: false
+    })
+    .done(function(data) {
+        $('#helpContent').html(data);
+    })
+    .fail(function() {
+        $('#helpContent').html('<div class="alert alert-danger">Error loading inquiries.</div>');
     });
 }
-
-function openClinicalModal(id, name) {
-    $('#clinicalProdName').text(name);
-    $('#clin_prod_id').val(id);
-    
-    $('#clinicalForm')[0].reset();
-    $('#clin_fields').addClass('d-none');
-    $('#clin_loading').removeClass('d-none');
-    
-    $('#clinicalModal').modal('show');
-
-    $.getJSON('actions/get_clinical_info.php', { product_id: id }, function(data) {
-        if(data.success && data.info) {
-            const info = data.info;
-            $('[name="about_text"]').val(info.about_text);
-            $('[name="uses"]').val(info.uses);
-            $('[name="directions"]').val(info.directions);
-            $('[name="side_effects"]').val(info.side_effects);
-            $('[name="how_it_works"]').val(info.how_it_works);
-            $('[name="storage_info"]').val(info.storage_info || 'Store below 30°C');
-        }
-    }).always(function() {
-        $('#clin_loading').addClass('d-none');
-        $('#clin_fields').removeClass('d-none');
-    });
-}
-
-function toggleOffer(id, name, price, isOffer){
-    if(isOffer){
-        if(confirm("Remove offer from " + name + "?")){
-            location.href = "process_offer.php?id=" + id + "&action=remove";
-        }
-    } else {
-        let val = prompt("Enter new offer price for " + name);
-        if(val && !isNaN(val) && parseFloat(val) < price){
-            location.href = "process_offer.php?id=" + id + "&action=set&price=" + val;
-        } else if (val) {
-            alert("Invalid price. Offer must be lower than the original price.");
-        }
-    }
-}
-
-function openImageUpload(id){
-    $('#img_product_id').val(id);
-    $('#uploadImageModal').modal('show');
-}
+</script>
 </script>
 </body>
 </html>
