@@ -7,6 +7,26 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+/*
+ * Load the database connection BEFORE the shared store header.
+ * This is intentional: store_header.php is reused from multiple
+ * public-store pages and must always receive the same $conn object.
+ */
+$store_conn_file = realpath(__DIR__ . '/../includes/conn.php');
+if (!$store_conn_file) {
+    $store_conn_file = realpath(__DIR__ . '/includes/conn.php');
+}
+if (!$store_conn_file || !is_file($store_conn_file)) {
+    http_response_code(500);
+    die('Database connection file (conn.php) not found.');
+}
+require_once $store_conn_file;
+
+if (!isset($conn) || !($conn instanceof mysqli)) {
+    http_response_code(500);
+    die('Database connection unavailable.');
+}
+
 // BIGE/Pharmacy POS uses Zambia Standard Time (Africa/Lusaka).
 date_default_timezone_set('Africa/Lusaka');
 $zambia_today = date('Y-m-d');
