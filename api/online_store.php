@@ -33,18 +33,67 @@ $path_prefix = $is_in_api_folder ? '' : 'api/';
 $store_root = $is_in_api_folder ? dirname(__DIR__) : __DIR__;
 $web_root_prefix = $is_in_api_folder ? '../' : '';
 
-// Always honour the branch selected by the header, but never trust a branch
-// belonging to another pharmacy.
-$requested_branch = isset($_GET['bid']) ? (int)$_GET['bid'] : 0;
+/*
+ * ---------------------------------------------------------------
+ * PUBLIC STORE BRANCH CONTEXT
+ * ---------------------------------------------------------------
+ * The shared store header already validates branch switching, but
+ * this page validates it again so a visitor cannot bypass the
+ * header by manually changing ?bid= in the URL.
+ * ---------------------------------------------------------------
+ */
+$requested_branch  = isset($_GET['bid']) ? (int)$_GET['bid'] : 0;
+$current_branch_id = isset($_SESSION['current_branch_id']) ? (int)$_SESSION['current_branch_id'] : 0;
+$current_pharmacy_id = 0;
+
+if ($current_branch_id > 0) {
+    $current_ctx = $conn->prepare(
+        "SELECT pharmacy_id
+         FROM branches
+         WHERE id = ? AND is_active = 1
+         LIMIT 1"
+    );
+    if ($current_ctx) {
+        $current_ctx->bind_param('i', $current_branch_id);
+        $current_ctx->execute();
+        $current_row = $current_ctx->get_result()->fetch_assoc();
+        $current_ctx->close();
+        $current_pharmacy_id = (int)($current_row['pharmacy_id'] ?? 0);
+    }
+}
+
 if ($requested_branch > 0) {
-    $branch_check = $conn->prepare("SELECT id FROM branches WHERE id = ? AND is_active = 1 LIMIT 1");
-    if ($branch_check) {
-        $branch_check->bind_param('i', $requested_branch);
-        $branch_check->execute();
-        $valid_branch = $branch_check->get_result()->fetch_assoc();
-        $branch_check->close();
-        if ($valid_branch) {
-            $_SESSION['current_branch_id'] = $requested_branch;
+    if ($current_pharmacy_id > 0) {
+        $branch_check = $conn->prepare(
+            "SELECT id
+             FROM branches
+             WHERE id = ?
+               AND pharmacy_id = ?
+               AND is_active = 1
+             LIMIT 1"
+        );
+        if ($branch_check) {
+            $branch_check->bind_param('ii', $requested_branch, $current_pharmacy_id);
+            $branch_check->execute();
+            $valid_branch = $branch_check->get_result()->fetch_assoc();
+            $branch_check->close();
+            if ($valid_branch) {
+                $_SESSION['current_branch_id'] = $requested_branch;
+            }
+        }
+    } else {
+        // First branch selection for a public visitor.
+        $branch_check = $conn->prepare(
+            "SELECT id FROM branches WHERE id = ? AND is_active = 1 LIMIT 1"
+        );
+        if ($branch_check) {
+            $branch_check->bind_param('i', $requested_branch);
+            $branch_check->execute();
+            $valid_branch = $branch_check->get_result()->fetch_assoc();
+            $branch_check->close();
+            if ($valid_branch) {
+                $_SESSION['current_branch_id'] = $requested_branch;
+            }
         }
     }
 }
