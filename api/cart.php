@@ -1419,8 +1419,26 @@ $branch = bige_cart_branch(
 $pharmacyId =
     (int)$branch['pharmacy_id'];
 
-$cart =
-    bige_cart_get($branchId);
+$clientId =
+    (int)($_SESSION['client_id'] ?? 0);
+
+/*
+ * CRITICAL: a normal GET must restore the persistent customer cart.
+ * Previously only POST actions hydrated the database cart, so after
+ * logout/login the session cart was empty even though the DB cart existed.
+ */
+if ($clientId > 0) {
+    $cart = bige_cart_persist_load(
+        $conn,
+        $clientId,
+        $pharmacyId,
+        $branchId,
+        bige_cart_get($branchId)
+    );
+    $_SESSION['carts'][$branchId] = $cart;
+} else {
+    $cart = bige_cart_get($branchId);
+}
 
 $cartCount = 0;
 $subtotal = 0.0;
@@ -1442,9 +1460,6 @@ $subtotal =
     round($subtotal, 2);
 
 /* Customer prefill */
-$clientId =
-    (int)($_SESSION['client_id'] ?? 0);
-
 $customerName =
     (string)($_SESSION['client_name'] ?? '');
 
