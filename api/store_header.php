@@ -122,7 +122,7 @@ if (isset($_SESSION['client_id'])) {
         /* ========================= TRUEMEDS-STYLE CATEGORY NAV ========================= */
         .mega-nav-wrap{background:#fff;border-bottom:1px solid #dfe4e8;position:relative;z-index:1100;}
         .mega-nav{min-height:46px;display:flex;align-items:stretch;justify-content:center;gap:0;overflow:visible;}
-        .mega-item{position:static;display:flex;align-items:center;}
+        .mega-item{position:relative;display:flex;align-items:center;}
         .mega-trigger{height:46px;display:flex;align-items:center;padding:0 17px;color:#5f6f7f;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap;border-bottom:2px solid transparent;transition:.18s ease;}
         .mega-trigger:hover,.mega-trigger.active{color:#1769d1;border-bottom-color:#1769d1;background:#fbfcfd;}
         .mega-trigger .mdi{font-size:14px;margin-left:4px;}
@@ -216,8 +216,8 @@ if (isset($_SESSION['client_id'])) {
         .mega-link:hover{background:#eaf0f5;color:#1769d1;}
         .mega-link .mdi{display:none;}
 
-        /* Keep menus inside the viewport on the right side. */
-        .mega-item:nth-last-child(-n+3)>.mega-panel{left:auto;right:0;}
+        /* Each dropdown is anchored to its own category trigger, exactly like the reference navigation. */
+        .mega-item > .mega-panel{left:0;right:auto;}
 
         /* Mobile menu */
         .mobile-category-toggle{display:none;border:0;background:#fff;width:100%;padding:11px 14px;font-size:13px;font-weight:700;color:#34495e;text-align:left;}
