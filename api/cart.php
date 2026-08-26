@@ -1,6 +1,6 @@
 <?php
 /**
- * BIGE50 ONLINE CART
+ * ECHOTECH ONLINE CART
  *
  * ONE FILE does both jobs:
  *   1. Normal GET  -> renders the cart page.
@@ -17,6 +17,47 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 date_default_timezone_set('Africa/Lusaka');
+
+/*
+ * AJAX responses must ALWAYS be JSON.
+ * Buffer accidental PHP notices/warnings/output so they cannot corrupt
+ * the response consumed by the online-store JavaScript.
+ */
+$echotech_cart_json_request = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
+$echotech_cart_json_sent = false;
+
+if ($echotech_cart_json_request) {
+    ob_start();
+
+    register_shutdown_function(function () use (&$echotech_cart_json_sent): void {
+        if ($echotech_cart_json_sent) {
+            return;
+        }
+
+        $error = error_get_last();
+        if (!$error) {
+            return;
+        }
+
+        $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR];
+        if (!in_array((int)$error['type'], $fatalTypes, true)) {
+            return;
+        }
+
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+
+        echo json_encode([
+            'success' => false,
+            'status'  => 'error',
+            'message' => 'The cart server encountered an unexpected error. Please try again.'
+        ], JSON_UNESCAPED_SLASHES);
+    });
+}
 
 /* ---------------------------------------------------------
    DATABASE
@@ -60,11 +101,19 @@ if (!isset($conn) || !($conn instanceof mysqli)) {
 /* ---------------------------------------------------------
    AJAX / JSON HELPERS
 --------------------------------------------------------- */
-function bige_cart_json(
+function echotech_cart_json(
     bool $success,
     string $message = '',
     array $extra = []
 ): never {
+    global $echotech_cart_json_sent;
+
+    $echotech_cart_json_sent = true;
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
     header('Content-Type: application/json; charset=utf-8');
 
     echo json_encode(
@@ -76,18 +125,18 @@ function bige_cart_json(
             ],
             $extra
         ),
-        JSON_UNESCAPED_SLASHES
+        JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
     );
 
     exit;
 }
 
-function bige_cart_fail(string $message, array $extra = []): never
+function echotech_cart_fail(string $message, array $extra = []): never
 {
-    bige_cart_json(false, $message, $extra);
+    echotech_cart_json(false, $message, $extra);
 }
 
-function bige_cart_check_csrf(): void
+function echotech_cart_check_csrf(): void
 {
     $sessionToken = (string)($_SESSION['online_cart_csrf'] ?? '');
     $postedToken  = (string)($_POST['csrf'] ?? '');
@@ -95,7 +144,7 @@ function bige_cart_check_csrf(): void
     if ($sessionToken === '' || $postedToken === '' ||
         !hash_equals($sessionToken, $postedToken)) {
 
-        bige_cart_fail(
+        echotech_cart_fail(
             'Security token expired. Please refresh the page and try again.'
         );
     }
@@ -113,10 +162,10 @@ $csrf = (string)$_SESSION['online_cart_csrf'];
 /* ---------------------------------------------------------
    CART HELPERS
 --------------------------------------------------------- */
-function bige_cart_branch(mysqli $db, int $branchId): array
+function echotech_cart_branch(mysqli $db, int $branchId): array
 {
     $stmt = $db->prepare(
-        "SELECT id, pharmacy_id, branch_name
+        "SELECT id, pharmacy_id, branch_name, branch_code
          FROM branches
          WHERE id = ? AND is_active = 1
          LIMIT 1"
@@ -142,7 +191,7 @@ function bige_cart_branch(mysqli $db, int $branchId): array
     return $branch;
 }
 
-function bige_cart_get(int $branchId): array
+function echotech_cart_get(int $branchId): array
 {
     if (!isset($_SESSION['carts']) || !is_array($_SESSION['carts'])) {
         $_SESSION['carts'] = [];
@@ -158,7 +207,7 @@ function bige_cart_get(int $branchId): array
     return $_SESSION['carts'][$branchId];
 }
 
-function bige_cart_summary(array $cart): array
+function echotech_cart_summary(array $cart): array
 {
     $count = 0;
     $subtotal = 0.0;
@@ -181,6 +230,328 @@ function bige_cart_summary(array $cart): array
     ];
 }
 
+
+/* ---------------------------------------------------------
+   PERSISTENT CUSTOMER CART
+   Logged-in customer carts live in online_cart_items.
+   Session cart remains available for guests.
+--------------------------------------------------------- */
+
+function echotech_cart_client_id(): int
+{
+    return (int)($_SESSION['client_id'] ?? 0);
+}
+
+function echotech_cart_persist_delete_branch(
+    mysqli $db,
+    int $clientId,
+    int $pharmacyId,
+    int $branchId,
+    ?int $productId = null
+): void {
+    if ($clientId <= 0) {
+        return;
+    }
+
+    if ($productId !== null) {
+        $stmt = $db->prepare(
+            "DELETE FROM online_cart_items
+             WHERE client_id = ?
+               AND pharmacy_id = ?
+               AND branch_id = ?
+               AND product_id = ?"
+        );
+
+        if (!$stmt) {
+            throw new RuntimeException('Unable to update the persistent cart.');
+        }
+
+        $stmt->bind_param(
+            'iiii',
+            $clientId,
+            $pharmacyId,
+            $branchId,
+            $productId
+        );
+    } else {
+        $stmt = $db->prepare(
+            "DELETE FROM online_cart_items
+             WHERE client_id = ?
+               AND pharmacy_id = ?
+               AND branch_id = ?"
+        );
+
+        if (!$stmt) {
+            throw new RuntimeException('Unable to clear the persistent cart.');
+        }
+
+        $stmt->bind_param(
+            'iii',
+            $clientId,
+            $pharmacyId,
+            $branchId
+        );
+    }
+
+    if (!$stmt->execute()) {
+        $stmt->close();
+        throw new RuntimeException('Unable to update the persistent cart.');
+    }
+
+    $stmt->close();
+}
+
+function echotech_cart_persist_upsert(
+    mysqli $db,
+    int $clientId,
+    int $pharmacyId,
+    int $branchId,
+    int $productId,
+    int $quantity
+): void {
+    if ($clientId <= 0 || $quantity <= 0) {
+        return;
+    }
+
+    $stmt = $db->prepare(
+        "INSERT INTO online_cart_items
+            (client_id, pharmacy_id, branch_id, product_id, quantity)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+            quantity = VALUES(quantity),
+            pharmacy_id = VALUES(pharmacy_id),
+            updated_at = CURRENT_TIMESTAMP"
+    );
+
+    if (!$stmt) {
+        throw new RuntimeException(
+            'Unable to save the persistent cart.'
+        );
+    }
+
+    $stmt->bind_param(
+        'iiiii',
+        $clientId,
+        $pharmacyId,
+        $branchId,
+        $productId,
+        $quantity
+    );
+
+    if (!$stmt->execute()) {
+        $error = $stmt->error;
+        $stmt->close();
+
+        throw new RuntimeException(
+            'Unable to save the persistent cart: ' . $error
+        );
+    }
+
+    $stmt->close();
+}
+
+function echotech_cart_persist_load(
+    mysqli $db,
+    int $clientId,
+    int $pharmacyId,
+    int $branchId
+): array {
+    if ($clientId <= 0) {
+        return [];
+    }
+
+    /*
+     * Remove abandoned items older than one month.
+     * This does not affect the POS cart.
+     */
+    $cleanup = $db->prepare(
+        "DELETE FROM online_cart_items
+         WHERE client_id = ?
+           AND pharmacy_id = ?
+           AND branch_id = ?
+           AND updated_at < DATE_SUB(NOW(), INTERVAL 1 MONTH)"
+    );
+
+    if ($cleanup) {
+        $cleanup->bind_param(
+            'iii',
+            $clientId,
+            $pharmacyId,
+            $branchId
+        );
+        $cleanup->execute();
+        $cleanup->close();
+    }
+
+    $stmt = $db->prepare(
+        "SELECT
+            c.product_id,
+            c.quantity AS cart_quantity,
+            s.id,
+            s.pharmacy_id,
+            s.item_name,
+            s.price,
+            s.online_price,
+            s.quantity,
+            s.image,
+            s.product_image,
+            s.category,
+            s.strength
+         FROM online_cart_items c
+         INNER JOIN store_items s
+            ON s.id = c.product_id
+           AND s.branch_id = c.branch_id
+         WHERE c.client_id = ?
+           AND c.pharmacy_id = ?
+           AND c.branch_id = ?
+           AND s.is_active = 1
+           AND s.is_online = 1
+           AND s.quantity > 0
+           AND (
+                s.expiry_date IS NULL
+                OR LEFT(CAST(s.expiry_date AS CHAR), 10) = '0000-00-00'
+                OR LEFT(CAST(s.expiry_date AS CHAR), 10) >= ?
+           )
+         ORDER BY c.id ASC"
+    );
+
+    if (!$stmt) {
+        throw new RuntimeException(
+            'Unable to load the persistent cart.'
+        );
+    }
+
+    $today = date('Y-m-d');
+
+    $stmt->bind_param(
+        'iiis',
+        $clientId,
+        $pharmacyId,
+        $branchId,
+        $today
+    );
+
+    $stmt->execute();
+
+    $result = $stmt->get_result();
+    $cart = [];
+    $validProductIds = [];
+
+    while ($row = $result->fetch_assoc()) {
+        $productId = (int)$row['product_id'];
+        $stock = (int)$row['quantity'];
+        $qty = max(1, (int)$row['cart_quantity']);
+
+        /*
+         * If stock has fallen below the saved cart quantity,
+         * keep only the quantity currently available.
+         */
+        if ($qty > $stock) {
+            $qty = $stock;
+        }
+
+        if ($qty <= 0) {
+            continue;
+        }
+
+        $cart[$productId] = [
+            'id'       => (int)$row['id'],
+            'name'     => (string)$row['item_name'],
+            'price'    => echotech_cart_price($row),
+            'qty'      => $qty,
+            'branch'   => $branchId,
+            'image'    => (string)(
+                $row['image'] ?: ($row['product_image'] ?? '')
+            ),
+            'category' => (string)($row['category'] ?? ''),
+            'strength' => (string)($row['strength'] ?? ''),
+            'stock'    => $stock
+        ];
+
+        $validProductIds[$productId] = true;
+    }
+
+    $stmt->close();
+
+    /*
+     * Remove products that disappeared from the store, became offline,
+     * expired, or otherwise failed the validation above.
+     */
+    $existingIds = [];
+
+    $idStmt = $db->prepare(
+        "SELECT product_id
+         FROM online_cart_items
+         WHERE client_id = ?
+           AND pharmacy_id = ?
+           AND branch_id = ?"
+    );
+
+    if ($idStmt) {
+        $idStmt->bind_param(
+            'iii',
+            $clientId,
+            $pharmacyId,
+            $branchId
+        );
+        $idStmt->execute();
+
+        $idResult = $idStmt->get_result();
+
+        while ($row = $idResult->fetch_assoc()) {
+            $existingIds[] = (int)$row['product_id'];
+        }
+
+        $idStmt->close();
+    }
+
+    foreach ($existingIds as $productId) {
+        if (!isset($validProductIds[$productId])) {
+            echotech_cart_persist_delete_branch(
+                $db,
+                $clientId,
+                $pharmacyId,
+                $branchId,
+                $productId
+            );
+        }
+    }
+
+    /*
+     * Synchronize quantity if stock forced a reduction.
+     */
+    foreach ($cart as $productId => $item) {
+        echotech_cart_persist_upsert(
+            $db,
+            $clientId,
+            $pharmacyId,
+            $branchId,
+            $productId,
+            (int)$item['qty']
+        );
+    }
+
+    return $cart;
+}
+
+function echotech_cart_persist_sync_session(
+    mysqli $db,
+    int $clientId,
+    int $pharmacyId,
+    int $branchId
+): array {
+    $cart = echotech_cart_persist_load(
+        $db,
+        $clientId,
+        $pharmacyId,
+        $branchId
+    );
+
+    $_SESSION['carts'][$branchId] = $cart;
+
+    return $cart;
+}
+
 /**
  * IMPORTANT:
  * Uses the same online-store rules:
@@ -193,7 +564,7 @@ function bige_cart_summary(array $cart): array
  * The zero-date check is converted to text so strict MySQL mode
  * does not choke on legacy 0000-00-00 dates.
  */
-function bige_cart_product(
+function echotech_cart_product(
     mysqli $db,
     int $productId,
     int $branchId,
@@ -252,7 +623,7 @@ function bige_cart_product(
     return $product ?: null;
 }
 
-function bige_cart_price(array $product): float
+function echotech_cart_price(array $product): float
 {
     $normal = (float)($product['price'] ?? 0);
     $online = (float)($product['online_price'] ?? 0);
@@ -264,14 +635,36 @@ function bige_cart_price(array $product): float
     return round($normal, 2);
 }
 
-function bige_cart_order_number(mysqli $db): string
-{
-    for ($attempt = 0; $attempt < 10; $attempt++) {
+function echotech_cart_order_number(
+    mysqli $db,
+    int $branchId,
+    string $branchCode
+): string {
+    $branchCode = strtoupper(trim($branchCode));
 
+    if ($branchCode === '') {
+        throw new RuntimeException(
+            'This branch has no branch code assigned. Please assign a branch code before placing online orders.'
+        );
+    }
+
+    /*
+     * The branch code is the authoritative prefix.
+     * Example: PMV-01-20260826131542-47
+     */
+    for ($attempt = 0; $attempt < 20; $attempt++) {
+        /*
+         * Keep the identifier within the current VARCHAR(20) column:
+         * 10-char branch code + '-' + YYMMDD + 3-digit sequence/random.
+         *
+         * Example:
+         * PMV-01-260826123
+         */
         $number =
-            'ORD-' .
-            date('YmdHis') .
-            random_int(10, 99);
+            $branchCode .
+            '-' .
+            date('ymd') .
+            random_int(100, 999);
 
         $stmt = $db->prepare(
             "SELECT id
@@ -296,10 +689,16 @@ function bige_cart_order_number(mysqli $db): string
         if (!$exists) {
             return $number;
         }
+
+        /*
+         * Very small delay makes a collision across two simultaneous
+         * requests much less likely while the uniqueness check remains.
+         */
+        usleep(1000);
     }
 
     throw new RuntimeException(
-        'Unable to generate a unique order number.'
+        'Unable to generate a unique branch order number.'
     );
 }
 
@@ -308,7 +707,7 @@ function bige_cart_order_number(mysqli $db): string
 --------------------------------------------------------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-    bige_cart_check_csrf();
+    echotech_cart_check_csrf();
 
     $action = strtolower(
         trim((string)($_POST['action'] ?? ''))
@@ -322,18 +721,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     );
 
     if ($branchId <= 0) {
-        bige_cart_fail('No active branch selected.');
+        echotech_cart_fail('No active branch selected.');
     }
 
     try {
 
-        $branch = bige_cart_branch($conn, $branchId);
+        $branch = echotech_cart_branch($conn, $branchId);
 
         $pharmacyId = (int)$branch['pharmacy_id'];
 
         $_SESSION['current_branch_id'] = $branchId;
 
-        $cart = bige_cart_get($branchId);
+        $clientId = echotech_cart_client_id();
+
+if ($clientId > 0) {
+    /*
+     * Logged-in customers always use the database-backed cart.
+     * This restores the cart after logout/login and prevents the
+     * authentication session from being the permanent cart store.
+     */
+    $cart = echotech_cart_persist_sync_session(
+        $conn,
+        $clientId,
+        $pharmacyId,
+        $branchId
+    );
+} else {
+    $cart = echotech_cart_get($branchId);
+}
 
         /* -------------------------------------------------
            ADD
@@ -352,17 +767,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
 
             if ($productId <= 0) {
-                bige_cart_fail('Invalid product.');
+                echotech_cart_fail('Invalid product.');
             }
 
-            $product = bige_cart_product(
+            $product = echotech_cart_product(
                 $conn,
                 $productId,
                 $branchId
             );
 
             if (!$product) {
-                bige_cart_fail(
+                echotech_cart_fail(
                     'This product is unavailable or out of stock.'
                 );
             }
@@ -376,7 +791,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newQty = $existingQty + $addQty;
 
             if ($newQty > $stock) {
-                bige_cart_fail(
+                echotech_cart_fail(
                     "Only {$stock} unit(s) are available.",
                     ['available' => $stock]
                 );
@@ -385,7 +800,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cart[$productId] = [
                 'id'       => (int)$product['id'],
                 'name'     => (string)$product['item_name'],
-                'price'    => bige_cart_price($product),
+                'price'    => echotech_cart_price($product),
                 'qty'      => $newQty,
                 'branch'   => $branchId,
                 'image'    => (string)(
@@ -403,10 +818,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $_SESSION['carts'][$branchId] = $cart;
 
-            bige_cart_json(
+            if ($clientId > 0) {
+                echotech_cart_persist_upsert(
+                    $conn,
+                    $clientId,
+                    $pharmacyId,
+                    $branchId,
+                    $productId,
+                    $newQty
+                );
+            }
+
+            echotech_cart_json(
                 true,
                 'Item added to cart.',
-                bige_cart_summary($cart)
+                echotech_cart_summary($cart)
             );
         }
 
@@ -415,10 +841,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ------------------------------------------------- */
         if ($action === 'get') {
 
-            bige_cart_json(
+            echotech_cart_json(
                 true,
                 'Cart loaded.',
-                bige_cart_summary($cart)
+                echotech_cart_summary($cart)
             );
         }
 
@@ -439,7 +865,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $productId <= 0 ||
                 !isset($cart[$productId])
             ) {
-                bige_cart_fail(
+                echotech_cart_fail(
                     'Item is not in the cart.'
                 );
             }
@@ -450,14 +876,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $_SESSION['carts'][$branchId] = $cart;
 
-                bige_cart_json(
+                if ($clientId > 0) {
+                    echotech_cart_persist_delete_branch(
+                        $conn,
+                        $clientId,
+                        $pharmacyId,
+                        $branchId,
+                        $productId
+                    );
+                }
+
+                echotech_cart_json(
                     true,
                     'Item removed.',
-                    bige_cart_summary($cart)
+                    echotech_cart_summary($cart)
                 );
             }
 
-            $product = bige_cart_product(
+            $product = echotech_cart_product(
                 $conn,
                 $productId,
                 $branchId
@@ -469,7 +905,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $_SESSION['carts'][$branchId] = $cart;
 
-                bige_cart_fail(
+                if ($clientId > 0) {
+                    echotech_cart_persist_delete_branch(
+                        $conn,
+                        $clientId,
+                        $pharmacyId,
+                        $branchId,
+                        $productId
+                    );
+                }
+
+                echotech_cart_fail(
                     'This product is no longer available.'
                 );
             }
@@ -477,7 +923,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stock = (int)$product['quantity'];
 
             if ($qty > $stock) {
-                bige_cart_fail(
+                echotech_cart_fail(
                     "Only {$stock} unit(s) are available.",
                     ['available' => $stock]
                 );
@@ -485,16 +931,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $cart[$productId]['qty'] = $qty;
             $cart[$productId]['price'] =
-                bige_cart_price($product);
+                echotech_cart_price($product);
 
             $cart[$productId]['stock'] = $stock;
 
             $_SESSION['carts'][$branchId] = $cart;
 
-            bige_cart_json(
+            if ($clientId > 0) {
+                echotech_cart_persist_upsert(
+                    $conn,
+                    $clientId,
+                    $pharmacyId,
+                    $branchId,
+                    $productId,
+                    $qty
+                );
+            }
+
+            echotech_cart_json(
                 true,
                 'Cart updated.',
-                bige_cart_summary($cart)
+                echotech_cart_summary($cart)
             );
         }
 
@@ -513,10 +970,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $_SESSION['carts'][$branchId] = $cart;
 
-            bige_cart_json(
+            if ($clientId > 0) {
+                echotech_cart_persist_delete_branch(
+                    $conn,
+                    $clientId,
+                    $pharmacyId,
+                    $branchId,
+                    $productId
+                );
+            }
+
+            echotech_cart_json(
                 true,
                 'Item removed.',
-                bige_cart_summary($cart)
+                echotech_cart_summary($cart)
             );
         }
 
@@ -527,10 +994,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $_SESSION['carts'][$branchId] = [];
 
-            bige_cart_json(
+            if ($clientId > 0) {
+                echotech_cart_persist_delete_branch(
+                    $conn,
+                    $clientId,
+                    $pharmacyId,
+                    $branchId
+                );
+            }
+
+            echotech_cart_json(
                 true,
                 'Cart cleared.',
-                bige_cart_summary([])
+                echotech_cart_summary([])
             );
         }
 
@@ -544,7 +1020,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
 
             if ($clientId <= 0) {
-                bige_cart_fail(
+                echotech_cart_fail(
                     'Please log in before placing an order.',
                     ['login_required' => true]
                 );
@@ -571,7 +1047,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $phone === '' ||
                 $address === ''
             ) {
-                bige_cart_fail(
+                echotech_cart_fail(
                     'Please complete your name, phone number and delivery address.'
                 );
             }
@@ -585,13 +1061,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ],
                 true
             )) {
-                bige_cart_fail(
+                echotech_cart_fail(
                     'Please select a valid payment method.'
                 );
             }
 
             if (!$cart) {
-                bige_cart_fail(
+                echotech_cart_fail(
                     'Your cart is empty.'
                 );
             }
@@ -651,7 +1127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         );
                     }
 
-                    $product = bige_cart_product(
+                    $product = echotech_cart_product(
                         $conn,
                         $productId,
                         $branchId,
@@ -674,7 +1150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     $unitPrice =
-                        bige_cart_price($product);
+                        echotech_cart_price($product);
 
                     $lineTotal =
                         round($unitPrice * $qty, 2);
@@ -896,7 +1372,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    Create order
                 ----------------------------------------- */
                 $orderNumber =
-                    bige_cart_order_number($conn);
+                    echotech_cart_order_number(
+                        $conn,
+                        $branchId,
+                        (string)($branch['branch_code'] ?? '')
+                    );
 
                 $stmt = $conn->prepare(
                     "INSERT INTO clients_orders
@@ -1001,13 +1481,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $itemStmt->close();
-                $stockStmt->close();
+
+                /*
+                 * Remove the persistent cart inside the same transaction.
+                 * If this fails, the whole order rolls back.
+                 */
+                echotech_cart_persist_delete_branch(
+                    $conn,
+                    $clientId,
+                    $pharmacyId,
+                    $branchId
+                );
 
                 $conn->commit();
 
                 $_SESSION['carts'][$branchId] = [];
 
-                bige_cart_json(
+                echotech_cart_json(
                     true,
                     'Your order has been placed successfully.',
                     [
@@ -1033,16 +1523,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        bige_cart_fail('Unknown cart action.');
+        echotech_cart_fail('Unknown cart action.');
 
     } catch (Throwable $e) {
 
         error_log(
-            'BIGE50 ONLINE CART: ' .
+            'ECHOTECH ONLINE CART: ' .
             $e->getMessage()
         );
 
-        bige_cart_fail(
+        echotech_cart_fail(
             $e->getMessage()
         );
     }
@@ -1123,7 +1613,7 @@ if ($branchId <= 0) {
     );
 }
 
-$branch = bige_cart_branch(
+$branch = echotech_cart_branch(
     $conn,
     $branchId
 );
@@ -1131,8 +1621,19 @@ $branch = bige_cart_branch(
 $pharmacyId =
     (int)$branch['pharmacy_id'];
 
-$cart =
-    bige_cart_get($branchId);
+$clientId =
+    echotech_cart_client_id();
+
+if ($clientId > 0) {
+    $cart = echotech_cart_persist_sync_session(
+        $conn,
+        $clientId,
+        $pharmacyId,
+        $branchId
+    );
+} else {
+    $cart = echotech_cart_get($branchId);
+}
 
 $cartCount = 0;
 $subtotal = 0.0;
@@ -1239,7 +1740,7 @@ if ($clientId > 0) {
     }
 }
 
-function bige_cart_e($value): string
+function echotech_cart_e($value): string
 {
     return htmlspecialchars(
         (string)($value ?? ''),
@@ -1248,7 +1749,7 @@ function bige_cart_e($value): string
     );
 }
 
-function bige_cart_money($value): string
+function echotech_cart_money($value): string
 {
     return 'K ' .
         number_format(
@@ -1257,7 +1758,7 @@ function bige_cart_money($value): string
         );
 }
 
-function bige_cart_image_url(
+function echotech_cart_image_url(
     string $image
 ): string {
 
@@ -1885,7 +2386,7 @@ function bige_cart_image_url(
                             );
 
                             $imageUrl =
-                                bige_cart_image_url($image);
+                                echotech_cart_image_url($image);
                             ?>
 
                             <article
@@ -1898,7 +2399,7 @@ function bige_cart_image_url(
                                     <?php if ($imageUrl): ?>
 
                                         <img
-                                            src="<?= bige_cart_e($imageUrl) ?>"
+                                            src="<?= echotech_cart_e($imageUrl) ?>"
                                             alt=""
                                             onerror="this.style.display='none';this.nextElementSibling.style.display='block'"
                                         >
@@ -1915,17 +2416,17 @@ function bige_cart_image_url(
                                 <div class="bige-cart-product">
 
                                     <h3>
-                                        <?= bige_cart_e($name) ?>
+                                        <?= echotech_cart_e($name) ?>
                                     </h3>
 
                                     <?php if ($strength): ?>
                                         <small>
-                                            <?= bige_cart_e($strength) ?>
+                                            <?= echotech_cart_e($strength) ?>
                                         </small>
                                     <?php endif; ?>
 
                                     <div class="bige-cart-price">
-                                        <?= bige_cart_money($price) ?>
+                                        <?= echotech_cart_money($price) ?>
                                     </div>
 
                                 </div>
@@ -1937,7 +2438,7 @@ function bige_cart_image_url(
                                         data-action="minus"
                                         aria-label="Decrease quantity"
                                     >
-                                        âˆ’
+                                        −
                                     </button>
 
                                     <input
@@ -1959,7 +2460,7 @@ function bige_cart_image_url(
                                 </div>
 
                                 <strong class="bige-cart-line">
-                                    <?= bige_cart_money($price * $qty) ?>
+                                    <?= echotech_cart_money($price * $qty) ?>
                                 </strong>
 
                                 <button
@@ -1994,7 +2495,7 @@ function bige_cart_image_url(
                 <div class="bige-cart-row">
                     <span>Subtotal</span>
                     <strong id="cartSubtotal">
-                        <?= bige_cart_money($subtotal) ?>
+                        <?= echotech_cart_money($subtotal) ?>
                     </strong>
                 </div>
 
@@ -2006,7 +2507,7 @@ function bige_cart_image_url(
                 <div class="bige-cart-row bige-cart-total">
                     <strong>Total</strong>
                     <strong id="cartTotal">
-                        <?= bige_cart_money($subtotal) ?>
+                        <?= echotech_cart_money($subtotal) ?>
                     </strong>
                 </div>
 
@@ -2060,7 +2561,7 @@ function bige_cart_image_url(
             data-close-cart
             aria-label="Close"
         >
-            Ã—
+            ×
         </button>
 
         <div id="checkoutView">
@@ -2090,7 +2591,7 @@ function bige_cart_image_url(
                         name="customer_name"
                         maxlength="120"
                         required
-                        value="<?= bige_cart_e($customerName) ?>"
+                        value="<?= echotech_cart_e($customerName) ?>"
                     >
                 </div>
 
@@ -2106,7 +2607,7 @@ function bige_cart_image_url(
                         maxlength="40"
                         required
                         autocomplete="tel"
-                        value="<?= bige_cart_e($customerPhone) ?>"
+                        value="<?= echotech_cart_e($customerPhone) ?>"
                     >
                 </div>
 
@@ -2121,7 +2622,7 @@ function bige_cart_image_url(
                         rows="4"
                         maxlength="500"
                         required
-                    ><?= bige_cart_e($customerAddress) ?></textarea>
+                    ><?= echotech_cart_e($customerAddress) ?></textarea>
                 </div>
 
                 <div class="bige-cart-field">
@@ -2255,7 +2756,7 @@ function bige_cart_image_url(
 </div>
 
 <script>
-window.BIGE50_CART = {
+window.ECHOTECH_CART = {
     branchId: <?= json_encode($branchId) ?>,
     csrf: <?= json_encode($csrf) ?>,
     api: 'cart.php'
@@ -2265,7 +2766,7 @@ window.BIGE50_CART = {
 
     'use strict';
 
-    const C = window.BIGE50_CART;
+    const C = window.ECHOTECH_CART;
 
     const $ = id =>
         document.getElementById(id);
@@ -2597,7 +3098,7 @@ window.BIGE50_CART = {
                                 type="button"
                                 data-action="minus"
                             >
-                                âˆ’
+                                −
                             </button>
 
                             <input
