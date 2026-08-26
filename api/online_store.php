@@ -43,7 +43,7 @@ $items = $p_stmt->get_result();
     
     @media (max-width: 767.98px) {
         .store-mobile-content { padding-left: 0 !important; padding-right: 0 !important; }
-        .online-store-features { margin-top: 8px !important; }
+        .online-store-features { margin-top: 12px !important; }
         .online-store-products { margin-top: 18px !important; }
         .online-store-products .section-title { font-size: 17px !important; }
         .feature-card { padding: 10px !important; min-height: 74px; border-radius: 9px !important; }
