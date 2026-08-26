@@ -3,6 +3,8 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+$current_store_page = basename($_SERVER['PHP_SELF'] ?? 'online_store.php');
+
 // 1. Database Connection Inclusion
 if (file_exists(__DIR__ . "/../includes/conn.php")) {
     require_once __DIR__ . "/../includes/conn.php";
@@ -503,21 +505,6 @@ $make_section_url = static function(string $section, int $bid): string {
         <?php endforeach; ?>
     </div>
 
-    <div class="tm-mobile-quick-strip">
-        <a class="tm-mobile-quick-card" href="upload_prescription.php?bid=<?php echo $branch_id; ?>">
-            <i class="mdi mdi-prescription text-success"></i><span><strong>Upload Prescription</strong><span>Easy & fast</span></span>
-        </a>
-        <a class="tm-mobile-quick-card" href="lab_results.php?bid=<?php echo $branch_id; ?>">
-            <i class="mdi mdi-flask-outline text-primary"></i><span><strong>Lab Results</strong><span>Secure access</span></span>
-        </a>
-        <a class="tm-mobile-quick-card" href="https://wa.me/<?php echo $phone; ?>?text=I%20need%20a%20fast%20delivery" target="_blank">
-            <i class="mdi mdi-truck-fast-outline text-warning"></i><span><strong>Fast Delivery</strong><span>Order by WhatsApp</span></span>
-        </a>
-        <a class="tm-mobile-quick-card" href="https://wa.me/<?php echo $phone; ?>?text=Do%20you%20accept%20insurance" target="_blank">
-            <i class="mdi mdi-shield-check-outline text-danger"></i><span><strong>Health Insurance</strong><span>Co-pay support</span></span>
-        </a>
-    </div>
-
     <div class="tm-mobile-drawer-backdrop" id="tmMobileBackdrop"></div>
     <aside class="tm-mobile-drawer" id="tmMobileDrawer" aria-label="Mobile navigation">
         <div class="tm-mobile-drawer-head">
@@ -609,11 +596,11 @@ $make_section_url = static function(string $section, int $bid): string {
     </div>
 
     <nav class="tm-mobile-bottom-nav" aria-label="Mobile quick navigation">
-        <a class="active" href="online_store.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-home-outline"></i><span>Home</span></a>
-        <a href="categories.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-view-grid-outline"></i><span>Categories</span></a>
-        <a href="upload_prescription.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-prescription"></i><span>Prescription</span></a>
-        <a class="bottom-cart" href="view_cart.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-cart-outline"></i><span>Cart</span><span class="badge bg-danger rounded-pill cart-count"><?php echo $mobile_cart_count; ?></span></a>
-        <a href="<?php echo isset($_SESSION['client_id']) ? 'profile.php?bid='.$branch_id : 'login_client.php?bid='.$branch_id; ?>"><i class="mdi mdi-account-outline"></i><span>Account</span></a>
+        <a class="<?php echo $current_store_page === 'online_store.php' ? 'active' : ''; ?>" href="online_store.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-home-outline"></i><span>Home</span></a>
+        <a class="<?php echo $current_store_page === 'categories.php' ? 'active' : ''; ?>" href="categories.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-view-grid-outline"></i><span>Categories</span></a>
+        <a class="<?php echo $current_store_page === 'upload_prescription.php' ? 'active' : ''; ?>" href="upload_prescription.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-prescription"></i><span>Prescription</span></a>
+        <a class="bottom-cart <?php echo $current_store_page === 'view_cart.php' ? 'active' : ''; ?>" href="view_cart.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-cart-outline"></i><span>Cart</span><span class="badge bg-danger rounded-pill cart-count"><?php echo $mobile_cart_count; ?></span></a>
+        <a class="<?php echo in_array($current_store_page, ['profile.php', 'login_client.php'], true) ? 'active' : ''; ?>" href="<?php echo isset($_SESSION['client_id']) ? 'profile.php?bid='.$branch_id : 'login_client.php?bid='.$branch_id; ?>"><i class="mdi mdi-account-outline"></i><span>Account</span></a>
     </nav>
 </div>
 
