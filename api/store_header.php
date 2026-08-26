@@ -54,12 +54,57 @@ $db_logo            = $tenant_context['tenant_logo'] ?? 'default_logo.png';
 // Fetch categories safely
 $cat_query = $conn->query("SELECT * FROM categories WHERE status = 1 LIMIT 8");
 
-// Image paths
-$logo_filename   = !empty($db_logo) ? $db_logo : 'default_logo.png';
-$logo_local_path = __DIR__ . "/uploads/logos/" . $logo_filename;
-$logo_web_path   = file_exists($logo_local_path) 
-    ? "uploads/logos/" . $logo_filename 
-    : "uploads/logos/default_logo.png";
+// =========================================================
+// PHARMACY LOGO RESOLUTION
+// =========================================================
+// IMPORTANT:
+// store_header.php is inside /api/, while admin-uploaded pharmacy
+// logos are stored in the project-level /uploads/logos/ directory.
+// Therefore the filesystem path must go one directory UP from /api/.
+//
+// The logo is selected from the pharmacy attached to the CURRENT
+// ACTIVE BRANCH (b.pharmacy_id -> p.logo). This prevents one pharmacy
+// from accidentally displaying another pharmacy's logo.
+
+$logo_filename = 'default_logo.png';
+
+if (!empty($db_logo)) {
+    // The admin may store either just the filename or a path such as:
+    // uploads/logos/logo.png, /uploads/logos/logo.png, etc.
+    // Only keep the filename so the public URL is always constructed
+    // from the trusted uploads directory.
+    $candidate_logo = trim((string)$db_logo);
+    $candidate_logo = str_replace('\\', '/', $candidate_logo);
+    $candidate_logo = basename(parse_url($candidate_logo, PHP_URL_PATH) ?: $candidate_logo);
+
+    if ($candidate_logo !== '' && $candidate_logo !== '.' && $candidate_logo !== '..') {
+        $logo_filename = $candidate_logo;
+    }
+}
+
+// Actual filesystem location: /project/uploads/logos/
+$logo_upload_dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'logos' . DIRECTORY_SEPARATOR;
+$logo_local_path = $logo_upload_dir . $logo_filename;
+
+// Public URL from pages inside /api/. Using ../ makes this work both
+// locally (XAMPP) and on the deployed Render application.
+if (is_file($logo_local_path)) {
+    $logo_web_path = '../uploads/logos/' . rawurlencode($logo_filename);
+} else {
+    // Safe fallback if the admin has not uploaded a logo for this pharmacy.
+    $fallback_logo = $logo_upload_dir . 'default_logo.png';
+    if (is_file($fallback_logo)) {
+        $logo_web_path = '../uploads/logos/default_logo.png';
+    } else {
+        // Leave a harmless empty value rather than pointing to a non-existent
+        // /api/uploads directory. The image element below will use its
+        // visual fallback.
+        $logo_web_path = '';
+    }
+}
+
+// Escape once for use in HTML attributes.
+$logo_web_path_html = htmlspecialchars($logo_web_path, ENT_QUOTES, 'UTF-8');
 
 // Notifications
 $response_count = 0;
@@ -460,7 +505,7 @@ $make_section_url = static function(string $section, int $bid): string {
             <i class="mdi mdi-menu"></i>
         </button>
         <a class="tm-mobile-brand" href="online_store.php?bid=<?php echo $branch_id; ?>">
-            <img src="<?php echo htmlspecialchars($logo_web_path); ?>" alt="">
+            <img src="<?php echo $logo_web_path_html; ?>" alt="">
             <strong><?php echo htmlspecialchars($pharmacy_name); ?></strong>
         </a>
         <a class="tm-mobile-icon-btn tm-mobile-cart" href="view_cart.php?bid=<?php echo $branch_id; ?>" aria-label="Cart">
@@ -508,7 +553,7 @@ $make_section_url = static function(string $section, int $bid): string {
     <div class="tm-mobile-drawer-backdrop" id="tmMobileBackdrop"></div>
     <aside class="tm-mobile-drawer" id="tmMobileDrawer" aria-label="Mobile navigation">
         <div class="tm-mobile-drawer-head">
-            <img class="tm-mobile-drawer-logo" src="<?php echo htmlspecialchars($logo_web_path); ?>" alt="">
+            <img class="tm-mobile-drawer-logo" src="<?php echo $logo_web_path_html; ?>" alt="">
             <div class="tm-mobile-drawer-title">
                 <strong><?php echo htmlspecialchars($pharmacy_name); ?></strong>
                 <span>Online Pharmacy Â· <?php echo htmlspecialchars($branch_name); ?></span>
@@ -818,10 +863,10 @@ $make_section_url = static function(string $section, int $bid): string {
         <div class="row align-items-center g-2">
             <div class="col-12 col-md-3 col-lg-3">
                 <div class="hng-logo-area">
-                    <img src="<?php echo htmlspecialchars($logo_web_path); ?>"
+                    <img src="<?php echo $logo_web_path_html; ?>"
                          alt="<?php echo htmlspecialchars($pharmacy_name); ?> logo"
                          style="height:38px;width:38px;object-fit:contain;"
-                         onerror="this.src='uploads/logos/default_logo.png';">
+                         onerror="this.src='../uploads/logos/default_logo.png';">
                     <div>
                         <h5 class="mb-0 fw-bold text-white" style="font-size:1rem;line-height:1.1;">
                             <?php echo htmlspecialchars($pharmacy_name); ?>
