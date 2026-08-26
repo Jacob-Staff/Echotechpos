@@ -28,22 +28,169 @@ if($action==='update_status'){
 
     $conn->begin_transaction();
     try{
+        /*
+         * Lock the order first. The Processing -> Completed transition
+         * is the ONLY point at which online-order stock is deducted.
+         * Pending and cancelled orders therefore do not consume stock.
+         */
         $stmt=$conn->prepare("SELECT id,status FROM clients_orders WHERE id=? AND pharmacy_id=? AND branch_id=? LIMIT 1 FOR UPDATE");
-        $stmt->bind_param('iii',$orderId,$pharmacyId,$branchId);$stmt->execute();$order=$stmt->get_result()->fetch_assoc();$stmt->close();
+        if(!$stmt) throw new RuntimeException('Unable to prepare order lookup.');
+        $stmt->bind_param('iii',$orderId,$pharmacyId,$branchId);
+        if(!$stmt->execute()) throw new RuntimeException('Unable to load order.');
+        $order=$stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
         if(!$order) throw new RuntimeException('Order not found for this branch.');
+
         $current=(string)$order['status'];
         $valid=false;
         if($status==='Processing') $valid=($current==='Pending');
         elseif($status==='Completed') $valid=($current==='Processing');
         elseif($status==='Cancelled') $valid=in_array($current,['Pending','Processing'],true);
         elseif($status==='Pending') $valid=false;
-        if(!$valid) throw new RuntimeException('This order cannot be moved from '.$current.' to '.$status.'.');
-        $stmt=$conn->prepare("UPDATE clients_orders SET status=? WHERE id=? AND pharmacy_id=? AND branch_id=? LIMIT 1");
-        $stmt->bind_param('siii',$status,$orderId,$pharmacyId,$branchId);$stmt->execute();
-        if($stmt->affected_rows!==1) throw new RuntimeException('Order status was not changed.');
-        $stmt->close();$conn->commit();
-        oo_json(['success'=>true,'message'=>'Order updated.','status'=>$status]);
-    }catch(Throwable $e){$conn->rollback();oo_json(['success'=>false,'message'=>$e->getMessage()],422);}
+
+        if(!$valid) {
+            throw new RuntimeException(
+                'This order cannot be moved from '.$current.' to '.$status.'.'
+            );
+        }
+
+        /* ---------------------------------------------------------
+           COMPLETING AN ORDER = DEDUCT STOCK
+
+           The order is locked above, then every product row is
+           locked and checked. If ANY item cannot be fulfilled,
+           the whole transaction rolls back and the order remains
+           Processing. This prevents partial stock deductions.
+        --------------------------------------------------------- */
+        if($status==='Completed') {
+
+            $itemsStmt=$conn->prepare("
+                SELECT product_id, quantity
+                FROM clients_order_items
+                WHERE order_id=?
+                  AND pharmacy_id=?
+                  AND branch_id=?
+                ORDER BY id ASC
+                FOR UPDATE
+            ");
+
+            if(!$itemsStmt) {
+                throw new RuntimeException('Unable to prepare order items.');
+            }
+
+            $itemsStmt->bind_param('iii',$orderId,$pharmacyId,$branchId);
+
+            if(!$itemsStmt->execute()) {
+                $itemsStmt->close();
+                throw new RuntimeException('Unable to load order items.');
+            }
+
+            $itemsResult=$itemsStmt->get_result();
+            $orderItems=$itemsResult->fetch_all(MYSQLI_ASSOC);
+            $itemsStmt->close();
+
+            if(!$orderItems) {
+                throw new RuntimeException('This order has no items to complete.');
+            }
+
+            $stockStmt=$conn->prepare("
+                UPDATE store_items
+                SET quantity = quantity - ?
+                WHERE id = ?
+                  AND pharmacy_id = ?
+                  AND branch_id = ?
+                  AND quantity >= ?
+                LIMIT 1
+            ");
+
+            if(!$stockStmt) {
+                throw new RuntimeException('Unable to prepare stock update.');
+            }
+
+            foreach($orderItems as $item) {
+                $productId=(int)($item['product_id']??0);
+                $qty=(int)($item['quantity']??0);
+
+                if($productId<=0 || $qty<=0) {
+                    $stockStmt->close();
+                    throw new RuntimeException('This order contains an invalid product quantity.');
+                }
+
+                $stockStmt->bind_param(
+                    'iiiii',
+                    $qty,
+                    $productId,
+                    $pharmacyId,
+                    $branchId,
+                    $qty
+                );
+
+                if(!$stockStmt->execute() || $stockStmt->affected_rows!==1) {
+                    $stockStmt->close();
+
+                    $nameStmt=$conn->prepare("
+                        SELECT item_name
+                        FROM store_items
+                        WHERE id=? AND pharmacy_id=? AND branch_id=?
+                        LIMIT 1
+                    ");
+
+                    $productName='One of the products';
+                    if($nameStmt) {
+                        $nameStmt->bind_param('iii',$productId,$pharmacyId,$branchId);
+                        $nameStmt->execute();
+                        $nameRow=$nameStmt->get_result()->fetch_assoc();
+                        if($nameRow && !empty($nameRow['item_name'])) {
+                            $productName=(string)$nameRow['item_name'];
+                        }
+                        $nameStmt->close();
+                    }
+
+                    throw new RuntimeException(
+                        $productName.' does not have enough stock to complete this order.'
+                    );
+                }
+            }
+
+            $stockStmt->close();
+        }
+
+        /* Change status only after successful stock deduction. */
+        $stmt=$conn->prepare("
+            UPDATE clients_orders
+            SET status=?
+            WHERE id=? AND pharmacy_id=? AND branch_id=?
+            LIMIT 1
+        ");
+
+        if(!$stmt) throw new RuntimeException('Unable to prepare order status update.');
+
+        $stmt->bind_param('siii',$status,$orderId,$pharmacyId,$branchId);
+
+        if(!$stmt->execute() || $stmt->affected_rows!==1) {
+            $stmt->close();
+            throw new RuntimeException('Order status was not changed.');
+        }
+
+        $stmt->close();
+        $conn->commit();
+
+        $message = $status==='Completed'
+            ? 'Order completed and pharmacy stock has been deducted.'
+            : 'Order updated.';
+
+        oo_json([
+            'success'=>true,
+            'message'=>$message,
+            'status'=>$status,
+            'stock_deducted'=>($status==='Completed')
+        ]);
+
+    }catch(Throwable $e){
+        try{$conn->rollback();}catch(Throwable $ignore){}
+        oo_json(['success'=>false,'message'=>$e->getMessage()],422);
+    }
 }
 
 if($action==='order'){
