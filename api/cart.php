@@ -1057,7 +1057,7 @@ if ($clientId > 0) {
                 [
                     'Cash on Delivery',
                     'Mobile Money',
-                    'Bank'
+                    'Bank Transfer'
                 ],
                 true
             )) {
@@ -1482,6 +1482,134 @@ if ($clientId > 0) {
 
                 $itemStmt->close();
 
+                /* -----------------------------------------
+                   Record the online order in Today's Transactions.
+
+                   This creates the normal EchoTech sales header/items
+                   without deducting stock here. Stock remains under
+                   the Online Orders completion workflow.
+                ----------------------------------------- */
+                $onlinePaymentMethod = '';
+                if ($payment === 'Cash on Delivery') {
+                    $onlinePaymentMethod = 'Online/Cash on Delivery';
+                } elseif ($payment === 'Bank Transfer') {
+                    $onlinePaymentMethod = 'Online/Bank Transfer';
+                } elseif ($payment === 'Mobile Money') {
+                    $onlinePaymentMethod = 'Online/Mobile Money';
+                }
+
+                if ($onlinePaymentMethod === '') {
+                    throw new RuntimeException(
+                        'Unable to determine online payment mode.'
+                    );
+                }
+
+                $clientReference = 'ONLINE_ORDER:' . $orderId;
+                $issuedBy = 'Online Customer';
+                $zero = 0.00;
+
+                $saleStmt = $conn->prepare("
+                    INSERT INTO sales (
+                        pharmacy_id,
+                        branch_id,
+                        issued_by,
+                        invoice,
+                        client_reference,
+                        total,
+                        payment,
+                        user_id,
+                        total_amount,
+                        subtotal,
+                        vat_amount,
+                        payment_method,
+                        amount_received,
+                        change_due,
+                        sale_date,
+                        created_at
+                    )
+                    VALUES (?,?,?,?,?,?,?,NULL,?,?,?,?,?,?,NOW(),NOW())
+                ");
+
+                if (!$saleStmt) {
+                    throw new RuntimeException(
+                        'Unable to prepare online transaction.'
+                    );
+                }
+
+                $saleStmt->bind_param(
+                    'iisssdsddddd',
+                    $pharmacyId,
+                    $branchId,
+                    $issuedBy,
+                    $orderNumber,
+                    $clientReference,
+                    $orderTotal,
+                    $onlinePaymentMethod,
+                    $orderTotal,
+                    $orderTotal,
+                    $zero,
+                    $zero,
+                    $zero
+                );
+
+                if (!$saleStmt->execute()) {
+                    throw new RuntimeException(
+                        'Unable to record online transaction: ' .
+                        $saleStmt->error
+                    );
+                }
+
+                $saleId = (int)$conn->insert_id;
+                $saleStmt->close();
+
+                if ($saleId <= 0) {
+                    throw new RuntimeException(
+                        'Online transaction was not recorded.'
+                    );
+                }
+
+                $saleItemStmt = $conn->prepare("
+                    INSERT INTO sales_items (
+                        sale_id,
+                        pharmacy_id,
+                        branch_id,
+                        product_id,
+                        quantity,
+                        unit_price
+                    )
+                    VALUES (?,?,?,?,?,?)
+                ");
+
+                if (!$saleItemStmt) {
+                    throw new RuntimeException(
+                        'Unable to prepare online transaction items.'
+                    );
+                }
+
+                foreach ($validated as $item) {
+                    $saleProductId = (int)$item['id'];
+                    $saleQty = (int)$item['qty'];
+                    $saleUnitPrice = (float)$item['price'];
+
+                    $saleItemStmt->bind_param(
+                        'iiiiid',
+                        $saleId,
+                        $pharmacyId,
+                        $branchId,
+                        $saleProductId,
+                        $saleQty,
+                        $saleUnitPrice
+                    );
+
+                    if (!$saleItemStmt->execute()) {
+                        throw new RuntimeException(
+                            'Unable to record online transaction item.'
+                        );
+                    }
+                }
+
+                $saleItemStmt->close();
+
                 /*
                  * Remove the persistent cart inside the same transaction.
                  * If this fails, the whole order rolls back.
@@ -1505,6 +1633,8 @@ if ($clientId > 0) {
                         'order_number'  => $orderNumber,
                         'total'         => $orderTotal,
                         'payment_method'=> $payment,
+                        'transaction_payment_method' => $onlinePaymentMethod,
+                        'sale_id'       => $saleId,
                         'branch_id'     => $branchId,
                         'pharmacy_id'   => $pharmacyId,
                         'cart_count'    => 0,
@@ -2438,7 +2568,7 @@ function echotech_cart_image_url(
                                         data-action="minus"
                                         aria-label="Decrease quantity"
                                     >
-                                        −
+                                        âˆ’
                                     </button>
 
                                     <input
@@ -2561,7 +2691,7 @@ function echotech_cart_image_url(
             data-close-cart
             aria-label="Close"
         >
-            ×
+            Ã—
         </button>
 
         <div id="checkoutView">
@@ -2641,7 +2771,7 @@ function echotech_cart_image_url(
                         <option value="Mobile Money">
                             Mobile Money
                         </option>
-                        <option value="Bank">
+                        <option value="Bank Transfer">
                             Bank / Transfer
                         </option>
                     </select>
@@ -2690,7 +2820,7 @@ function echotech_cart_image_url(
 
                 <a
                     class="bige-cart-primary"
-                    href="my_orders.php"
+                    href="client_orders.php"
                 >
                     View My Orders
                 </a>
@@ -3098,7 +3228,7 @@ window.ECHOTECH_CART = {
                                 type="button"
                                 data-action="minus"
                             >
-                                −
+                                âˆ’
                             </button>
 
                             <input
