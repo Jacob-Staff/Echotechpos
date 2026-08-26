@@ -245,7 +245,7 @@ $raw_items = $stmt->get_result();
    databases may contain 0000-00-00, which strict MySQL can
    reject during date comparisons. We validate it in PHP.
 --------------------------------------------------------- */
-function bige_store_expiry_ok($expiry): bool
+function bige_store_expiry_ok($expiry, string $today): bool
 {
     $value = trim((string)($expiry ?? ''));
 
@@ -258,13 +258,13 @@ function bige_store_expiry_ok($expiry): bool
         return true;
     }
 
-    return $date->format('Y-m-d') >= $zambia_today;
+    return $date->format('Y-m-d') >= $today;
 }
 
 $items = [];
 if ($raw_items) {
     while ($candidate = $raw_items->fetch_assoc()) {
-        if (!bige_store_expiry_ok($candidate['expiry_date'] ?? null)) {
+        if (!bige_store_expiry_ok($candidate['expiry_date'] ?? null, $zambia_today)) {
             continue;
         }
 
