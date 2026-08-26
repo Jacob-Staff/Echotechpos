@@ -855,7 +855,7 @@ $make_section_url = static function(string $section, int $bid): string {
                             <p>User ID: #<?php echo str_pad((string)($user_data['id'] ?? 0), 5, '0', STR_PAD_LEFT); ?></p>
                             <hr class="my-1">
                             <a href="profile.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-account-outline"></i> Profile</a>
-                            <a href="client_orders.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
+                            <a href="my_orders.php?bid=<?php echo $branch_id; ?>" class="menu-link"><i class="mdi mdi-package-variant-closed"></i> Orders</a>
                             <a href="logout_client.php" class="menu-link text-danger"><i class="mdi mdi-logout"></i> Logout</a>
                         <?php else: ?>
                             <h6>Guest Menu</h6>
