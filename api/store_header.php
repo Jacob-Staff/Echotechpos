@@ -248,6 +248,102 @@ if (isset($_SESSION['client_id'])) {
         .menu-link{display:block;padding:7px 0;color:#333;text-decoration:none;font-size:12px;font-weight:600;}
         .menu-link:hover{color:var(--echo-green);}
 
+
+        /* ========================= MOBILE TRUEMEDS-STYLE LAYOUT ========================= */
+        .tm-mobile-shell{display:none;}
+        .tm-mobile-mainbar{height:58px;background:#fff;border-bottom:1px solid #e8edf1;display:flex;align-items:center;padding:0 12px;gap:10px;position:relative;z-index:2200;}
+        .tm-mobile-menu-btn,.tm-mobile-icon-btn{border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#173b59;font-size:22px;flex:0 0 38px;}
+        .tm-mobile-menu-btn:active,.tm-mobile-icon-btn:active{background:#f0f4f7;}
+        .tm-mobile-brand{min-width:0;flex:1;text-decoration:none;color:var(--echo-teal);display:flex;align-items:center;gap:7px;}
+        .tm-mobile-brand img{width:31px;height:31px;object-fit:contain;}
+        .tm-mobile-brand strong{font-size:18px;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:145px;}
+        .tm-mobile-cart{position:relative;}
+        .tm-mobile-cart .cart-count{font-size:8px!important;min-width:15px;line-height:15px;padding:0 3px;top:2px!important;}
+        .tm-mobile-search-row{background:#fff;padding:8px 12px 10px;border-bottom:1px solid #e7ecef;position:relative;z-index:2150;}
+        .tm-mobile-search{height:43px;background:#f5f7f9;border:1px solid #dfe5e9;border-radius:9px;display:flex;align-items:center;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+        .tm-mobile-search input{border:0;background:transparent;outline:0;flex:1;min-width:0;padding:0 10px;font-size:13px;color:#253746;}
+        .tm-mobile-search button{border:0;background:#1769d1;color:#fff;width:43px;height:43px;display:flex;align-items:center;justify-content:center;font-size:19px;}
+        .tm-mobile-location{margin-top:7px;display:flex;align-items:center;gap:5px;color:#506170;font-size:11px;white-space:nowrap;overflow:hidden;}
+        .tm-mobile-location strong{color:#1769d1;overflow:hidden;text-overflow:ellipsis;}
+        .tm-mobile-category-strip{display:none;gap:8px;overflow-x:auto;padding:9px 12px;background:#fff;border-bottom:1px solid #e7ecef;scrollbar-width:none;position:relative;z-index:2100;}
+        .tm-mobile-category-strip::-webkit-scrollbar{display:none;}
+        .tm-mobile-category-chip{flex:0 0 auto;border:1px solid #e1e7eb;background:#fff;border-radius:18px;padding:7px 12px;text-decoration:none;color:#435565;font-size:11px;font-weight:700;white-space:nowrap;}
+        .tm-mobile-category-chip:active{background:#eef5ff;color:#1769d1;border-color:#c9ddf8;}
+        .tm-mobile-quick-strip{display:flex;gap:10px;overflow-x:auto;padding:10px 12px;background:#f8fafb;scrollbar-width:none;}
+        .tm-mobile-quick-strip::-webkit-scrollbar{display:none;}
+        .tm-mobile-quick-card{flex:0 0 148px;background:#fff;border:1px solid #e3e9ed;border-radius:10px;padding:10px;text-decoration:none;display:flex;align-items:center;gap:8px;box-shadow:0 2px 5px rgba(25,45,65,.05);}
+        .tm-mobile-quick-card i{font-size:22px;}
+        .tm-mobile-quick-card strong{display:block;font-size:11px;line-height:1.15;color:#253746;}
+        .tm-mobile-quick-card span{display:block;font-size:9px;color:#778693;margin-top:2px;}
+        .tm-mobile-drawer-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:5000;}
+        .tm-mobile-drawer{position:fixed;top:0;left:0;bottom:0;width:min(86vw,360px);background:#fff;transform:translateX(-105%);transition:transform .24s ease;z-index:5100;box-shadow:8px 0 28px rgba(0,0,0,.16);overflow-y:auto;}
+        .tm-mobile-drawer.open{transform:translateX(0);}
+        .tm-mobile-drawer-backdrop.open{display:block;}
+        .tm-mobile-drawer-head{padding:16px 14px 13px;background:#fff;border-bottom:1px solid #e6ebef;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:2;}
+        .tm-mobile-drawer-logo{width:38px;height:38px;object-fit:contain;}
+        .tm-mobile-drawer-title{flex:1;min-width:0;}
+        .tm-mobile-drawer-title strong{display:block;color:var(--echo-teal);font-size:18px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .tm-mobile-drawer-title span{display:block;color:#7a8791;font-size:10px;margin-top:2px;}
+        .tm-mobile-drawer-close{border:0;background:#f2f5f7;border-radius:50%;width:34px;height:34px;font-size:20px;color:#34495e;}
+        .tm-mobile-drawer-account{margin:12px;border:1px solid #e2e8ec;border-radius:10px;padding:11px;text-decoration:none;display:flex;align-items:center;gap:9px;color:#253746;}
+        .tm-mobile-drawer-account i{font-size:25px;color:#1769d1;}
+        .tm-mobile-drawer-account strong{font-size:12px;display:block;}
+        .tm-mobile-drawer-account span{font-size:10px;color:#7b8892;display:block;margin-top:2px;}
+        .tm-mobile-drawer-section-title{padding:9px 14px 6px;color:#8a959e;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;}
+        .tm-mobile-drawer-link{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #f0f2f4;text-decoration:none;color:#314555;font-size:13px;font-weight:700;}
+        .tm-mobile-drawer-link .mdi:first-child{font-size:19px;width:26px;color:#1769d1;}
+        .tm-mobile-accordion{border-bottom:1px solid #f0f2f4;}
+        .tm-mobile-accordion-btn{width:100%;border:0;background:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;text-align:left;color:#314555;font-size:13px;font-weight:700;}
+        .tm-mobile-accordion-btn .label{flex:1;}
+        .tm-mobile-accordion-content{display:none;background:#f8fafb;padding:4px 0 8px;}
+        .tm-mobile-accordion.open .tm-mobile-accordion-content{display:block;}
+        .tm-mobile-accordion.open .tm-mobile-accordion-btn{color:#1769d1;background:#f5f9fe;}
+        .tm-mobile-subgroup-btn{width:100%;border:0;background:transparent;padding:10px 18px 9px 40px;text-align:left;display:flex;justify-content:space-between;color:#526575;font-size:12px;font-weight:700;}
+        .tm-mobile-subitems{display:none;padding:0 16px 7px 52px;}
+        .tm-mobile-subgroup.open .tm-mobile-subitems{display:block;}
+        .tm-mobile-subitems a{display:block;padding:6px 0;text-decoration:none;color:#71808b;font-size:11px;}
+        .tm-mobile-branch-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.38);z-index:5200;}
+        .tm-mobile-branch-backdrop.open{display:block;}
+        .tm-mobile-branch-sheet{position:fixed;left:50%;bottom:0;transform:translate(-50%,105%);width:min(100%,430px);background:#fff;border-radius:16px 16px 0 0;z-index:5250;box-shadow:0 -10px 35px rgba(0,0,0,.18);transition:transform .22s ease;padding:14px 14px 18px;}
+        .tm-mobile-branch-sheet.open{transform:translate(-50%,0);}
+        .tm-mobile-branch-sheet-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid #edf0f2;}
+        .tm-mobile-branch-sheet-head strong{font-size:15px;color:#243746;}
+        .tm-mobile-branch-sheet-close{border:0;background:#f1f4f6;width:32px;height:32px;border-radius:50%;font-size:18px;color:#425463;}
+        .tm-mobile-branch-option{width:100%;border:1px solid #e3e8ec;background:#fff;border-radius:9px;padding:11px 12px;margin-top:8px;display:flex;align-items:center;justify-content:space-between;text-align:left;color:#344958;font-size:12px;font-weight:700;}
+        .tm-mobile-branch-option.active{border-color:#1769d1;background:#f3f8ff;color:#1769d1;}
+
+        .tm-mobile-bottom-nav{display:none;}
+
+        @media (max-width:767.98px){
+            html,body{background:#f7f9fa;}
+            .store-topbar,.mega-nav-wrap{display:none!important;}
+            .tm-mobile-shell{display:block;}
+            .tier-3-action{display:none!important;}
+            body{padding-bottom:65px;}
+            .container{max-width:100%;}
+            .tm-mobile-bottom-nav{position:fixed;display:flex;left:0;right:0;bottom:0;height:62px;background:#fff;border-top:1px solid #dfe5e9;z-index:4200;box-shadow:0 -4px 14px rgba(25,45,65,.08);padding-bottom:env(safe-area-inset-bottom);}
+            .tm-mobile-bottom-nav a{flex:1;text-decoration:none;color:#657481;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;font-weight:700;gap:2px;}
+            .tm-mobile-bottom-nav a.active,.tm-mobile-bottom-nav a:active{color:#1769d1;}
+            .tm-mobile-bottom-nav i{font-size:21px;line-height:1;}
+            .tm-mobile-bottom-nav .bottom-cart{position:relative;}
+            .tm-mobile-bottom-nav .bottom-cart .cart-count{position:absolute!important;top:0!important;left:50%;margin-left:6px;font-size:8px!important;min-width:15px;line-height:15px;padding:0 3px;}
+            .feature-card{min-height:74px;border-radius:9px!important;}
+            .feature-card i{font-size:25px!important;margin-right:7px!important;}
+            .feature-title{font-size:11px!important;line-height:1.15;}
+            .feature-sub{font-size:9px!important;}
+            .product-card{border-radius:9px!important;padding:8px!important;min-height:100%;}
+            .product-card img{height:105px!important;max-width:100%;}
+            .product-title{font-size:11px!important;line-height:1.2!important;min-height:39px;}
+            .product-price{font-size:14px!important;}
+            .add-to-cart-btn{font-size:10px!important;padding:7px 5px!important;border-radius:6px!important;}
+            .wa-sticky{bottom:72px!important;right:10px!important;margin:0!important;width:48px;height:48px;padding:0!important;display:flex;align-items:center;justify-content:center;}
+            .wa-sticky i{font-size:25px!important;}
+            .tm-mobile-quick-strip + .container{margin-top:8px!important;}
+        }
+        @media (min-width:768px){
+            .tm-mobile-shell,.tm-mobile-bottom-nav{display:none!important;}
+        }
+
         @media (max-width:1100px){
             .mega-trigger{padding:0 11px;font-size:11px;}
             .store-top-links{gap:11px;}
@@ -354,6 +450,172 @@ $make_section_url = static function(string $section, int $bid): string {
     return 'online_store.php?bid=' . $bid . '&section=' . urlencode($section);
 };
 ?>
+
+<!-- ========================= MOBILE STORE SHELL ========================= -->
+<div class="tm-mobile-shell">
+    <div class="tm-mobile-mainbar">
+        <button type="button" class="tm-mobile-menu-btn" id="tmMobileMenuOpen" aria-label="Open menu">
+            <i class="mdi mdi-menu"></i>
+        </button>
+        <a class="tm-mobile-brand" href="online_store.php?bid=<?php echo $branch_id; ?>">
+            <img src="<?php echo htmlspecialchars($logo_web_path); ?>" alt="">
+            <strong><?php echo htmlspecialchars($pharmacy_name); ?></strong>
+        </a>
+        <a class="tm-mobile-icon-btn tm-mobile-cart" href="view_cart.php?bid=<?php echo $branch_id; ?>" aria-label="Cart">
+            <i class="mdi mdi-cart-outline"></i>
+            <span class="badge bg-danger position-absolute rounded-pill cart-count">
+                <?php
+                $mobile_cart_count = 0;
+                if (isset($_SESSION['carts'][$branch_id]) && is_array($_SESSION['carts'][$branch_id])) {
+                    foreach ($_SESSION['carts'][$branch_id] as $cart_item) {
+                        $mobile_cart_count += isset($cart_item['qty']) ? max(1, (int)$cart_item['qty']) : 1;
+                    }
+                }
+                echo $mobile_cart_count;
+                ?>
+            </span>
+        </a>
+        <button type="button" class="tm-mobile-icon-btn" id="tmMobileAccountOpen" aria-label="Account">
+            <i class="mdi mdi-account-circle-outline"></i>
+        </button>
+    </div>
+
+    <div class="tm-mobile-search-row">
+        <form action="online_store.php" method="GET" class="tm-mobile-search">
+            <input type="hidden" name="bid" value="<?php echo $branch_id; ?>">
+            <input type="text" name="q" value="<?php echo htmlspecialchars($_GET['q'] ?? ''); ?>" placeholder="Search medicines, products and health care..." autocomplete="off">
+            <button type="submit" aria-label="Search"><i class="mdi mdi-magnify"></i></button>
+        </form>
+        <div class="tm-mobile-location">
+            <i class="mdi mdi-map-marker-outline"></i>
+            <span>Shopping in</span>
+            <strong><?php echo htmlspecialchars($branch_name); ?></strong>
+            <span>Â·</span>
+            <a href="javascript:void(0);" id="tmMobileBranchOpen" style="color:#1769d1;text-decoration:none;font-weight:700;">Change</a>
+        </div>
+    </div>
+
+    <div class="tm-mobile-category-strip" aria-label="Categories">
+        <?php foreach ($nav as $label => $menu): ?>
+            <a class="tm-mobile-category-chip" href="<?php echo htmlspecialchars($make_section_url($menu['section'], $branch_id)); ?>">
+                <?php echo htmlspecialchars($label); ?>
+            </a>
+        <?php endforeach; ?>
+    </div>
+
+    <div class="tm-mobile-quick-strip">
+        <a class="tm-mobile-quick-card" href="upload_prescription.php?bid=<?php echo $branch_id; ?>">
+            <i class="mdi mdi-prescription text-success"></i><span><strong>Upload Prescription</strong><span>Easy & fast</span></span>
+        </a>
+        <a class="tm-mobile-quick-card" href="lab_results.php?bid=<?php echo $branch_id; ?>">
+            <i class="mdi mdi-flask-outline text-primary"></i><span><strong>Lab Results</strong><span>Secure access</span></span>
+        </a>
+        <a class="tm-mobile-quick-card" href="https://wa.me/<?php echo $phone; ?>?text=I%20need%20a%20fast%20delivery" target="_blank">
+            <i class="mdi mdi-truck-fast-outline text-warning"></i><span><strong>Fast Delivery</strong><span>Order by WhatsApp</span></span>
+        </a>
+        <a class="tm-mobile-quick-card" href="https://wa.me/<?php echo $phone; ?>?text=Do%20you%20accept%20insurance" target="_blank">
+            <i class="mdi mdi-shield-check-outline text-danger"></i><span><strong>Health Insurance</strong><span>Co-pay support</span></span>
+        </a>
+    </div>
+
+    <div class="tm-mobile-drawer-backdrop" id="tmMobileBackdrop"></div>
+    <aside class="tm-mobile-drawer" id="tmMobileDrawer" aria-label="Mobile navigation">
+        <div class="tm-mobile-drawer-head">
+            <img class="tm-mobile-drawer-logo" src="<?php echo htmlspecialchars($logo_web_path); ?>" alt="">
+            <div class="tm-mobile-drawer-title">
+                <strong><?php echo htmlspecialchars($pharmacy_name); ?></strong>
+                <span>Online Pharmacy Â· <?php echo htmlspecialchars($branch_name); ?></span>
+            </div>
+            <button type="button" class="tm-mobile-drawer-close" id="tmMobileMenuClose" aria-label="Close menu"><i class="mdi mdi-close"></i></button>
+        </div>
+
+        <a class="tm-mobile-drawer-account" href="<?php echo isset($_SESSION['client_id']) ? 'profile.php?bid='.$branch_id : 'login_client.php?bid='.$branch_id; ?>">
+            <i class="mdi mdi-account-circle-outline"></i>
+            <span><strong><?php echo isset($_SESSION['client_id']) ? htmlspecialchars($_SESSION['client_name'] ?? 'My Account') : 'Login / Register'; ?></strong><span>Manage account and orders</span></span>
+            <i class="mdi mdi-chevron-right" style="font-size:19px;color:#84919b;width:auto;"></i>
+        </a>
+
+        <div class="tm-mobile-drawer-section-title">Shop</div>
+        <a class="tm-mobile-drawer-link" href="online_store.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-home-outline"></i> Home</span><i class="mdi mdi-chevron-right"></i></a>
+        <a class="tm-mobile-drawer-link" href="categories.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-view-grid-outline"></i> All Categories</span><i class="mdi mdi-chevron-right"></i></a>
+        <a class="tm-mobile-drawer-link" href="offers.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-tag-outline"></i> Offers</span><i class="mdi mdi-chevron-right"></i></a>
+        <a class="tm-mobile-drawer-link" href="view_cart.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-cart-outline"></i> My Cart</span><i class="mdi mdi-chevron-right"></i></a>
+
+        <div class="tm-mobile-drawer-section-title">Categories</div>
+        <?php foreach ($nav as $label => $menu): ?>
+            <?php if (empty($menu['groups'])): ?>
+                <a class="tm-mobile-drawer-link" href="<?php echo htmlspecialchars($make_section_url($menu['section'], $branch_id)); ?>">
+                    <span><i class="mdi <?php echo htmlspecialchars($menu['icon']); ?>"></i> <?php echo htmlspecialchars($label); ?></span>
+                    <i class="mdi mdi-chevron-right"></i>
+                </a>
+            <?php else: ?>
+                <div class="tm-mobile-accordion">
+                    <button type="button" class="tm-mobile-accordion-btn">
+                        <i class="mdi <?php echo htmlspecialchars($menu['icon']); ?>" style="font-size:19px;width:26px;color:#1769d1;"></i>
+                        <span class="label"><?php echo htmlspecialchars($label); ?></span>
+                        <i class="mdi mdi-chevron-down accordion-chevron"></i>
+                    </button>
+                    <div class="tm-mobile-accordion-content">
+                        <?php foreach ($menu['groups'] as $group => $links): ?>
+                            <div class="tm-mobile-subgroup">
+                                <button type="button" class="tm-mobile-subgroup-btn">
+                                    <span><?php echo htmlspecialchars($group); ?></span>
+                                    <i class="mdi mdi-chevron-down"></i>
+                                </button>
+                                <div class="tm-mobile-subitems">
+                                    <a href="<?php echo htmlspecialchars($make_search_url($group, $branch_id)); ?>">View <?php echo htmlspecialchars($group); ?></a>
+                                    <?php foreach ($links as $sub): ?>
+                                        <a href="<?php echo htmlspecialchars($make_search_url($sub, $branch_id)); ?>"><?php echo htmlspecialchars($sub); ?></a>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+        <?php endforeach; ?>
+
+        <div class="tm-mobile-drawer-section-title">Help & Services</div>
+        <a class="tm-mobile-drawer-link" href="upload_prescription.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-prescription"></i> Upload Prescription</span><i class="mdi mdi-chevron-right"></i></a>
+        <a class="tm-mobile-drawer-link" href="pharmacist.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-account-tie-outline"></i> Pharmacists</span><i class="mdi mdi-chevron-right"></i></a>
+        <a class="tm-mobile-drawer-link" href="help.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-help-circle-outline"></i> Help & Support</span><i class="mdi mdi-chevron-right"></i></a>
+        <a class="tm-mobile-drawer-link" href="javascript:void(0);" id="tmMobileBranchLink"><span><i class="mdi mdi-map-marker-outline"></i> Switch Branch</span><i class="mdi mdi-chevron-right"></i></a>
+    </aside>
+
+    <div class="tm-mobile-branch-backdrop" id="tmMobileBranchBackdrop"></div>
+    <div class="tm-mobile-branch-sheet" id="tmMobileBranchSheet" role="dialog" aria-modal="true" aria-label="Switch branch">
+        <div class="tm-mobile-branch-sheet-head">
+            <strong>Choose branch</strong>
+            <button type="button" class="tm-mobile-branch-sheet-close" id="tmMobileBranchClose"><i class="mdi mdi-close"></i></button>
+        </div>
+        <?php
+        if ($parent_pharmacy_id > 0 && ($stmt_mbr = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1 ORDER BY branch_name ASC"))) {
+            $stmt_mbr->bind_param("i", $parent_pharmacy_id);
+            $stmt_mbr->execute();
+            $mbr_list = $stmt_mbr->get_result();
+            while ($mbr = $mbr_list->fetch_assoc()):
+                $mbr_id = (int)$mbr['id'];
+                $mbr_active = ($mbr_id === $branch_id);
+        ?>
+            <button type="button" class="tm-mobile-branch-option <?php echo $mbr_active ? 'active' : ''; ?>" data-branch-url="switch_branch.php?bid=<?php echo $mbr_id; ?>">
+                <span><i class="mdi mdi-map-marker-outline me-1"></i><?php echo htmlspecialchars($mbr['branch_name']); ?></span>
+                <?php if ($mbr_active): ?><i class="mdi mdi-check-circle"></i><?php else: ?><i class="mdi mdi-chevron-right"></i><?php endif; ?>
+            </button>
+        <?php
+            endwhile;
+            $stmt_mbr->close();
+        }
+        ?>
+    </div>
+
+    <nav class="tm-mobile-bottom-nav" aria-label="Mobile quick navigation">
+        <a class="active" href="online_store.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-home-outline"></i><span>Home</span></a>
+        <a href="categories.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-view-grid-outline"></i><span>Categories</span></a>
+        <a href="upload_prescription.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-prescription"></i><span>Prescription</span></a>
+        <a class="bottom-cart" href="view_cart.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-cart-outline"></i><span>Cart</span><span class="badge bg-danger rounded-pill cart-count"><?php echo $mobile_cart_count; ?></span></a>
+        <a href="<?php echo isset($_SESSION['client_id']) ? 'profile.php?bid='.$branch_id : 'login_client.php?bid='.$branch_id; ?>"><i class="mdi mdi-account-outline"></i><span>Account</span></a>
+    </nav>
+</div>
 
 <!-- ========================= TOP HEADER ========================= -->
 <header class="store-topbar">
@@ -680,6 +942,90 @@ $make_section_url = static function(string $section, int $bid): string {
             });
         }
     });
+
+
+    /* Mobile drawer + accordion navigation */
+    const mobileDrawer = document.getElementById('tmMobileDrawer');
+    const mobileBackdrop = document.getElementById('tmMobileBackdrop');
+    const mobileOpen = document.getElementById('tmMobileMenuOpen');
+    const mobileClose = document.getElementById('tmMobileMenuClose');
+
+    function openMobileDrawer(){
+        if(!mobileDrawer || !mobileBackdrop) return;
+        mobileDrawer.classList.add('open');
+        mobileBackdrop.classList.add('open');
+        document.body.style.overflow='hidden';
+    }
+    function closeMobileDrawer(){
+        if(!mobileDrawer || !mobileBackdrop) return;
+        mobileDrawer.classList.remove('open');
+        mobileBackdrop.classList.remove('open');
+        document.body.style.overflow='';
+    }
+    if(mobileOpen) mobileOpen.addEventListener('click', openMobileDrawer);
+    if(mobileClose) mobileClose.addEventListener('click', closeMobileDrawer);
+    const mobileAccountOpen = document.getElementById('tmMobileAccountOpen');
+    if(mobileAccountOpen) mobileAccountOpen.addEventListener('click', openMobileDrawer);
+    if(mobileBackdrop) mobileBackdrop.addEventListener('click', closeMobileDrawer);
+
+    document.querySelectorAll('.tm-mobile-accordion-btn').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            const parent = btn.closest('.tm-mobile-accordion');
+            const wasOpen = parent.classList.contains('open');
+            document.querySelectorAll('.tm-mobile-accordion.open').forEach(function(other){
+                if(other !== parent) other.classList.remove('open');
+            });
+            parent.classList.toggle('open', !wasOpen);
+            const icon = btn.querySelector('.accordion-chevron');
+            if(icon) icon.className = 'mdi ' + (parent.classList.contains('open') ? 'mdi-chevron-up accordion-chevron' : 'mdi-chevron-down accordion-chevron');
+        });
+    });
+
+    document.querySelectorAll('.tm-mobile-subgroup-btn').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            const group = btn.closest('.tm-mobile-subgroup');
+            const wasOpen = group.classList.contains('open');
+            const parent = group.closest('.tm-mobile-accordion-content');
+            if(parent){
+                parent.querySelectorAll('.tm-mobile-subgroup.open').forEach(function(other){
+                    if(other !== group) other.classList.remove('open');
+                });
+            }
+            group.classList.toggle('open', !wasOpen);
+            const icon = btn.querySelector('.mdi');
+            if(icon) icon.className = 'mdi ' + (group.classList.contains('open') ? 'mdi-chevron-up' : 'mdi-chevron-down');
+        });
+    });
+
+    const mobileBranchSheet = document.getElementById('tmMobileBranchSheet');
+    const mobileBranchBackdrop = document.getElementById('tmMobileBranchBackdrop');
+    const mobileBranchClose = document.getElementById('tmMobileBranchClose');
+    function openBranchSheet(){
+        if(!mobileBranchSheet || !mobileBranchBackdrop) return;
+        mobileBranchSheet.classList.add('open');
+        mobileBranchBackdrop.classList.add('open');
+        closeMobileDrawer();
+        document.body.style.overflow='hidden';
+    }
+    function closeBranchSheet(){
+        if(!mobileBranchSheet || !mobileBranchBackdrop) return;
+        mobileBranchSheet.classList.remove('open');
+        mobileBranchBackdrop.classList.remove('open');
+        document.body.style.overflow='';
+    }
+    function showBranchSelector(){ openBranchSheet(); }
+    if(mobileBranchClose) mobileBranchClose.addEventListener('click', closeBranchSheet);
+    if(mobileBranchBackdrop) mobileBranchBackdrop.addEventListener('click', closeBranchSheet);
+    document.querySelectorAll('.tm-mobile-branch-option').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            const url = btn.getAttribute('data-branch-url');
+            if(url) window.location.href = url;
+        });
+    });
+    const mobileBranchOpen = document.getElementById('tmMobileBranchOpen');
+    const mobileBranchLink = document.getElementById('tmMobileBranchLink');
+    if(mobileBranchOpen) mobileBranchOpen.addEventListener('click', showBranchSelector);
+    if(mobileBranchLink) mobileBranchLink.addEventListener('click', showBranchSelector);
 
     document.addEventListener('click', function(e){
         if(!e.target.closest('.mega-item')){
