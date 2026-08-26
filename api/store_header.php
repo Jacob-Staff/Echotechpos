@@ -508,7 +508,7 @@ $make_section_url = static function(string $section, int $bid): string {
             <img src="<?php echo $logo_web_path_html; ?>" alt="">
             <strong><?php echo htmlspecialchars($pharmacy_name); ?></strong>
         </a>
-        <a class="tm-mobile-icon-btn tm-mobile-cart" href="view_cart.php?bid=<?php echo $branch_id; ?>" aria-label="Cart">
+        <a class="tm-mobile-icon-btn tm-mobile-cart" href="cart.php?bid=<?php echo $branch_id; ?>" aria-label="Cart">
             <i class="mdi mdi-cart-outline"></i>
             <span class="badge bg-danger position-absolute rounded-pill cart-count">
                 <?php
@@ -571,7 +571,7 @@ $make_section_url = static function(string $section, int $bid): string {
         <a class="tm-mobile-drawer-link" href="online_store.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-home-outline"></i> Home</span><i class="mdi mdi-chevron-right"></i></a>
         <a class="tm-mobile-drawer-link" href="categories.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-view-grid-outline"></i> All Categories</span><i class="mdi mdi-chevron-right"></i></a>
         <a class="tm-mobile-drawer-link" href="offers.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-tag-outline"></i> Offers</span><i class="mdi mdi-chevron-right"></i></a>
-        <a class="tm-mobile-drawer-link" href="view_cart.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-cart-outline"></i> My Cart</span><i class="mdi mdi-chevron-right"></i></a>
+        <a class="tm-mobile-drawer-link" href="cart.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-cart-outline"></i> My Cart</span><i class="mdi mdi-chevron-right"></i></a>
 
         <div class="tm-mobile-drawer-section-title">Categories</div>
         <?php foreach ($nav as $label => $menu): ?>
@@ -644,7 +644,7 @@ $make_section_url = static function(string $section, int $bid): string {
         <a class="<?php echo $current_store_page === 'online_store.php' ? 'active' : ''; ?>" href="online_store.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-home-outline"></i><span>Home</span></a>
         <a class="<?php echo $current_store_page === 'categories.php' ? 'active' : ''; ?>" href="categories.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-view-grid-outline"></i><span>Categories</span></a>
         <a class="<?php echo $current_store_page === 'upload_prescription.php' ? 'active' : ''; ?>" href="upload_prescription.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-prescription"></i><span>Prescription</span></a>
-        <a class="bottom-cart <?php echo $current_store_page === 'view_cart.php' ? 'active' : ''; ?>" href="view_cart.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-cart-outline"></i><span>Cart</span><span class="badge bg-danger rounded-pill cart-count"><?php echo $mobile_cart_count; ?></span></a>
+        <a class="bottom-cart <?php echo $current_store_page === 'cart.php' ? 'active' : ''; ?>" href="cart.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-cart-outline"></i><span>Cart</span><span class="badge bg-danger rounded-pill cart-count"><?php echo $mobile_cart_count; ?></span></a>
         <a class="<?php echo in_array($current_store_page, ['profile.php', 'login_client.php'], true) ? 'active' : ''; ?>" href="<?php echo isset($_SESSION['client_id']) ? 'profile.php?bid='.$branch_id : 'login_client.php?bid='.$branch_id; ?>"><i class="mdi mdi-account-outline"></i><span>Account</span></a>
     </nav>
 </div>
@@ -718,7 +718,7 @@ $make_section_url = static function(string $section, int $bid): string {
                 <a href="pharmacist.php?bid=<?php echo $branch_id; ?>" class="store-top-link">Pharmacists</a>
                 <a href="upload_prescription.php?bid=<?php echo $branch_id; ?>" class="store-top-link">Prescriptions</a>
 
-                <a href="view_cart.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none position-relative">
+                <a href="cart.php?bid=<?php echo $branch_id; ?>" class="text-decoration-none position-relative">
                     <i class="mdi mdi-cart-outline top-cart"></i>
                     <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge cart-count" style="font-size:9px;">
                         <?php
