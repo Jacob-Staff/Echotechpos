@@ -1419,26 +1419,8 @@ $branch = bige_cart_branch(
 $pharmacyId =
     (int)$branch['pharmacy_id'];
 
-$clientId =
-    (int)($_SESSION['client_id'] ?? 0);
-
-/*
- * CRITICAL: a normal GET must restore the persistent customer cart.
- * Previously only POST actions hydrated the database cart, so after
- * logout/login the session cart was empty even though the DB cart existed.
- */
-if ($clientId > 0) {
-    $cart = bige_cart_persist_load(
-        $conn,
-        $clientId,
-        $pharmacyId,
-        $branchId,
-        bige_cart_get($branchId)
-    );
-    $_SESSION['carts'][$branchId] = $cart;
-} else {
-    $cart = bige_cart_get($branchId);
-}
+$cart =
+    bige_cart_get($branchId);
 
 $cartCount = 0;
 $subtotal = 0.0;
@@ -1460,6 +1442,9 @@ $subtotal =
     round($subtotal, 2);
 
 /* Customer prefill */
+$clientId =
+    (int)($_SESSION['client_id'] ?? 0);
+
 $customerName =
     (string)($_SESSION['client_name'] ?? '');
 
@@ -2485,14 +2470,14 @@ function bige_cart_image_url(
 
             <p>
                 Your order has been sent to the pharmacy.
-                You can follow it from your orders page.
+                The pharmacy can now process it in Online Orders, and you can follow it from My Orders.
             </p>
 
             <div class="bige-cart-actions">
 
                 <a
                     class="bige-cart-primary"
-                    href="client_orders.php"
+                    href="my_orders.php"
                 >
                     View My Orders
                 </a>
