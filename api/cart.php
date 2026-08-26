@@ -1506,7 +1506,24 @@ if ($clientId > 0) {
 
                 $clientReference = 'ONLINE_ORDER:' . $orderId;
                 $issuedBy = 'Online Customer';
-                $zero = 0.00;
+
+                /*
+                 * IMPORTANT:
+                 * The existing EchoTech sales schema keeps `payment` as the legacy
+                 * payment-value field, while `payment_method` stores the mode.
+                 * For a newly placed online order the payment has not yet
+                 * been received, so keep payment/amount_received/change_due
+                 * at 0.00 and store the requested mode in payment_method.
+                 *
+                 * This INSERT deliberately has 13 bound parameters because
+                 * user_id is explicitly NULL and sale_date/created_at use NOW().
+                 */
+                $paymentValue = '';
+                $amountReceived = 0.00;
+                $changeDue = 0.00;
+                $vatAmount = 0.00;
+                $subtotalAmount = $orderTotal;
+                $totalAmount = $orderTotal;
 
                 $saleStmt = $conn->prepare("
                     INSERT INTO sales (
@@ -1532,24 +1549,29 @@ if ($clientId > 0) {
 
                 if (!$saleStmt) {
                     throw new RuntimeException(
-                        'Unable to prepare online transaction.'
+                        'Unable to prepare online transaction: ' . $conn->error
                     );
                 }
 
+                /*
+                 * 13 placeholders = 13 types/variables:
+                 * ii sss d s d d d s d d
+                 */
                 $saleStmt->bind_param(
-                    'iisssdsddddd',
+                    'iisssdsdddsdd',
                     $pharmacyId,
                     $branchId,
                     $issuedBy,
                     $orderNumber,
                     $clientReference,
                     $orderTotal,
+                    $paymentValue,
+                    $totalAmount,
+                    $subtotalAmount,
+                    $vatAmount,
                     $onlinePaymentMethod,
-                    $orderTotal,
-                    $orderTotal,
-                    $zero,
-                    $zero,
-                    $zero
+                    $amountReceived,
+                    $changeDue
                 );
 
                 if (!$saleStmt->execute()) {
