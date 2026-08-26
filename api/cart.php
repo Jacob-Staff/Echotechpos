@@ -1966,7 +1966,7 @@ function bige_cart_image_url(
                                         data-action="minus"
                                         aria-label="Decrease quantity"
                                     >
-                                        −
+                                        âˆ’
                                     </button>
 
                                     <input
@@ -2089,7 +2089,7 @@ function bige_cart_image_url(
             data-close-cart
             aria-label="Close"
         >
-            ×
+            Ã—
         </button>
 
         <div id="checkoutView">
@@ -2626,7 +2626,7 @@ window.BIGE50_CART = {
                                 type="button"
                                 data-action="minus"
                             >
-                                −
+                                âˆ’
                             </button>
 
                             <input
