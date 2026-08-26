@@ -208,6 +208,7 @@ function bige_cart_product(
             price,
             online_price,
             quantity,
+            expiry_date,
             image,
             product_image,
             category,
@@ -218,11 +219,6 @@ function bige_cart_product(
           AND is_active = 1
           AND is_online = 1
           AND quantity > 0
-          AND (
-                expiry_date IS NULL
-                OR LEFT(CAST(expiry_date AS CHAR), 10) = '0000-00-00'
-                OR LEFT(CAST(expiry_date AS CHAR), 10) >= ?
-          )
         LIMIT 1
     ";
 
@@ -242,14 +238,30 @@ function bige_cart_product(
         return null;
     }
 
-    $stmt->bind_param('iis', $productId, $branchId, $today);
+    $stmt->bind_param('ii', $productId, $branchId);
     $stmt->execute();
 
     $product = $stmt->get_result()->fetch_assoc();
 
     $stmt->close();
 
-    return $product ?: null;
+    if (!$product) {
+        return null;
+    }
+
+    /* Never compare expiry_date in SQL. Validate legacy values in PHP. */
+    $expiry = trim((string)($product['expiry_date'] ?? ''));
+
+    if ($expiry !== '' && $expiry !== '0000-00-00') {
+        $expiryDate = DateTime::createFromFormat('!Y-m-d', substr($expiry, 0, 10));
+        if ($expiryDate && $expiryDate->format('Y-m-d') === substr($expiry, 0, 10)) {
+            if ($expiryDate->format('Y-m-d') < $today) {
+                return null;
+            }
+        }
+    }
+
+    return $product;
 }
 
 function bige_cart_price(array $product): float
