@@ -119,7 +119,10 @@ $allowedMethods = [
     'All',
     'Cash',
     'Card',
-    'Mobile'
+    'Mobile',
+    'Online/Cash on Delivery',
+    'Online/Bank Transfer',
+    'Online/Mobile Money'
 ];
 
 if (!in_array(
@@ -247,7 +250,7 @@ if ($filter_method === 'Mobile') {
 
     $where[] = "
         LOWER(COALESCE(s.payment_method, ''))
-        IN ('mobile', 'mobile money', 'momo')
+        IN ('mobile', 'mobile money', 'momo', 'online/mobile money')
     ";
 
 } elseif ($filter_method !== 'All') {
@@ -552,7 +555,7 @@ require_once "../includes/head.php";
 
 <style>
 /* =========================================================
-   ECHOTECH POS â€” TODAY'S TRANSACTIONS
+   ECHOTECH POS Ã¢â‚¬â€ TODAY'S TRANSACTIONS
    Dashboard-matched professional UI
 ========================================================= */
 
@@ -1150,14 +1153,14 @@ require_once "../includes/head.php";
                                 strtoupper($display_pharm)
                             ) ?>
 
-                            <span class="mx-1">â€¢</span>
+                            <span class="mx-1">Ã¢â‚¬Â¢</span>
 
                             <?= tx_e($display_bran) ?>
 
-                            <span class="mx-1">â€¢</span>
+                            <span class="mx-1">Ã¢â‚¬Â¢</span>
 
                             <?= (int)$total_invoices ?>
-                            completed sale(s)
+                            transaction(s)
                         </div>
 
                     </div>
@@ -1288,6 +1291,33 @@ require_once "../includes/head.php";
                                     Mobile Money
                                 </option>
 
+                                <option
+                                    value="Online/Cash on Delivery"
+                                    <?= $filter_method === 'Online/Cash on Delivery'
+                                        ? 'selected'
+                                        : '' ?>
+                                >
+                                    Online / Cash on Delivery
+                                </option>
+
+                                <option
+                                    value="Online/Bank Transfer"
+                                    <?= $filter_method === 'Online/Bank Transfer'
+                                        ? 'selected'
+                                        : '' ?>
+                                >
+                                    Online / Bank Transfer
+                                </option>
+
+                                <option
+                                    value="Online/Mobile Money"
+                                    <?= $filter_method === 'Online/Mobile Money'
+                                        ? 'selected'
+                                        : '' ?>
+                                >
+                                    Online / Mobile Money
+                                </option>
+
                             </select>
 
                         </div>
@@ -1392,7 +1422,7 @@ require_once "../includes/head.php";
                     </div>
 
                     <div class="tx-kpi-note">
-                        Completed sales
+                        Sales and online orders
                     </div>
 
                 </div>
@@ -1590,12 +1620,14 @@ require_once "../includes/head.php";
 
                                 if (
                                     $paymentLower === 'card'
+                                    || $paymentLower === 'online/bank transfer'
                                 ) {
 
                                     $paymentClass = 'card';
                                     $paymentIcon =
                                         'fa-credit-card';
-                                    $paymentLabel = 'Card';
+                                    $paymentLabel =
+                                        $paymentMethod;
 
                                 } elseif (
                                     in_array(
@@ -1603,7 +1635,8 @@ require_once "../includes/head.php";
                                         [
                                             'mobile',
                                             'mobile money',
-                                            'momo'
+                                            'momo',
+                                            'online/mobile money'
                                         ],
                                         true
                                     )
@@ -1613,7 +1646,17 @@ require_once "../includes/head.php";
                                     $paymentIcon =
                                         'fa-mobile-alt';
                                     $paymentLabel =
-                                        'Mobile Money';
+                                        $paymentMethod;
+
+                                } elseif (
+                                    $paymentLower === 'online/cash on delivery'
+                                ) {
+
+                                    $paymentClass = 'cash';
+                                    $paymentIcon =
+                                        'fa-truck';
+                                    $paymentLabel =
+                                        $paymentMethod;
 
                                 } else {
 
