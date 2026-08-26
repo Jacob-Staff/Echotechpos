@@ -3,8 +3,6 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-$current_store_page = basename($_SERVER['PHP_SELF'] ?? 'online_store.php');
-
 // 1. Database Connection Inclusion
 if (file_exists(__DIR__ . "/../includes/conn.php")) {
     require_once __DIR__ . "/../includes/conn.php";
@@ -54,57 +52,12 @@ $db_logo            = $tenant_context['tenant_logo'] ?? 'default_logo.png';
 // Fetch categories safely
 $cat_query = $conn->query("SELECT * FROM categories WHERE status = 1 LIMIT 8");
 
-// =========================================================
-// PHARMACY LOGO RESOLUTION
-// =========================================================
-// IMPORTANT:
-// store_header.php is inside /api/, while admin-uploaded pharmacy
-// logos are stored in the project-level /uploads/logos/ directory.
-// Therefore the filesystem path must go one directory UP from /api/.
-//
-// The logo is selected from the pharmacy attached to the CURRENT
-// ACTIVE BRANCH (b.pharmacy_id -> p.logo). This prevents one pharmacy
-// from accidentally displaying another pharmacy's logo.
-
-$logo_filename = 'default_logo.png';
-
-if (!empty($db_logo)) {
-    // The admin may store either just the filename or a path such as:
-    // uploads/logos/logo.png, /uploads/logos/logo.png, etc.
-    // Only keep the filename so the public URL is always constructed
-    // from the trusted uploads directory.
-    $candidate_logo = trim((string)$db_logo);
-    $candidate_logo = str_replace('\\', '/', $candidate_logo);
-    $candidate_logo = basename(parse_url($candidate_logo, PHP_URL_PATH) ?: $candidate_logo);
-
-    if ($candidate_logo !== '' && $candidate_logo !== '.' && $candidate_logo !== '..') {
-        $logo_filename = $candidate_logo;
-    }
-}
-
-// Actual filesystem location: /project/uploads/logos/
-$logo_upload_dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'logos' . DIRECTORY_SEPARATOR;
-$logo_local_path = $logo_upload_dir . $logo_filename;
-
-// Public URL from pages inside /api/. Using ../ makes this work both
-// locally (XAMPP) and on the deployed Render application.
-if (is_file($logo_local_path)) {
-    $logo_web_path = '../uploads/logos/' . rawurlencode($logo_filename);
-} else {
-    // Safe fallback if the admin has not uploaded a logo for this pharmacy.
-    $fallback_logo = $logo_upload_dir . 'default_logo.png';
-    if (is_file($fallback_logo)) {
-        $logo_web_path = '../uploads/logos/default_logo.png';
-    } else {
-        // Leave a harmless empty value rather than pointing to a non-existent
-        // /api/uploads directory. The image element below will use its
-        // visual fallback.
-        $logo_web_path = '';
-    }
-}
-
-// Escape once for use in HTML attributes.
-$logo_web_path_html = htmlspecialchars($logo_web_path, ENT_QUOTES, 'UTF-8');
+// Image paths
+$logo_filename   = !empty($db_logo) ? $db_logo : 'default_logo.png';
+$logo_local_path = __DIR__ . "/uploads/logos/" . $logo_filename;
+$logo_web_path   = file_exists($logo_local_path) 
+    ? "uploads/logos/" . $logo_filename 
+    : "uploads/logos/default_logo.png";
 
 // Notifications
 $response_count = 0;
@@ -169,102 +122,27 @@ if (isset($_SESSION['client_id'])) {
         /* ========================= TRUEMEDS-STYLE CATEGORY NAV ========================= */
         .mega-nav-wrap{background:#fff;border-bottom:1px solid #dfe4e8;position:relative;z-index:1100;}
         .mega-nav{min-height:46px;display:flex;align-items:stretch;justify-content:center;gap:0;overflow:visible;}
-        .mega-item{position:relative;display:flex;align-items:center;}
+        .mega-item{position:static;display:flex;align-items:center;}
         .mega-trigger{height:46px;display:flex;align-items:center;padding:0 17px;color:#5f6f7f;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap;border-bottom:2px solid transparent;transition:.18s ease;}
         .mega-trigger:hover,.mega-trigger.active{color:#1769d1;border-bottom-color:#1769d1;background:#fbfcfd;}
         .mega-trigger .mdi{font-size:14px;margin-left:4px;}
 
-        .mega-panel{
-            position:absolute;
-            left:0;
-            top:100%;
-            width:390px;
-            display:none;
-            background:#fff;
-            border:1px solid #e5e9ed;
-            border-top:0;
-            border-radius:0 0 7px 7px;
-            box-shadow:0 8px 20px rgba(20,35,50,.16);
-            overflow:hidden;
-            z-index:2500;
-        }
-        .mega-item:hover>.mega-panel,
-        .mega-item:focus-within>.mega-panel,
-        .mega-item.menu-open>.mega-panel{display:block;}
-
-        .mega-panel-inner{
-            display:grid;
-            grid-template-columns:210px 180px;
-            gap:0;
-            width:100%;
-            min-height:200px;
-            max-height:430px;
-        }
-        .mega-side{
-            border-right:1px solid #edf0f3;
-            padding:9px 0;
-            background:#fff;
-            overflow-y:auto;
-            max-height:430px;
-        }
-        .mega-side-title{display:none;}
-        .mega-side-link{
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            text-decoration:none;
-            color:#5f6f7f;
-            font-size:12px;
-            font-weight:500;
-            line-height:1.2;
-            padding:9px 18px 9px 20px;
-            border-radius:0;
-            min-height:36px;
-            transition:background .12s ease,color .12s ease;
-        }
-        .mega-side-link:hover,
-        .mega-side-link.active{
-            background:#f0f3f7;
-            color:#3d4c5a;
-        }
-        .mega-side-link .mdi{font-size:15px;color:#333;}
-        .mega-content{
-            min-width:0;
-            background:#f4f7fa;
-            padding:9px 0 12px;
-            overflow-y:auto;
-            max-height:430px;
-        }
-        .mega-heading{
-            display:none;
-        }
-        .mega-group-content{display:none;}
-        .mega-group-content.active{display:block;}
-        .mega-group-title{
-            display:none;
-        }
-        .mega-grid{
-            display:block;
-            max-height:none;
-            overflow:visible;
-            padding:0;
-        }
-        .mega-link{
-            display:block;
-            color:#657585;
-            text-decoration:none;
-            font-size:12px;
-            font-weight:500;
-            padding:8px 18px;
-            line-height:1.2;
-            border-radius:0;
-            white-space:normal;
-        }
-        .mega-link:hover{background:#eaf0f5;color:#1769d1;}
-        .mega-link .mdi{display:none;}
-
-        /* Each dropdown is anchored to its own category trigger, exactly like the reference navigation. */
-        .mega-item > .mega-panel{left:0;right:auto;}
+        .mega-panel{position:absolute;left:0;right:0;top:100%;display:none;background:#fff;border-top:1px solid #e7ebef;box-shadow:0 10px 24px rgba(18,38,63,.12);padding:18px 0 20px;}
+        .mega-item:hover>.mega-panel,.mega-item:focus-within>.mega-panel{display:block;}
+        .mega-panel-inner{max-width:1200px;margin:0 auto;padding:0 22px;display:grid;grid-template-columns:220px 1fr;gap:22px;}
+        .mega-side{border-right:1px solid #e9edf1;padding-right:18px;}
+        .mega-side-title{font-size:14px;font-weight:800;color:#253746;margin-bottom:10px;}
+        .mega-side-link{display:flex;align-items:center;justify-content:space-between;text-decoration:none;color:#586878;font-size:12px;padding:9px 10px;border-radius:7px;}
+        .mega-side-link:hover{background:#f2f7fb;color:#1769d1;}
+        .mega-side-link .mdi{font-size:16px;}
+        .mega-content{min-width:0;}
+        .mega-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+        .mega-heading strong{font-size:14px;color:#263746;}
+        .mega-viewall{font-size:11px;font-weight:800;color:#1769d1;text-decoration:none;}
+        .mega-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));column-gap:24px;row-gap:3px;max-height:310px;overflow:auto;padding-right:5px;}
+        .mega-link{display:block;color:#657585;text-decoration:none;font-size:11.5px;padding:6px 5px;border-radius:5px;line-height:1.25;}
+        .mega-link:hover{background:#f5f8fa;color:#1769d1;}
+        .mega-link .mdi{font-size:12px;margin-right:3px;}
 
         /* Mobile menu */
         .mobile-category-toggle{display:none;border:0;background:#fff;width:100%;padding:11px 14px;font-size:13px;font-weight:700;color:#34495e;text-align:left;}
@@ -294,102 +172,6 @@ if (isset($_SESSION['client_id'])) {
         .user-menu p{margin:2px 0;font-size:11px;color:#666;}
         .menu-link{display:block;padding:7px 0;color:#333;text-decoration:none;font-size:12px;font-weight:600;}
         .menu-link:hover{color:var(--echo-green);}
-
-
-        /* ========================= MOBILE TRUEMEDS-STYLE LAYOUT ========================= */
-        .tm-mobile-shell{display:none;}
-        .tm-mobile-mainbar{height:58px;background:#fff;border-bottom:1px solid #e8edf1;display:flex;align-items:center;padding:0 12px;gap:10px;position:relative;z-index:2200;}
-        .tm-mobile-menu-btn,.tm-mobile-icon-btn{border:0;background:transparent;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#173b59;font-size:22px;flex:0 0 38px;}
-        .tm-mobile-menu-btn:active,.tm-mobile-icon-btn:active{background:#f0f4f7;}
-        .tm-mobile-brand{min-width:0;flex:1;text-decoration:none;color:var(--echo-teal);display:flex;align-items:center;gap:7px;}
-        .tm-mobile-brand img{width:31px;height:31px;object-fit:contain;}
-        .tm-mobile-brand strong{font-size:18px;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:145px;}
-        .tm-mobile-cart{position:relative;}
-        .tm-mobile-cart .cart-count{font-size:8px!important;min-width:15px;line-height:15px;padding:0 3px;top:2px!important;}
-        .tm-mobile-search-row{background:#fff;padding:8px 12px 10px;border-bottom:1px solid #e7ecef;position:relative;z-index:2150;}
-        .tm-mobile-search{height:43px;background:#f5f7f9;border:1px solid #dfe5e9;border-radius:9px;display:flex;align-items:center;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04);}
-        .tm-mobile-search input{border:0;background:transparent;outline:0;flex:1;min-width:0;padding:0 10px;font-size:13px;color:#253746;}
-        .tm-mobile-search button{border:0;background:#1769d1;color:#fff;width:43px;height:43px;display:flex;align-items:center;justify-content:center;font-size:19px;}
-        .tm-mobile-location{margin-top:7px;display:flex;align-items:center;gap:5px;color:#506170;font-size:11px;white-space:nowrap;overflow:hidden;}
-        .tm-mobile-location strong{color:#1769d1;overflow:hidden;text-overflow:ellipsis;}
-        .tm-mobile-category-strip{display:none;gap:8px;overflow-x:auto;padding:9px 12px;background:#fff;border-bottom:1px solid #e7ecef;scrollbar-width:none;position:relative;z-index:2100;}
-        .tm-mobile-category-strip::-webkit-scrollbar{display:none;}
-        .tm-mobile-category-chip{flex:0 0 auto;border:1px solid #e1e7eb;background:#fff;border-radius:18px;padding:7px 12px;text-decoration:none;color:#435565;font-size:11px;font-weight:700;white-space:nowrap;}
-        .tm-mobile-category-chip:active{background:#eef5ff;color:#1769d1;border-color:#c9ddf8;}
-        .tm-mobile-quick-strip{display:flex;gap:10px;overflow-x:auto;padding:10px 12px;background:#f8fafb;scrollbar-width:none;}
-        .tm-mobile-quick-strip::-webkit-scrollbar{display:none;}
-        .tm-mobile-quick-card{flex:0 0 148px;background:#fff;border:1px solid #e3e9ed;border-radius:10px;padding:10px;text-decoration:none;display:flex;align-items:center;gap:8px;box-shadow:0 2px 5px rgba(25,45,65,.05);}
-        .tm-mobile-quick-card i{font-size:22px;}
-        .tm-mobile-quick-card strong{display:block;font-size:11px;line-height:1.15;color:#253746;}
-        .tm-mobile-quick-card span{display:block;font-size:9px;color:#778693;margin-top:2px;}
-        .tm-mobile-drawer-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:5000;}
-        .tm-mobile-drawer{position:fixed;top:0;left:0;bottom:0;width:min(86vw,360px);background:#fff;transform:translateX(-105%);transition:transform .24s ease;z-index:5100;box-shadow:8px 0 28px rgba(0,0,0,.16);overflow-y:auto;}
-        .tm-mobile-drawer.open{transform:translateX(0);}
-        .tm-mobile-drawer-backdrop.open{display:block;}
-        .tm-mobile-drawer-head{padding:16px 14px 13px;background:#fff;border-bottom:1px solid #e6ebef;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:2;}
-        .tm-mobile-drawer-logo{width:38px;height:38px;object-fit:contain;}
-        .tm-mobile-drawer-title{flex:1;min-width:0;}
-        .tm-mobile-drawer-title strong{display:block;color:var(--echo-teal);font-size:18px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-        .tm-mobile-drawer-title span{display:block;color:#7a8791;font-size:10px;margin-top:2px;}
-        .tm-mobile-drawer-close{border:0;background:#f2f5f7;border-radius:50%;width:34px;height:34px;font-size:20px;color:#34495e;}
-        .tm-mobile-drawer-account{margin:12px;border:1px solid #e2e8ec;border-radius:10px;padding:11px;text-decoration:none;display:flex;align-items:center;gap:9px;color:#253746;}
-        .tm-mobile-drawer-account i{font-size:25px;color:#1769d1;}
-        .tm-mobile-drawer-account strong{font-size:12px;display:block;}
-        .tm-mobile-drawer-account span{font-size:10px;color:#7b8892;display:block;margin-top:2px;}
-        .tm-mobile-drawer-section-title{padding:9px 14px 6px;color:#8a959e;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;}
-        .tm-mobile-drawer-link{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #f0f2f4;text-decoration:none;color:#314555;font-size:13px;font-weight:700;}
-        .tm-mobile-drawer-link .mdi:first-child{font-size:19px;width:26px;color:#1769d1;}
-        .tm-mobile-accordion{border-bottom:1px solid #f0f2f4;}
-        .tm-mobile-accordion-btn{width:100%;border:0;background:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;text-align:left;color:#314555;font-size:13px;font-weight:700;}
-        .tm-mobile-accordion-btn .label{flex:1;}
-        .tm-mobile-accordion-content{display:none;background:#f8fafb;padding:4px 0 8px;}
-        .tm-mobile-accordion.open .tm-mobile-accordion-content{display:block;}
-        .tm-mobile-accordion.open .tm-mobile-accordion-btn{color:#1769d1;background:#f5f9fe;}
-        .tm-mobile-subgroup-btn{width:100%;border:0;background:transparent;padding:10px 18px 9px 40px;text-align:left;display:flex;justify-content:space-between;color:#526575;font-size:12px;font-weight:700;}
-        .tm-mobile-subitems{display:none;padding:0 16px 7px 52px;}
-        .tm-mobile-subgroup.open .tm-mobile-subitems{display:block;}
-        .tm-mobile-subitems a{display:block;padding:6px 0;text-decoration:none;color:#71808b;font-size:11px;}
-        .tm-mobile-branch-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.38);z-index:5200;}
-        .tm-mobile-branch-backdrop.open{display:block;}
-        .tm-mobile-branch-sheet{position:fixed;left:50%;bottom:0;transform:translate(-50%,105%);width:min(100%,430px);background:#fff;border-radius:16px 16px 0 0;z-index:5250;box-shadow:0 -10px 35px rgba(0,0,0,.18);transition:transform .22s ease;padding:14px 14px 18px;}
-        .tm-mobile-branch-sheet.open{transform:translate(-50%,0);}
-        .tm-mobile-branch-sheet-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid #edf0f2;}
-        .tm-mobile-branch-sheet-head strong{font-size:15px;color:#243746;}
-        .tm-mobile-branch-sheet-close{border:0;background:#f1f4f6;width:32px;height:32px;border-radius:50%;font-size:18px;color:#425463;}
-        .tm-mobile-branch-option{width:100%;border:1px solid #e3e8ec;background:#fff;border-radius:9px;padding:11px 12px;margin-top:8px;display:flex;align-items:center;justify-content:space-between;text-align:left;color:#344958;font-size:12px;font-weight:700;}
-        .tm-mobile-branch-option.active{border-color:#1769d1;background:#f3f8ff;color:#1769d1;}
-
-        .tm-mobile-bottom-nav{display:none;}
-
-        @media (max-width:767.98px){
-            html,body{background:#f7f9fa;}
-            .store-topbar,.mega-nav-wrap{display:none!important;}
-            .tm-mobile-shell{display:block;}
-            .tier-3-action{display:none!important;}
-            body{padding-bottom:65px;}
-            .container{max-width:100%;}
-            .tm-mobile-bottom-nav{position:fixed;display:flex;left:0;right:0;bottom:0;height:62px;background:#fff;border-top:1px solid #dfe5e9;z-index:4200;box-shadow:0 -4px 14px rgba(25,45,65,.08);padding-bottom:env(safe-area-inset-bottom);}
-            .tm-mobile-bottom-nav a{flex:1;text-decoration:none;color:#657481;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;font-weight:700;gap:2px;}
-            .tm-mobile-bottom-nav a.active,.tm-mobile-bottom-nav a:active{color:#1769d1;}
-            .tm-mobile-bottom-nav i{font-size:21px;line-height:1;}
-            .tm-mobile-bottom-nav .bottom-cart{position:relative;}
-            .tm-mobile-bottom-nav .bottom-cart .cart-count{position:absolute!important;top:0!important;left:50%;margin-left:6px;font-size:8px!important;min-width:15px;line-height:15px;padding:0 3px;}
-            .feature-card{min-height:74px;border-radius:9px!important;}
-            .feature-card i{font-size:25px!important;margin-right:7px!important;}
-            .feature-title{font-size:11px!important;line-height:1.15;}
-            .feature-sub{font-size:9px!important;}
-            .product-card{border-radius:9px!important;padding:8px!important;min-height:100%;}
-            .product-card img{height:105px!important;max-width:100%;}
-            .product-title{font-size:11px!important;line-height:1.2!important;min-height:39px;}
-            .product-price{font-size:14px!important;}
-            .add-to-cart-btn{font-size:10px!important;padding:7px 5px!important;border-radius:6px!important;}
-            .wa-sticky{bottom:72px!important;right:10px!important;margin:0!important;width:48px;height:48px;padding:0!important;display:flex;align-items:center;justify-content:center;}
-            .wa-sticky i{font-size:25px!important;}
-            .tm-mobile-quick-strip + .container{margin-top:8px!important;}
-        }
-        @media (min-width:768px){
-            .tm-mobile-shell,.tm-mobile-bottom-nav{display:none!important;}
-        }
 
         @media (max-width:1100px){
             .mega-trigger{padding:0 11px;font-size:11px;}
@@ -498,157 +280,6 @@ $make_section_url = static function(string $section, int $bid): string {
 };
 ?>
 
-<!-- ========================= MOBILE STORE SHELL ========================= -->
-<div class="tm-mobile-shell">
-    <div class="tm-mobile-mainbar">
-        <button type="button" class="tm-mobile-menu-btn" id="tmMobileMenuOpen" aria-label="Open menu">
-            <i class="mdi mdi-menu"></i>
-        </button>
-        <a class="tm-mobile-brand" href="online_store.php?bid=<?php echo $branch_id; ?>">
-            <img src="<?php echo $logo_web_path_html; ?>" alt="">
-            <strong><?php echo htmlspecialchars($pharmacy_name); ?></strong>
-        </a>
-        <a class="tm-mobile-icon-btn tm-mobile-cart" href="cart.php?bid=<?php echo $branch_id; ?>" aria-label="Cart">
-            <i class="mdi mdi-cart-outline"></i>
-            <span class="badge bg-danger position-absolute rounded-pill cart-count">
-                <?php
-                $mobile_cart_count = 0;
-                if (isset($_SESSION['carts'][$branch_id]) && is_array($_SESSION['carts'][$branch_id])) {
-                    foreach ($_SESSION['carts'][$branch_id] as $cart_item) {
-                        $mobile_cart_count += isset($cart_item['qty']) ? max(1, (int)$cart_item['qty']) : 1;
-                    }
-                }
-                echo $mobile_cart_count;
-                ?>
-            </span>
-        </a>
-        <button type="button" class="tm-mobile-icon-btn" id="tmMobileAccountOpen" aria-label="Account">
-            <i class="mdi mdi-account-circle-outline"></i>
-        </button>
-    </div>
-
-    <div class="tm-mobile-search-row">
-        <form action="online_store.php" method="GET" class="tm-mobile-search">
-            <input type="hidden" name="bid" value="<?php echo $branch_id; ?>">
-            <input type="text" name="q" value="<?php echo htmlspecialchars($_GET['q'] ?? ''); ?>" placeholder="Search medicines, products and health care..." autocomplete="off">
-            <button type="submit" aria-label="Search"><i class="mdi mdi-magnify"></i></button>
-        </form>
-        <div class="tm-mobile-location">
-            <i class="mdi mdi-map-marker-outline"></i>
-            <span>Shopping in</span>
-            <strong><?php echo htmlspecialchars($branch_name); ?></strong>
-            <span>Â·</span>
-            <a href="javascript:void(0);" id="tmMobileBranchOpen" style="color:#1769d1;text-decoration:none;font-weight:700;">Change</a>
-        </div>
-    </div>
-
-    <div class="tm-mobile-category-strip" aria-label="Categories">
-        <?php foreach ($nav as $label => $menu): ?>
-            <a class="tm-mobile-category-chip" href="<?php echo htmlspecialchars($make_section_url($menu['section'], $branch_id)); ?>">
-                <?php echo htmlspecialchars($label); ?>
-            </a>
-        <?php endforeach; ?>
-    </div>
-
-    <div class="tm-mobile-drawer-backdrop" id="tmMobileBackdrop"></div>
-    <aside class="tm-mobile-drawer" id="tmMobileDrawer" aria-label="Mobile navigation">
-        <div class="tm-mobile-drawer-head">
-            <img class="tm-mobile-drawer-logo" src="<?php echo $logo_web_path_html; ?>" alt="">
-            <div class="tm-mobile-drawer-title">
-                <strong><?php echo htmlspecialchars($pharmacy_name); ?></strong>
-                <span>Online Pharmacy Â· <?php echo htmlspecialchars($branch_name); ?></span>
-            </div>
-            <button type="button" class="tm-mobile-drawer-close" id="tmMobileMenuClose" aria-label="Close menu"><i class="mdi mdi-close"></i></button>
-        </div>
-
-        <a class="tm-mobile-drawer-account" href="<?php echo isset($_SESSION['client_id']) ? 'profile.php?bid='.$branch_id : 'login_client.php?bid='.$branch_id; ?>">
-            <i class="mdi mdi-account-circle-outline"></i>
-            <span><strong><?php echo isset($_SESSION['client_id']) ? htmlspecialchars($_SESSION['client_name'] ?? 'My Account') : 'Login / Register'; ?></strong><span>Manage account and orders</span></span>
-            <i class="mdi mdi-chevron-right" style="font-size:19px;color:#84919b;width:auto;"></i>
-        </a>
-
-        <div class="tm-mobile-drawer-section-title">Shop</div>
-        <a class="tm-mobile-drawer-link" href="online_store.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-home-outline"></i> Home</span><i class="mdi mdi-chevron-right"></i></a>
-        <a class="tm-mobile-drawer-link" href="categories.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-view-grid-outline"></i> All Categories</span><i class="mdi mdi-chevron-right"></i></a>
-        <a class="tm-mobile-drawer-link" href="offers.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-tag-outline"></i> Offers</span><i class="mdi mdi-chevron-right"></i></a>
-        <a class="tm-mobile-drawer-link" href="cart.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-cart-outline"></i> My Cart</span><i class="mdi mdi-chevron-right"></i></a>
-
-        <div class="tm-mobile-drawer-section-title">Categories</div>
-        <?php foreach ($nav as $label => $menu): ?>
-            <?php if (empty($menu['groups'])): ?>
-                <a class="tm-mobile-drawer-link" href="<?php echo htmlspecialchars($make_section_url($menu['section'], $branch_id)); ?>">
-                    <span><i class="mdi <?php echo htmlspecialchars($menu['icon']); ?>"></i> <?php echo htmlspecialchars($label); ?></span>
-                    <i class="mdi mdi-chevron-right"></i>
-                </a>
-            <?php else: ?>
-                <div class="tm-mobile-accordion">
-                    <button type="button" class="tm-mobile-accordion-btn">
-                        <i class="mdi <?php echo htmlspecialchars($menu['icon']); ?>" style="font-size:19px;width:26px;color:#1769d1;"></i>
-                        <span class="label"><?php echo htmlspecialchars($label); ?></span>
-                        <i class="mdi mdi-chevron-down accordion-chevron"></i>
-                    </button>
-                    <div class="tm-mobile-accordion-content">
-                        <?php foreach ($menu['groups'] as $group => $links): ?>
-                            <div class="tm-mobile-subgroup">
-                                <button type="button" class="tm-mobile-subgroup-btn">
-                                    <span><?php echo htmlspecialchars($group); ?></span>
-                                    <i class="mdi mdi-chevron-down"></i>
-                                </button>
-                                <div class="tm-mobile-subitems">
-                                    <a href="<?php echo htmlspecialchars($make_search_url($group, $branch_id)); ?>">View <?php echo htmlspecialchars($group); ?></a>
-                                    <?php foreach ($links as $sub): ?>
-                                        <a href="<?php echo htmlspecialchars($make_search_url($sub, $branch_id)); ?>"><?php echo htmlspecialchars($sub); ?></a>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-            <?php endif; ?>
-        <?php endforeach; ?>
-
-        <div class="tm-mobile-drawer-section-title">Help & Services</div>
-        <a class="tm-mobile-drawer-link" href="upload_prescription.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-prescription"></i> Upload Prescription</span><i class="mdi mdi-chevron-right"></i></a>
-        <a class="tm-mobile-drawer-link" href="pharmacist.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-account-tie-outline"></i> Pharmacists</span><i class="mdi mdi-chevron-right"></i></a>
-        <a class="tm-mobile-drawer-link" href="help.php?bid=<?php echo $branch_id; ?>"><span><i class="mdi mdi-help-circle-outline"></i> Help & Support</span><i class="mdi mdi-chevron-right"></i></a>
-        <a class="tm-mobile-drawer-link" href="javascript:void(0);" id="tmMobileBranchLink"><span><i class="mdi mdi-map-marker-outline"></i> Switch Branch</span><i class="mdi mdi-chevron-right"></i></a>
-    </aside>
-
-    <div class="tm-mobile-branch-backdrop" id="tmMobileBranchBackdrop"></div>
-    <div class="tm-mobile-branch-sheet" id="tmMobileBranchSheet" role="dialog" aria-modal="true" aria-label="Switch branch">
-        <div class="tm-mobile-branch-sheet-head">
-            <strong>Choose branch</strong>
-            <button type="button" class="tm-mobile-branch-sheet-close" id="tmMobileBranchClose"><i class="mdi mdi-close"></i></button>
-        </div>
-        <?php
-        if ($parent_pharmacy_id > 0 && ($stmt_mbr = $conn->prepare("SELECT id, branch_name FROM branches WHERE pharmacy_id = ? AND is_active = 1 ORDER BY branch_name ASC"))) {
-            $stmt_mbr->bind_param("i", $parent_pharmacy_id);
-            $stmt_mbr->execute();
-            $mbr_list = $stmt_mbr->get_result();
-            while ($mbr = $mbr_list->fetch_assoc()):
-                $mbr_id = (int)$mbr['id'];
-                $mbr_active = ($mbr_id === $branch_id);
-        ?>
-            <button type="button" class="tm-mobile-branch-option <?php echo $mbr_active ? 'active' : ''; ?>" data-branch-url="switch_branch.php?bid=<?php echo $mbr_id; ?>">
-                <span><i class="mdi mdi-map-marker-outline me-1"></i><?php echo htmlspecialchars($mbr['branch_name']); ?></span>
-                <?php if ($mbr_active): ?><i class="mdi mdi-check-circle"></i><?php else: ?><i class="mdi mdi-chevron-right"></i><?php endif; ?>
-            </button>
-        <?php
-            endwhile;
-            $stmt_mbr->close();
-        }
-        ?>
-    </div>
-
-    <nav class="tm-mobile-bottom-nav" aria-label="Mobile quick navigation">
-        <a class="<?php echo $current_store_page === 'online_store.php' ? 'active' : ''; ?>" href="online_store.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-home-outline"></i><span>Home</span></a>
-        <a class="<?php echo $current_store_page === 'categories.php' ? 'active' : ''; ?>" href="categories.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-view-grid-outline"></i><span>Categories</span></a>
-        <a class="<?php echo $current_store_page === 'upload_prescription.php' ? 'active' : ''; ?>" href="upload_prescription.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-prescription"></i><span>Prescription</span></a>
-        <a class="bottom-cart <?php echo $current_store_page === 'cart.php' ? 'active' : ''; ?>" href="cart.php?bid=<?php echo $branch_id; ?>"><i class="mdi mdi-cart-outline"></i><span>Cart</span><span class="badge bg-danger rounded-pill cart-count"><?php echo $mobile_cart_count; ?></span></a>
-        <a class="<?php echo in_array($current_store_page, ['profile.php', 'login_client.php'], true) ? 'active' : ''; ?>" href="<?php echo isset($_SESSION['client_id']) ? 'profile.php?bid='.$branch_id : 'login_client.php?bid='.$branch_id; ?>"><i class="mdi mdi-account-outline"></i><span>Account</span></a>
-    </nav>
-</div>
-
 <!-- ========================= TOP HEADER ========================= -->
 <header class="store-topbar">
     <div class="container-fluid px-3 px-md-4">
@@ -723,11 +354,52 @@ $make_section_url = static function(string $section, int $bid): string {
                     <span class="badge bg-danger position-absolute top-0 start-100 translate-middle rounded-pill cart-badge cart-count" style="font-size:9px;">
                         <?php
                         $cart_count = 0;
-                        if (isset($_SESSION['carts'][$branch_id]) && is_array($_SESSION['carts'][$branch_id])) {
+
+                        /* Logged-in customers use the persistent online cart. */
+                        if (isset($_SESSION['client_id'])) {
+                            $cart_client_id = (int)$_SESSION['client_id'];
+
+                            /* The table is created by cart.php/online_store.php.
+                               If it does not exist yet, safely fall back to session. */
+                            $table_exists = false;
+                            if ($table_result = $conn->query("SHOW TABLES LIKE 'online_cart_items'")) {
+                                $table_exists = $table_result->num_rows > 0;
+                                $table_result->free();
+                            }
+
+                            if ($table_exists) {
+                                if ($clean_cart = $conn->prepare(
+                                    "DELETE FROM online_cart_items
+                                     WHERE client_id = ?
+                                       AND created_at < DATE_SUB(NOW(), INTERVAL 1 MONTH)"
+                                )) {
+                                    $clean_cart->bind_param('i', $cart_client_id);
+                                    $clean_cart->execute();
+                                    $clean_cart->close();
+                                }
+
+                                if ($cart_stmt = $conn->prepare(
+                                    "SELECT COALESCE(SUM(quantity),0) AS total
+                                     FROM online_cart_items
+                                     WHERE client_id = ?
+                                       AND branch_id = ?"
+                                )) {
+                                    $cart_stmt->bind_param('ii', $cart_client_id, $branch_id);
+                                    $cart_stmt->execute();
+                                    $cart_row = $cart_stmt->get_result()->fetch_assoc();
+                                    $cart_count = (int)($cart_row['total'] ?? 0);
+                                    $cart_stmt->close();
+                                }
+                            }
+                        }
+
+                        /* Guest/session fallback. */
+                        if ($cart_count === 0 && isset($_SESSION['carts'][$branch_id]) && is_array($_SESSION['carts'][$branch_id])) {
                             foreach ($_SESSION['carts'][$branch_id] as $cart_item) {
                                 $cart_count += isset($cart_item['qty']) ? max(1, (int)$cart_item['qty']) : 1;
                             }
                         }
+
                         echo $cart_count;
                         ?>
                     </span>
@@ -794,36 +466,32 @@ $make_section_url = static function(string $section, int $bid): string {
                 </a>
 
                 <?php if (!empty($menu['groups'])): ?>
-                    <div class="mega-panel" role="menu">
+                    <div class="mega-panel">
                         <div class="mega-panel-inner">
                             <div class="mega-side">
-                                <?php $group_index = 0; ?>
+                                <div class="mega-side-title"><?php echo htmlspecialchars($label); ?></div>
                                 <?php foreach ($menu['groups'] as $group => $links): ?>
-                                    <a href="<?php echo htmlspecialchars($make_search_url($group, $branch_id)); ?>"
-                                       class="mega-side-link <?php echo $group_index === 0 ? 'active' : ''; ?>"
-                                       data-mega-group="<?php echo htmlspecialchars($menu['section'] . '-' . $group_index); ?>">
+                                    <a class="mega-side-link" href="<?php echo htmlspecialchars($make_search_url($group, $branch_id)); ?>">
                                         <span><?php echo htmlspecialchars($group); ?></span>
                                         <i class="mdi mdi-chevron-right"></i>
                                     </a>
-                                    <?php $group_index++; ?>
                                 <?php endforeach; ?>
                             </div>
 
                             <div class="mega-content">
-                                <?php $group_index = 0; ?>
-                                <?php foreach ($menu['groups'] as $group => $links): ?>
-                                    <div class="mega-group-content <?php echo $group_index === 0 ? 'active' : ''; ?>"
-                                         data-mega-content="<?php echo htmlspecialchars($menu['section'] . '-' . $group_index); ?>">
-                                        <div class="mega-grid">
-                                            <?php foreach ($links as $sub): ?>
-                                                <a class="mega-link" href="<?php echo htmlspecialchars($make_search_url($sub, $branch_id)); ?>">
-                                                    <?php echo htmlspecialchars($sub); ?>
-                                                </a>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </div>
-                                    <?php $group_index++; ?>
-                                <?php endforeach; ?>
+                                <div class="mega-heading">
+                                    <strong>Shop <?php echo htmlspecialchars($label); ?></strong>
+                                    <a class="mega-viewall" href="<?php echo htmlspecialchars($make_section_url($menu['section'], $branch_id)); ?>">VIEW ALL</a>
+                                </div>
+                                <div class="mega-grid">
+                                    <?php foreach ($menu['groups'] as $group => $links): ?>
+                                        <?php foreach ($links as $sub): ?>
+                                            <a class="mega-link" href="<?php echo htmlspecialchars($make_search_url($sub, $branch_id)); ?>">
+                                                <i class="mdi mdi-chevron-right"></i><?php echo htmlspecialchars($sub); ?>
+                                            </a>
+                                        <?php endforeach; ?>
+                                    <?php endforeach; ?>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -863,10 +531,10 @@ $make_section_url = static function(string $section, int $bid): string {
         <div class="row align-items-center g-2">
             <div class="col-12 col-md-3 col-lg-3">
                 <div class="hng-logo-area">
-                    <img src="<?php echo $logo_web_path_html; ?>"
+                    <img src="<?php echo htmlspecialchars($logo_web_path); ?>"
                          alt="<?php echo htmlspecialchars($pharmacy_name); ?> logo"
                          style="height:38px;width:38px;object-fit:contain;"
-                         onerror="this.src='../uploads/logos/default_logo.png';">
+                         onerror="this.src='uploads/logos/default_logo.png';">
                     <div>
                         <h5 class="mb-0 fw-bold text-white" style="font-size:1rem;line-height:1.1;">
                             <?php echo htmlspecialchars($pharmacy_name); ?>
@@ -903,7 +571,6 @@ $make_section_url = static function(string $section, int $bid): string {
 
 <script>
 (function(){
-    /* Mobile categories */
     const toggle = document.getElementById('mobileCategoryToggle');
     const menu = document.getElementById('mobileCategoryMenu');
     const chevron = document.getElementById('mobileCategoryChevron');
@@ -917,154 +584,5 @@ $make_section_url = static function(string $section, int $bid): string {
             }
         });
     }
-
-    /* Desktop Truemeds-style two-column mega menus.
-       The first group is visible immediately; hovering a group changes
-       only the right-hand column, exactly like the reference. */
-    document.querySelectorAll('.mega-item').forEach(function(item){
-        const panel = item.querySelector('.mega-panel');
-        if(!panel) return;
-
-        const sideLinks = panel.querySelectorAll('.mega-side-link');
-        const contents = panel.querySelectorAll('.mega-group-content');
-
-        function activate(key){
-            sideLinks.forEach(function(link){
-                link.classList.toggle('active', link.dataset.megaGroup === key);
-            });
-            contents.forEach(function(content){
-                content.classList.toggle('active', content.dataset.megaContent === key);
-            });
-        }
-
-        sideLinks.forEach(function(link){
-            link.addEventListener('mouseenter', function(){
-                activate(link.dataset.megaGroup);
-            });
-            link.addEventListener('focus', function(){
-                activate(link.dataset.megaGroup);
-            });
-        });
-
-        item.addEventListener('mouseenter', function(){
-            item.classList.add('menu-open');
-            const current = panel.querySelector('.mega-side-link.active') || sideLinks[0];
-            if(current) activate(current.dataset.megaGroup);
-        });
-
-        item.addEventListener('mouseleave', function(){
-            item.classList.remove('menu-open');
-        });
-
-        /* Clicking a top-level category opens its menu on desktop instead
-           of immediately navigating when it has subcategories. */
-        const trigger = item.querySelector('.mega-trigger');
-        if(trigger && sideLinks.length){
-            trigger.addEventListener('click', function(e){
-                if(window.innerWidth >= 992){
-                    e.preventDefault();
-                    const wasOpen = item.classList.contains('menu-open');
-                    document.querySelectorAll('.mega-item.menu-open').forEach(function(other){
-                        if(other !== item) other.classList.remove('menu-open');
-                    });
-                    item.classList.toggle('menu-open', !wasOpen);
-                    const current = panel.querySelector('.mega-side-link.active') || sideLinks[0];
-                    if(current) activate(current.dataset.megaGroup);
-                }
-            });
-        }
-    });
-
-
-    /* Mobile drawer + accordion navigation */
-    const mobileDrawer = document.getElementById('tmMobileDrawer');
-    const mobileBackdrop = document.getElementById('tmMobileBackdrop');
-    const mobileOpen = document.getElementById('tmMobileMenuOpen');
-    const mobileClose = document.getElementById('tmMobileMenuClose');
-
-    function openMobileDrawer(){
-        if(!mobileDrawer || !mobileBackdrop) return;
-        mobileDrawer.classList.add('open');
-        mobileBackdrop.classList.add('open');
-        document.body.style.overflow='hidden';
-    }
-    function closeMobileDrawer(){
-        if(!mobileDrawer || !mobileBackdrop) return;
-        mobileDrawer.classList.remove('open');
-        mobileBackdrop.classList.remove('open');
-        document.body.style.overflow='';
-    }
-    if(mobileOpen) mobileOpen.addEventListener('click', openMobileDrawer);
-    if(mobileClose) mobileClose.addEventListener('click', closeMobileDrawer);
-    const mobileAccountOpen = document.getElementById('tmMobileAccountOpen');
-    if(mobileAccountOpen) mobileAccountOpen.addEventListener('click', openMobileDrawer);
-    if(mobileBackdrop) mobileBackdrop.addEventListener('click', closeMobileDrawer);
-
-    document.querySelectorAll('.tm-mobile-accordion-btn').forEach(function(btn){
-        btn.addEventListener('click', function(){
-            const parent = btn.closest('.tm-mobile-accordion');
-            const wasOpen = parent.classList.contains('open');
-            document.querySelectorAll('.tm-mobile-accordion.open').forEach(function(other){
-                if(other !== parent) other.classList.remove('open');
-            });
-            parent.classList.toggle('open', !wasOpen);
-            const icon = btn.querySelector('.accordion-chevron');
-            if(icon) icon.className = 'mdi ' + (parent.classList.contains('open') ? 'mdi-chevron-up accordion-chevron' : 'mdi-chevron-down accordion-chevron');
-        });
-    });
-
-    document.querySelectorAll('.tm-mobile-subgroup-btn').forEach(function(btn){
-        btn.addEventListener('click', function(){
-            const group = btn.closest('.tm-mobile-subgroup');
-            const wasOpen = group.classList.contains('open');
-            const parent = group.closest('.tm-mobile-accordion-content');
-            if(parent){
-                parent.querySelectorAll('.tm-mobile-subgroup.open').forEach(function(other){
-                    if(other !== group) other.classList.remove('open');
-                });
-            }
-            group.classList.toggle('open', !wasOpen);
-            const icon = btn.querySelector('.mdi');
-            if(icon) icon.className = 'mdi ' + (group.classList.contains('open') ? 'mdi-chevron-up' : 'mdi-chevron-down');
-        });
-    });
-
-    const mobileBranchSheet = document.getElementById('tmMobileBranchSheet');
-    const mobileBranchBackdrop = document.getElementById('tmMobileBranchBackdrop');
-    const mobileBranchClose = document.getElementById('tmMobileBranchClose');
-    function openBranchSheet(){
-        if(!mobileBranchSheet || !mobileBranchBackdrop) return;
-        mobileBranchSheet.classList.add('open');
-        mobileBranchBackdrop.classList.add('open');
-        closeMobileDrawer();
-        document.body.style.overflow='hidden';
-    }
-    function closeBranchSheet(){
-        if(!mobileBranchSheet || !mobileBranchBackdrop) return;
-        mobileBranchSheet.classList.remove('open');
-        mobileBranchBackdrop.classList.remove('open');
-        document.body.style.overflow='';
-    }
-    function showBranchSelector(){ openBranchSheet(); }
-    if(mobileBranchClose) mobileBranchClose.addEventListener('click', closeBranchSheet);
-    if(mobileBranchBackdrop) mobileBranchBackdrop.addEventListener('click', closeBranchSheet);
-    document.querySelectorAll('.tm-mobile-branch-option').forEach(function(btn){
-        btn.addEventListener('click', function(){
-            const url = btn.getAttribute('data-branch-url');
-            if(url) window.location.href = url;
-        });
-    });
-    const mobileBranchOpen = document.getElementById('tmMobileBranchOpen');
-    const mobileBranchLink = document.getElementById('tmMobileBranchLink');
-    if(mobileBranchOpen) mobileBranchOpen.addEventListener('click', showBranchSelector);
-    if(mobileBranchLink) mobileBranchLink.addEventListener('click', showBranchSelector);
-
-    document.addEventListener('click', function(e){
-        if(!e.target.closest('.mega-item')){
-            document.querySelectorAll('.mega-item.menu-open').forEach(function(item){
-                item.classList.remove('menu-open');
-            });
-        }
-    });
 })();
 </script>
