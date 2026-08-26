@@ -156,7 +156,185 @@ if($action==='update_status'){
             $stockStmt->close();
         }
 
-        /* Change status only after successful stock deduction. */
+        /* ---------------------------------------------------------
+           COMPLETED ONLINE ORDER = RECORD REAL POS TRANSACTION
+
+           This runs ONLY when the order moves Processing -> Completed.
+           sale_date and created_at are NOW(), so Today's Transactions
+           shows the actual completion time, not the order placement time.
+
+           The stock deduction, sales record, sales items and status
+           change all share this transaction. If any step fails, all
+           changes roll back together.
+        --------------------------------------------------------- */
+        $saleId = null;
+
+        if ($status === 'Completed') {
+            $clientReference = 'ONLINE_ORDER_' . $orderId;
+            $issuedBy = 'Online Customer';
+            $saleTotal = round((float)($order['total_amount'] ?? 0), 2);
+            $zero = 0.00;
+
+            $orderPayment = trim((string)($order['payment_method'] ?? ''));
+            if ($orderPayment === 'Cash on Delivery') {
+                $onlinePaymentMethod = 'Online/Cash on Delivery';
+            } elseif ($orderPayment === 'Bank Transfer' || $orderPayment === 'Bank') {
+                $onlinePaymentMethod = 'Online/Bank Transfer';
+            } elseif ($orderPayment === 'Mobile Money') {
+                $onlinePaymentMethod = 'Online/Mobile Money';
+            } else {
+                throw new RuntimeException('Unable to determine the online payment method for this order.');
+            }
+
+            /* Prevent duplicate sales for the same completed order. */
+            $existingSaleStmt = $conn->prepare("
+                SELECT id
+                FROM sales
+                WHERE client_reference = ?
+                  AND pharmacy_id = ?
+                  AND branch_id = ?
+                LIMIT 1
+                FOR UPDATE
+            ");
+
+            if (!$existingSaleStmt) {
+                throw new RuntimeException('Unable to verify existing online transaction.');
+            }
+
+            $existingSaleStmt->bind_param(
+                'sii',
+                $clientReference,
+                $pharmacyId,
+                $branchId
+            );
+
+            if (!$existingSaleStmt->execute()) {
+                $existingSaleStmt->close();
+                throw new RuntimeException('Unable to verify existing online transaction.');
+            }
+
+            $existingSale = $existingSaleStmt->get_result()->fetch_assoc();
+            $existingSaleStmt->close();
+
+            if ($existingSale) {
+                $saleId = (int)$existingSale['id'];
+            } else {
+                $saleStmt = $conn->prepare("
+                    INSERT INTO sales (
+                        pharmacy_id,
+                        branch_id,
+                        issued_by,
+                        invoice,
+                        client_reference,
+                        total,
+                        payment,
+                        user_id,
+                        total_amount,
+                        subtotal,
+                        vat_amount,
+                        payment_method,
+                        amount_received,
+                        change_due,
+                        sale_date,
+                        created_at
+                    )
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())
+                ");
+
+                if (!$saleStmt) {
+                    throw new RuntimeException(
+                        'Unable to prepare completed online transaction: ' . $conn->error
+                    );
+                }
+
+                $saleStmt->bind_param(
+                    'iisssddidddsdd',
+                    $pharmacyId,
+                    $branchId,
+                    $issuedBy,
+                    $order['order_number'],
+                    $clientReference,
+                    $saleTotal,
+                    $saleTotal,
+                    $userId,
+                    $saleTotal,
+                    $saleTotal,
+                    $zero,
+                    $onlinePaymentMethod,
+                    $saleTotal,
+                    $zero
+                );
+
+                if (!$saleStmt->execute()) {
+                    $error = $saleStmt->error;
+                    $saleStmt->close();
+                    throw new RuntimeException(
+                        'Unable to record completed online transaction: ' . $error
+                    );
+                }
+
+                $saleId = (int)$conn->insert_id;
+                $saleStmt->close();
+
+                if ($saleId <= 0) {
+                    throw new RuntimeException('Completed online transaction was not recorded.');
+                }
+
+                $saleItemStmt = $conn->prepare("
+                    INSERT INTO sales_items (
+                        sale_id,
+                        pharmacy_id,
+                        branch_id,
+                        product_id,
+                        quantity,
+                        unit_price
+                    )
+                    SELECT
+                        ?,
+                        pharmacy_id,
+                        branch_id,
+                        product_id,
+                        quantity,
+                        price_at_purchase
+                    FROM clients_order_items
+                    WHERE order_id = ?
+                      AND pharmacy_id = ?
+                      AND branch_id = ?
+                    ORDER BY id ASC
+                ");
+
+                if (!$saleItemStmt) {
+                    throw new RuntimeException(
+                        'Unable to prepare completed online transaction items: ' . $conn->error
+                    );
+                }
+
+                $saleItemStmt->bind_param(
+                    'iiii',
+                    $saleId,
+                    $orderId,
+                    $pharmacyId,
+                    $branchId
+                );
+
+                if (!$saleItemStmt->execute()) {
+                    $error = $saleItemStmt->error;
+                    $saleItemStmt->close();
+                    throw new RuntimeException(
+                        'Unable to record completed online transaction items: ' . $error
+                    );
+                }
+
+                if ($saleItemStmt->affected_rows <= 0) {
+                    $saleItemStmt->close();
+                    throw new RuntimeException('Completed online transaction has no sale items.');
+                }
+
+                $saleItemStmt->close();
+            }
+        }
+
+        /* Change status only after stock deduction AND transaction recording succeed. */
         $stmt=$conn->prepare("
             UPDATE clients_orders
             SET status=?
@@ -184,7 +362,8 @@ if($action==='update_status'){
             'success'=>true,
             'message'=>$message,
             'status'=>$status,
-            'stock_deducted'=>($status==='Completed')
+            'stock_deducted'=>($status==='Completed'),
+            'sale_id'=>($status==='Completed' ? $saleId : null)
         ]);
 
     }catch(Throwable $e){
