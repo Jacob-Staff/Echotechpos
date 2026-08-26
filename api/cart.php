@@ -1483,154 +1483,17 @@ if ($clientId > 0) {
                 $itemStmt->close();
 
                 /* -----------------------------------------
-                   Record the online order in Today's Transactions.
+                   IMPORTANT: DO NOT create a sales transaction here.
 
-                   This creates the normal EchoTech sales header/items
-                   without deducting stock here. Stock remains under
-                   the Online Orders completion workflow.
+                   Placing an online order only creates a Pending
+                   clients_orders record and its order items.
+
+                   The sales + sales_items records, stock deduction,
+                   and transaction timestamp are created by
+                   online_orders.php ONLY when staff completes the
+                   order. This keeps Pending/Processing orders out
+                   of Today's Transactions.
                 ----------------------------------------- */
-                $onlinePaymentMethod = '';
-                if ($payment === 'Cash on Delivery') {
-                    $onlinePaymentMethod = 'Online/Cash on Delivery';
-                } elseif ($payment === 'Bank Transfer') {
-                    $onlinePaymentMethod = 'Online/Bank Transfer';
-                } elseif ($payment === 'Mobile Money') {
-                    $onlinePaymentMethod = 'Online/Mobile Money';
-                }
-
-                if ($onlinePaymentMethod === '') {
-                    throw new RuntimeException(
-                        'Unable to determine online payment mode.'
-                    );
-                }
-
-                $clientReference = 'ONLINE_ORDER:' . $orderId;
-                $issuedBy = 'Online Customer';
-
-                /*
-                 * IMPORTANT:
-                 * The existing EchoTech sales schema keeps `payment` as the legacy
-                 * payment-value field, while `payment_method` stores the mode.
-                 * For a newly placed online order the payment has not yet
-                 * been received, so keep payment/amount_received/change_due
-                 * at 0.00 and store the requested mode in payment_method.
-                 *
-                 * This INSERT deliberately has 13 bound parameters because
-                 * user_id is explicitly NULL and sale_date/created_at use NOW().
-                 */
-                $paymentValue = '';
-                $amountReceived = 0.00;
-                $changeDue = 0.00;
-                $vatAmount = 0.00;
-                $subtotalAmount = $orderTotal;
-                $totalAmount = $orderTotal;
-
-                $saleStmt = $conn->prepare("
-                    INSERT INTO sales (
-                        pharmacy_id,
-                        branch_id,
-                        issued_by,
-                        invoice,
-                        client_reference,
-                        total,
-                        payment,
-                        user_id,
-                        total_amount,
-                        subtotal,
-                        vat_amount,
-                        payment_method,
-                        amount_received,
-                        change_due,
-                        sale_date,
-                        created_at
-                    )
-                    VALUES (?,?,?,?,?,?,?,NULL,?,?,?,?,?,?,NOW(),NOW())
-                ");
-
-                if (!$saleStmt) {
-                    throw new RuntimeException(
-                        'Unable to prepare online transaction: ' . $conn->error
-                    );
-                }
-
-                /*
-                 * 13 placeholders = 13 types/variables:
-                 * ii sss d s d d d s d d
-                 */
-                $saleStmt->bind_param(
-                    'iisssdsdddsdd',
-                    $pharmacyId,
-                    $branchId,
-                    $issuedBy,
-                    $orderNumber,
-                    $clientReference,
-                    $orderTotal,
-                    $paymentValue,
-                    $totalAmount,
-                    $subtotalAmount,
-                    $vatAmount,
-                    $onlinePaymentMethod,
-                    $amountReceived,
-                    $changeDue
-                );
-
-                if (!$saleStmt->execute()) {
-                    throw new RuntimeException(
-                        'Unable to record online transaction: ' .
-                        $saleStmt->error
-                    );
-                }
-
-                $saleId = (int)$conn->insert_id;
-                $saleStmt->close();
-
-                if ($saleId <= 0) {
-                    throw new RuntimeException(
-                        'Online transaction was not recorded.'
-                    );
-                }
-
-                $saleItemStmt = $conn->prepare("
-                    INSERT INTO sales_items (
-                        sale_id,
-                        pharmacy_id,
-                        branch_id,
-                        product_id,
-                        quantity,
-                        unit_price
-                    )
-                    VALUES (?,?,?,?,?,?)
-                ");
-
-                if (!$saleItemStmt) {
-                    throw new RuntimeException(
-                        'Unable to prepare online transaction items.'
-                    );
-                }
-
-                foreach ($validated as $item) {
-                    $saleProductId = (int)$item['id'];
-                    $saleQty = (int)$item['qty'];
-                    $saleUnitPrice = (float)$item['price'];
-
-                    $saleItemStmt->bind_param(
-                        'iiiiid',
-                        $saleId,
-                        $pharmacyId,
-                        $branchId,
-                        $saleProductId,
-                        $saleQty,
-                        $saleUnitPrice
-                    );
-
-                    if (!$saleItemStmt->execute()) {
-                        throw new RuntimeException(
-                            'Unable to record online transaction item.'
-                        );
-                    }
-                }
-
-                $saleItemStmt->close();
 
                 /*
                  * Remove the persistent cart inside the same transaction.
@@ -1655,8 +1518,6 @@ if ($clientId > 0) {
                         'order_number'  => $orderNumber,
                         'total'         => $orderTotal,
                         'payment_method'=> $payment,
-                        'transaction_payment_method' => $onlinePaymentMethod,
-                        'sale_id'       => $saleId,
                         'branch_id'     => $branchId,
                         'pharmacy_id'   => $pharmacyId,
                         'cart_count'    => 0,
