@@ -111,6 +111,216 @@ if (empty($_SESSION['online_cart_csrf'])) {
 $csrf = (string)$_SESSION['online_cart_csrf'];
 
 /* ---------------------------------------------------------
+   PERSISTENT CUSTOMER CART
+   Logged-in carts live in the database so logout/login does
+   not destroy them. Guest carts remain session-based.
+--------------------------------------------------------- */
+function bige_cart_persist_ensure_table(mysqli $db): void
+{
+    $sql = "CREATE TABLE IF NOT EXISTS online_cart_items (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                client_id INT NOT NULL,
+                pharmacy_id INT NOT NULL,
+                branch_id INT NOT NULL,
+                product_id INT NOT NULL,
+                quantity INT NOT NULL DEFAULT 1,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                UNIQUE KEY uq_online_cart_client_branch_product (client_id, branch_id, product_id),
+                KEY idx_online_cart_client (client_id),
+                KEY idx_online_cart_branch (branch_id),
+                KEY idx_online_cart_created (created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    if (!$db->query($sql)) {
+        throw new RuntimeException('Unable to initialize the online cart storage.');
+    }
+}
+
+function bige_cart_persist_cleanup(mysqli $db, int $clientId): void
+{
+    if ($clientId <= 0) return;
+
+    $stmt = $db->prepare(
+        "DELETE FROM online_cart_items
+         WHERE client_id = ?
+           AND created_at < DATE_SUB(NOW(), INTERVAL 1 MONTH)"
+    );
+
+    if (!$stmt) {
+        throw new RuntimeException('Unable to clean expired cart items.');
+    }
+
+    $stmt->bind_param('i', $clientId);
+    $stmt->execute();
+    $stmt->close();
+}
+
+function bige_cart_persist_delete_item(mysqli $db, int $clientId, int $branchId, int $productId): void
+{
+    if ($clientId <= 0 || $branchId <= 0 || $productId <= 0) return;
+
+    $stmt = $db->prepare(
+        "DELETE FROM online_cart_items
+         WHERE client_id = ? AND branch_id = ? AND product_id = ?"
+    );
+    if (!$stmt) return;
+
+    $stmt->bind_param('iii', $clientId, $branchId, $productId);
+    $stmt->execute();
+    $stmt->close();
+}
+
+function bige_cart_persist_upsert(
+    mysqli $db,
+    int $clientId,
+    int $pharmacyId,
+    int $branchId,
+    int $productId,
+    int $qty
+): void {
+    if ($clientId <= 0 || $branchId <= 0 || $productId <= 0 || $qty <= 0) return;
+
+    $stmt = $db->prepare(
+        "INSERT INTO online_cart_items
+            (client_id, pharmacy_id, branch_id, product_id, quantity)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+            quantity = VALUES(quantity),
+            pharmacy_id = VALUES(pharmacy_id),
+            updated_at = CURRENT_TIMESTAMP"
+    );
+
+    if (!$stmt) {
+        throw new RuntimeException('Unable to save the persistent cart item.');
+    }
+
+    $stmt->bind_param('iiiii', $clientId, $pharmacyId, $branchId, $productId, $qty);
+    $stmt->execute();
+    $stmt->close();
+}
+
+function bige_cart_persist_clear_branch(mysqli $db, int $clientId, int $branchId): void
+{
+    if ($clientId <= 0 || $branchId <= 0) return;
+
+    $stmt = $db->prepare(
+        "DELETE FROM online_cart_items
+         WHERE client_id = ? AND branch_id = ?"
+    );
+    if (!$stmt) return;
+
+    $stmt->bind_param('ii', $clientId, $branchId);
+    $stmt->execute();
+    $stmt->close();
+}
+
+function bige_cart_persist_load(
+    mysqli $db,
+    int $clientId,
+    int $pharmacyId,
+    int $branchId,
+    array $sessionCart = []
+): array {
+    if ($clientId <= 0 || $branchId <= 0) {
+        return $sessionCart;
+    }
+
+    bige_cart_persist_cleanup($db, $clientId);
+
+    /* Preserve anything already in the current session when a user logs in. */
+    foreach ($sessionCart as $productId => $sessionItem) {
+        $productId = (int)$productId;
+        $qty = max(0, (int)($sessionItem['qty'] ?? 0));
+        if ($productId > 0 && $qty > 0) {
+            bige_cart_persist_upsert(
+                $db,
+                $clientId,
+                $pharmacyId,
+                $branchId,
+                $productId,
+                $qty
+            );
+        }
+    }
+
+    $cart = [];
+
+    $stmt = $db->prepare(
+        "SELECT product_id, quantity
+         FROM online_cart_items
+         WHERE client_id = ?
+           AND pharmacy_id = ?
+           AND branch_id = ?
+         ORDER BY created_at ASC"
+    );
+
+    if (!$stmt) {
+        return $sessionCart;
+    }
+
+    $stmt->bind_param('iii', $clientId, $pharmacyId, $branchId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    while ($row = $result->fetch_assoc()) {
+        $productId = (int)$row['product_id'];
+        $requestedQty = max(0, (int)$row['quantity']);
+
+        if ($productId <= 0 || $requestedQty <= 0) {
+            bige_cart_persist_delete_item($db, $clientId, $branchId, $productId);
+            continue;
+        }
+
+        $product = bige_cart_product($db, $productId, $branchId);
+
+        /* Product is gone, offline, inactive, expired or out of stock. */
+        if (!$product) {
+            bige_cart_persist_delete_item($db, $clientId, $branchId, $productId);
+            continue;
+        }
+
+        $stock = (int)$product['quantity'];
+        $qty = min($requestedQty, $stock);
+
+        if ($qty <= 0) {
+            bige_cart_persist_delete_item($db, $clientId, $branchId, $productId);
+            continue;
+        }
+
+        if ($qty !== $requestedQty) {
+            bige_cart_persist_upsert(
+                $db,
+                $clientId,
+                $pharmacyId,
+                $branchId,
+                $productId,
+                $qty
+            );
+        }
+
+        $cart[$productId] = [
+            'id'       => (int)$product['id'],
+            'name'     => (string)$product['item_name'],
+            'price'    => bige_cart_price($product),
+            'qty'      => $qty,
+            'branch'   => $branchId,
+            'image'    => (string)($product['image'] ?: ($product['product_image'] ?? '')),
+            'category' => (string)($product['category'] ?? ''),
+            'strength' => (string)($product['strength'] ?? ''),
+            'stock'    => $stock
+        ];
+    }
+
+    $stmt->close();
+
+    return $cart;
+}
+
+bige_cart_persist_ensure_table($conn);
+
+/* ---------------------------------------------------------
    CART HELPERS
 --------------------------------------------------------- */
 function bige_cart_branch(mysqli $db, int $branchId): array
@@ -347,6 +557,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $cart = bige_cart_get($branchId);
 
+        $clientId = (int)($_SESSION['client_id'] ?? 0);
+        if ($clientId > 0) {
+            $cart = bige_cart_persist_load(
+                $conn,
+                $clientId,
+                $pharmacyId,
+                $branchId,
+                $cart
+            );
+            $_SESSION['carts'][$branchId] = $cart;
+        }
+
         /* -------------------------------------------------
            ADD
         ------------------------------------------------- */
@@ -415,6 +637,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $_SESSION['carts'][$branchId] = $cart;
 
+            if ($clientId > 0) {
+                bige_cart_persist_upsert($conn, $clientId, $pharmacyId, $branchId, $productId, $newQty);
+            }
+
             bige_cart_json(
                 true,
                 'Item added to cart.',
@@ -462,6 +688,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $_SESSION['carts'][$branchId] = $cart;
 
+                if ($clientId > 0) {
+                    bige_cart_persist_delete_item($conn, $clientId, $branchId, $productId);
+                }
+
                 bige_cart_json(
                     true,
                     'Item removed.',
@@ -480,6 +710,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 unset($cart[$productId]);
 
                 $_SESSION['carts'][$branchId] = $cart;
+
+                if ($clientId > 0) {
+                    bige_cart_persist_delete_item($conn, $clientId, $branchId, $productId);
+                }
 
                 bige_cart_fail(
                     'This product is no longer available.'
@@ -503,6 +737,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $_SESSION['carts'][$branchId] = $cart;
 
+            if ($clientId > 0) {
+                bige_cart_persist_upsert($conn, $clientId, $pharmacyId, $branchId, $productId, $qty);
+            }
+
             bige_cart_json(
                 true,
                 'Cart updated.',
@@ -525,6 +763,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $_SESSION['carts'][$branchId] = $cart;
 
+            if ($clientId > 0) {
+                bige_cart_persist_delete_item($conn, $clientId, $branchId, $productId);
+            }
+
             bige_cart_json(
                 true,
                 'Item removed.',
@@ -538,6 +780,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'clear') {
 
             $_SESSION['carts'][$branchId] = [];
+
+            if ($clientId > 0) {
+                bige_cart_persist_clear_branch($conn, $clientId, $branchId);
+            }
 
             bige_cart_json(
                 true,
@@ -1047,6 +1293,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $conn->commit();
 
                 $_SESSION['carts'][$branchId] = [];
+                bige_cart_persist_clear_branch($conn, $clientId, $branchId);
 
                 bige_cart_json(
                     true,
