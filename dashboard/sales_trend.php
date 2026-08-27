@@ -339,7 +339,7 @@ require_once "../includes/head.php";
                         <h3 class="mb-1 fw-bold">Sales Trend</h3>
                         <div class="small text-muted">
                             <strong><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></strong>
-                            <span class="mx-1">â€¢</span>
+                            <span class="mx-1">Ã¢â‚¬Â¢</span>
                             <?= htmlspecialchars($display_branch_name) ?>
                         </div>
                     </div>
@@ -395,11 +395,28 @@ require_once "../includes/head.php";
                         <div class="d-flex justify-content-between align-items-start">
                             <div>
                                 <div class="kpi-label">Best Period</div>
-                                <div class="kpi-value" id="best-period">â€”</div>
+                                <div class="kpi-value" id="best-period">Ã¢â‚¬â€</div>
                                 <small id="best-period-value">No sales yet</small>
                             </div>
                             <div class="kpi-icon"><i class="fas fa-trophy"></i></div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-md-6 col-xl-3">
+                    <div class="trend-card p-3">
+                        <div class="small text-muted fw-bold text-uppercase">Online Orders</div>
+                        <div class="fs-4 fw-bold text-info" id="online-revenue">K 0.00</div>
+                        <div class="small text-muted"><span id="online-transactions">0</span> transactions</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <div class="trend-card p-3">
+                        <div class="small text-muted fw-bold text-uppercase">POS Sales</div>
+                        <div class="fs-4 fw-bold text-secondary" id="pos-revenue">K 0.00</div>
+                        <div class="small text-muted"><span id="pos-transactions">0</span> transactions</div>
                     </div>
                 </div>
             </div>
@@ -487,7 +504,7 @@ require_once "../includes/head.php";
                     <div>
                         <h5 class="fw-bold mb-1">Sales Performance</h5>
                         <div class="chart-legend-note">
-                            Revenue and transaction volume for the selected period.
+                            Revenue trend split between Online Orders and POS Sales.
                         </div>
                     </div>
                     <div class="small text-muted">
@@ -505,7 +522,7 @@ require_once "../includes/head.php";
                     <div class="col-12 col-md-4">
                         <div class="insight-box">
                             <div class="small text-muted">Highest Revenue Period</div>
-                            <div class="insight-value" id="insight-highest">â€”</div>
+                            <div class="insight-value" id="insight-highest">Ã¢â‚¬â€</div>
                         </div>
                     </div>
                     <div class="col-12 col-md-4">
@@ -517,7 +534,7 @@ require_once "../includes/head.php";
                     <div class="col-12 col-md-4">
                         <div class="insight-box">
                             <div class="small text-muted">Selected Date Range</div>
-                            <div class="insight-value" id="insight-range">â€”</div>
+                            <div class="insight-value" id="insight-range">Ã¢â‚¬â€</div>
                         </div>
                     </div>
                 </div>
@@ -671,9 +688,13 @@ require_once "../includes/head.php";
             $('total-revenue').textContent = 'K 0.00';
             $('total-transactions').textContent = '0';
             $('avg-ticket').textContent = 'K 0.00';
-            $('best-period').textContent = 'â€”';
+            $('online-revenue').textContent = 'K 0.00';
+            $('pos-revenue').textContent = 'K 0.00';
+            $('online-transactions').textContent = '0';
+            $('pos-transactions').textContent = '0';
+            $('best-period').textContent = 'Ã¢â‚¬â€';
             $('best-period-value').textContent = 'No sales yet';
-            renderChart([], [], []);
+            renderChart([], [], [], []);
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i> APPLY FILTERS';
@@ -688,10 +709,16 @@ require_once "../includes/head.php";
         const labels = Array.isArray(data.labels) ? data.labels : [];
         const totals = Array.isArray(data.totals) ? data.totals.map(Number) : [];
         const counts = Array.isArray(data.counts) ? data.counts.map(Number) : [];
+        const onlineTotals = Array.isArray(data.online_totals) ? data.online_totals.map(Number) : [];
+        const posTotals = Array.isArray(data.pos_totals) ? data.pos_totals.map(Number) : [];
 
         $('total-revenue').textContent = formatMoney(revenue);
         $('total-transactions').textContent = transactions.toLocaleString('en-ZM');
         $('avg-ticket').textContent = formatMoney(average);
+        $('online-revenue').textContent = formatMoney(data.total_online_revenue || 0);
+        $('pos-revenue').textContent = formatMoney(data.total_pos_revenue || 0);
+        $('online-transactions').textContent = Number(data.total_online_transactions || 0).toLocaleString('en-ZM');
+        $('pos-transactions').textContent = Number(data.total_pos_transactions || 0).toLocaleString('en-ZM');
 
         let bestIndex = -1;
         let bestValue = 0;
@@ -704,24 +731,24 @@ require_once "../includes/head.php";
         });
 
         if (bestIndex >= 0) {
-            $('best-period').textContent = labels[bestIndex] || 'â€”';
+            $('best-period').textContent = labels[bestIndex] || 'Ã¢â‚¬â€';
             $('best-period-value').textContent = formatMoney(bestValue);
-            $('insight-highest').textContent = `${labels[bestIndex]} â€” ${formatMoney(bestValue)}`;
+            $('insight-highest').textContent = `${labels[bestIndex]} Ã¢â‚¬â€ ${formatMoney(bestValue)}`;
             $('insight-count').textContent = (counts[bestIndex] || 0).toLocaleString('en-ZM');
         } else {
-            $('best-period').textContent = 'â€”';
+            $('best-period').textContent = 'Ã¢â‚¬â€';
             $('best-period-value').textContent = 'No sales yet';
             $('insight-highest').textContent = 'No sales recorded';
             $('insight-count').textContent = '0';
         }
 
         $('insight-range').textContent =
-            `${$('startDate').value} â†’ ${$('endDate').value}`;
+            `${$('startDate').value} Ã¢â€ â€™ ${$('endDate').value}`;
 
-        renderChart(labels, totals, counts);
+        renderChart(labels, totals, onlineTotals, posTotals);
     }
 
-    function renderChart(labels, totals, counts) {
+    function renderChart(labels, totals, onlineTotals, posTotals) {
         const canvas = $('salesTrendChart');
 
         if (trendChart) {
@@ -734,30 +761,39 @@ require_once "../includes/head.php";
                 labels,
                 datasets: [
                     {
-                        label: 'Revenue (ZMW)',
+                        label: 'Total Revenue (ZMW)',
                         data: totals,
                         borderColor: '#1677ff',
-                        backgroundColor: 'rgba(22,119,255,.10)',
+                        backgroundColor: 'rgba(22,119,255,.08)',
                         borderWidth: 3,
                         fill: true,
                         tension: .35,
                         pointRadius: 4,
                         pointHoverRadius: 6,
-                        pointBackgroundColor: '#1677ff',
-                        yAxisID: 'revenue'
+                        pointBackgroundColor: '#1677ff'
                     },
                     {
-                        label: 'Transactions',
-                        data: counts,
-                        borderColor: '#ff9800',
+                        label: 'Online Orders (ZMW)',
+                        data: onlineTotals,
+                        borderColor: '#0dcaf0',
+                        backgroundColor: 'transparent',
+                        borderWidth: 3,
+                        tension: .35,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#0dcaf0'
+                    },
+                    {
+                        label: 'POS Sales (ZMW)',
+                        data: posTotals,
+                        borderColor: '#6c757d',
                         backgroundColor: 'transparent',
                         borderWidth: 3,
                         borderDash: [7, 5],
                         tension: .35,
                         pointRadius: 4,
                         pointHoverRadius: 6,
-                        pointBackgroundColor: '#ff9800',
-                        yAxisID: 'transactions'
+                        pointBackgroundColor: '#6c757d'
                     }
                 ]
             },
@@ -779,18 +815,13 @@ require_once "../includes/head.php";
                     tooltip: {
                         callbacks: {
                             label(context) {
-                                if (context.dataset.yAxisID === 'revenue') {
-                                    return ` Revenue: ${formatMoney(context.parsed.y)}`;
-                                }
-                                return ` Transactions: ${context.parsed.y}`;
+                                return ` ${context.dataset.label}: ${formatMoney(context.parsed.y)}`;
                             }
                         }
                     }
                 },
                 scales: {
-                    revenue: {
-                        type: 'linear',
-                        position: 'left',
+                    y: {
                         beginAtZero: true,
                         title: {
                             display: true,
@@ -798,21 +829,6 @@ require_once "../includes/head.php";
                         },
                         grid: {
                             color: '#edf1f5'
-                        }
-                    },
-                    transactions: {
-                        type: 'linear',
-                        position: 'right',
-                        beginAtZero: true,
-                        ticks: {
-                            precision: 0
-                        },
-                        title: {
-                            display: true,
-                            text: 'Transactions'
-                        },
-                        grid: {
-                            drawOnChartArea: false
                         }
                     },
                     x: {
@@ -823,9 +839,7 @@ require_once "../includes/head.php";
                 }
             }
         });
-    }
-
-    $('filter-btn').addEventListener('click', loadTrendData);
+.addEventListener('click', loadTrendData);
 
     $('reset-btn').addEventListener('click', () => {
         $('search').value = '';
