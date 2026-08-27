@@ -158,7 +158,41 @@ if ($hasItemFilter) {
         SELECT
             {$labelSql} AS sale_label,
             COALESCE(SUM(si.quantity * COALESCE(si.unit_price, st.price)), 0) AS total_sales,
-            COUNT(DISTINCT s.id) AS transactions
+            COALESCE(SUM(
+                CASE
+                    WHEN (
+                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                    )
+                    THEN si.quantity * COALESCE(si.unit_price, st.price)
+                    ELSE 0
+                END
+            ), 0) AS online_sales,
+            COALESCE(SUM(
+                CASE
+                    WHEN NOT (
+                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                    )
+                    THEN si.quantity * COALESCE(si.unit_price, st.price)
+                    ELSE 0
+                END
+            ), 0) AS pos_sales,
+            COUNT(DISTINCT s.id) AS transactions,
+            COUNT(DISTINCT CASE
+                WHEN (
+                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                )
+                THEN s.id
+            END) AS online_transactions,
+            COUNT(DISTINCT CASE
+                WHEN NOT (
+                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                )
+                THEN s.id
+            END) AS pos_transactions
         FROM sales s
         INNER JOIN sales_items si
             ON si.sale_id = s.id
@@ -201,7 +235,41 @@ if ($hasItemFilter) {
         SELECT
             {$labelSql} AS sale_label,
             COALESCE(SUM(COALESCE(s.total_amount, s.total, 0)), 0) AS total_sales,
-            COUNT(s.id) AS transactions
+            COALESCE(SUM(
+                CASE
+                    WHEN (
+                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                    )
+                    THEN COALESCE(s.total_amount, s.total, 0)
+                    ELSE 0
+                END
+            ), 0) AS online_sales,
+            COALESCE(SUM(
+                CASE
+                    WHEN NOT (
+                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                    )
+                    THEN COALESCE(s.total_amount, s.total, 0)
+                    ELSE 0
+                END
+            ), 0) AS pos_sales,
+            COUNT(s.id) AS transactions,
+            COUNT(CASE
+                WHEN (
+                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                )
+                THEN 1
+            END) AS online_transactions,
+            COUNT(CASE
+                WHEN NOT (
+                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                )
+                THEN 1
+            END) AS pos_transactions
         FROM sales s
         WHERE {$whereSql}
         GROUP BY {$groupBy}
@@ -247,19 +315,39 @@ $result = $stmt->get_result();
 $labels = [];
 $totals = [];
 $counts = [];
+$onlineTotals = [];
+$posTotals = [];
+$onlineCounts = [];
+$posCounts = [];
 $totalRevenue = 0.0;
 $totalTransactions = 0;
+$totalOnlineRevenue = 0.0;
+$totalPosRevenue = 0.0;
+$totalOnlineTransactions = 0;
+$totalPosTransactions = 0;
 
 while ($row = $result->fetch_assoc()) {
     $amount = (float)$row['total_sales'];
     $count  = (int)$row['transactions'];
+    $onlineAmount = (float)($row['online_sales'] ?? 0);
+    $posAmount = (float)($row['pos_sales'] ?? 0);
+    $onlineCount = (int)($row['online_transactions'] ?? 0);
+    $posCount = (int)($row['pos_transactions'] ?? 0);
 
     $labels[] = $row['sale_label'];
     $totals[] = round($amount, 2);
     $counts[] = $count;
+    $onlineTotals[] = round($onlineAmount, 2);
+    $posTotals[] = round($posAmount, 2);
+    $onlineCounts[] = $onlineCount;
+    $posCounts[] = $posCount;
 
     $totalRevenue += $amount;
     $totalTransactions += $count;
+    $totalOnlineRevenue += $onlineAmount;
+    $totalPosRevenue += $posAmount;
+    $totalOnlineTransactions += $onlineCount;
+    $totalPosTransactions += $posCount;
 }
 
 $stmt->close();
@@ -277,8 +365,16 @@ echo json_encode([
     'labels' => $labels,
     'totals' => $totals,
     'counts' => $counts,
+    'online_totals' => $onlineTotals,
+    'pos_totals' => $posTotals,
+    'online_counts' => $onlineCounts,
+    'pos_counts' => $posCounts,
     'total_revenue' => round($totalRevenue, 2),
-    'total_transactions' => $totalTransactions
+    'total_transactions' => $totalTransactions,
+    'total_online_revenue' => round($totalOnlineRevenue, 2),
+    'total_pos_revenue' => round($totalPosRevenue, 2),
+    'total_online_transactions' => $totalOnlineTransactions,
+    'total_pos_transactions' => $totalPosTransactions
 ], JSON_UNESCAPED_UNICODE);
 
 exit;
