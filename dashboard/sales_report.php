@@ -551,7 +551,7 @@ require_once "../includes/head.php";
     .table-custom {
 
         min-width:
-            700px;
+            980px;
     }
 
 
@@ -1629,6 +1629,18 @@ require_once "../includes/head.php";
                                     <th
                                         class="text-center"
                                     >
+                                        Payment
+                                    </th>
+
+                                    <th
+                                        class="text-center"
+                                    >
+                                        Source
+                                    </th>
+
+                                    <th
+                                        class="text-center"
+                                    >
                                         Date
                                     </th>
 
@@ -1644,7 +1656,7 @@ require_once "../includes/head.php";
                                 <tr>
 
                                     <td
-                                        colspan="6"
+                                        colspan="8"
                                         class="
                                             text-center
                                             py-4
@@ -2050,7 +2062,7 @@ function loadSales() {
         `
         <tr>
             <td
-                colspan="6"
+                colspan="8"
                 class="text-center py-4 text-muted"
             >
                 <i
@@ -2135,7 +2147,7 @@ function loadSales() {
                         `
                         <tr>
                             <td
-                                colspan="6"
+                                colspan="8"
                                 class="
                                     text-center
                                     text-danger
@@ -2201,6 +2213,16 @@ function loadSales() {
                             const saleDate =
                                 escapeHtml(
                                     s.date
+                                );
+
+                            const paymentMethod =
+                                escapeHtml(
+                                    s.payment_method || 'Not specified'
+                                );
+
+                            const source =
+                                escapeHtml(
+                                    s.source || 'POS Sale'
                                 );
 
 
@@ -2279,6 +2301,36 @@ function loadSales() {
                                     <td
                                         class="
                                             text-center
+                                            small
+                                        "
+                                    >
+                                        <span
+                                            class="badge bg-light text-dark border"
+                                        >
+                                            ${paymentMethod}
+                                        </span>
+                                    </td>
+
+                                    <td
+                                        class="
+                                            text-center
+                                            small
+                                        "
+                                    >
+                                        <span
+                                            class="badge ${
+                                                source === 'Online Order'
+                                                    ? 'bg-info text-dark'
+                                                    : 'bg-secondary'
+                                            }"
+                                        >
+                                            ${source}
+                                        </span>
+                                    </td>
+
+                                    <td
+                                        class="
+                                            text-center
                                             text-muted
                                             small
                                         "
@@ -2312,7 +2364,7 @@ function loadSales() {
                         <tr>
 
                             <td
-                                colspan="6"
+                                colspan="8"
                                 class="
                                     text-center
                                     py-4
@@ -2474,7 +2526,7 @@ function loadSales() {
                     <tr>
 
                         <td
-                            colspan="6"
+                            colspan="8"
                             class="
                                 text-center
                                 text-danger
