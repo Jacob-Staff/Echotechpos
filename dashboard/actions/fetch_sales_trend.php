@@ -95,48 +95,84 @@ switch ($trendType) {
         break;
 }
 
+
+/*
+|--------------------------------------------------------------------------
+| BUILD FILTERS
+|--------------------------------------------------------------------------
+|
+| IMPORTANT:
+| The sales table is the authoritative transaction table.
+| We aggregate one row per sale, not one row per sales_items row.
+|
+| Revenue:
+|   Prefer total_amount.
+|   Fall back to total for older POS records where total_amount is 0/NULL.
+|
+| Online:
+|   client_reference LIKE ONLINE_ORDER:%
+|   OR payment_method LIKE Online/%
+|--------------------------------------------------------------------------
+*/
+
 $where = [
     "s.pharmacy_id = ?",
     "s.branch_id = ?",
-    "DATE(s.sale_date) BETWEEN ? AND ?"
+    "s.sale_date >= ?",
+    "s.sale_date < DATE_ADD(?, INTERVAL 1 DAY)"
 ];
 
-$params = [$pharmacy_id, $branch_id, $startDate, $endDate];
-$types  = "iiss";
+$params = [
+    $pharmacy_id,
+    $branch_id,
+    $startDate . ' 00:00:00',
+    $endDate . ' 00:00:00'
+];
 
-/*
- * We use EXISTS for item/category/search filters.
- * This avoids multiplying a sale when an invoice contains several items.
- */
-if ($category !== '' || $search !== '') {
-    $exists = [
-        "si.sale_id = s.id",
-        "si.pharmacy_id = s.pharmacy_id",
-        "si.branch_id = s.branch_id",
-        "st.id = si.product_id"
-    ];
+$types = "iiss";
 
-    if ($category !== '') {
-        $exists[] = "st.category = ?";
-        $params[] = $category;
-        $types .= "s";
-    }
-
-    if ($search !== '') {
-        $exists[] = "(s.invoice LIKE ? OR st.item_name LIKE ? OR st.barcode LIKE ?)";
-        $searchParam = "%{$search}%";
-        $params[] = $searchParam;
-        $params[] = $searchParam;
-        $params[] = $searchParam;
-        $types .= "sss";
-    }
-
+if ($category !== '') {
     $where[] = "EXISTS (
         SELECT 1
-        FROM sales_items si
-        INNER JOIN store_items st ON st.id = si.product_id
-        WHERE " . implode(" AND ", $exists) . "
+        FROM sales_items si_cat
+        INNER JOIN store_items st_cat
+            ON st_cat.id = si_cat.product_id
+        WHERE si_cat.sale_id = s.id
+          AND si_cat.pharmacy_id = s.pharmacy_id
+          AND si_cat.branch_id = s.branch_id
+          AND st_cat.category = ?
     )";
+
+    $params[] = $category;
+    $types .= "s";
+}
+
+if ($search !== '') {
+    $searchLike = '%' . $search . '%';
+
+    $where[] = "(
+        s.invoice LIKE ?
+        OR s.client_reference LIKE ?
+        OR EXISTS (
+            SELECT 1
+            FROM sales_items si_search
+            INNER JOIN store_items st_search
+                ON st_search.id = si_search.product_id
+            WHERE si_search.sale_id = s.id
+              AND si_search.pharmacy_id = s.pharmacy_id
+              AND si_search.branch_id = s.branch_id
+              AND (
+                  st_search.item_name LIKE ?
+                  OR st_search.barcode LIKE ?
+              )
+        )
+    )";
+
+    $params[] = $searchLike;
+    $params[] = $searchLike;
+    $params[] = $searchLike;
+    $params[] = $searchLike;
+    $types .= "ssss";
 }
 
 if ($payment_method !== '') {
@@ -147,135 +183,115 @@ if ($payment_method !== '') {
 
 $whereSql = implode(" AND ", $where);
 
-/*
- * When a category/product filter is active, revenue is calculated from
- * the matching sale lines. Otherwise the authoritative sale total is used.
- */
-$hasItemFilter = ($category !== '' || $search !== '');
+switch ($trendType) {
+    case 'daily':
+        $groupBy = "DATE(s.sale_date)";
+        $labelSql = "DATE_FORMAT(s.sale_date, '%d %b %Y')";
+        break;
 
-if ($hasItemFilter) {
-    $sql = "
-        SELECT
-            {$labelSql} AS sale_label,
-            COALESCE(SUM(si.quantity * COALESCE(si.unit_price, st.price)), 0) AS total_sales,
-            COALESCE(SUM(
-                CASE
-                    WHEN (
-                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
-                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
-                    )
-                    THEN si.quantity * COALESCE(si.unit_price, st.price)
-                    ELSE 0
-                END
-            ), 0) AS online_sales,
-            COALESCE(SUM(
-                CASE
-                    WHEN NOT (
-                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
-                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
-                    )
-                    THEN si.quantity * COALESCE(si.unit_price, st.price)
-                    ELSE 0
-                END
-            ), 0) AS pos_sales,
-            COUNT(DISTINCT s.id) AS transactions,
-            COUNT(DISTINCT CASE
-                WHEN (
-                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
-                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
-                )
-                THEN s.id
-            END) AS online_transactions,
-            COUNT(DISTINCT CASE
-                WHEN NOT (
-                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
-                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
-                )
-                THEN s.id
-            END) AS pos_transactions
-        FROM sales s
-        INNER JOIN sales_items si
-            ON si.sale_id = s.id
-           AND si.pharmacy_id = s.pharmacy_id
-           AND si.branch_id = s.branch_id
-        INNER JOIN store_items st
-            ON st.id = si.product_id
-        WHERE {$whereSql}
-          AND (
-              ? = ''
-              OR st.category = ?
-          )
-          AND (
-              ? = ''
-              OR s.invoice LIKE ?
-              OR st.item_name LIKE ?
-              OR st.barcode LIKE ?
-          )
-        GROUP BY {$groupBy}
-        ORDER BY MIN(s.sale_date) ASC
-    ";
+    case 'monthly':
+        $groupBy = "YEAR(s.sale_date), MONTH(s.sale_date)";
+        $labelSql = "DATE_FORMAT(s.sale_date, '%b %Y')";
+        break;
 
-    /*
-     * The EXISTS filter above determines which sales qualify, while these
-     * additional conditions determine which line values contribute to the
-     * filtered revenue.
-     */
-    $params[] = $category;
-    $params[] = $category;
-    $types .= "ss";
+    case 'yearly':
+        $groupBy = "YEAR(s.sale_date)";
+        $labelSql = "CAST(YEAR(s.sale_date) AS CHAR)";
+        break;
 
-    $params[] = $search;
-    $searchParam = "%{$search}%";
-    $params[] = $searchParam;
-    $params[] = $searchParam;
-    $params[] = $searchParam;
-    $types .= "ssss";
-} else {
-    $sql = "
-        SELECT
-            {$labelSql} AS sale_label,
-            COALESCE(SUM(COALESCE(s.total_amount, 0)), 0) AS total_sales,
-            COALESCE(SUM(
-                CASE
-                    WHEN (
-                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
-                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
-                    )
-                    THEN COALESCE(s.total_amount, 0)
-                    ELSE 0
-                END
-            ), 0) AS online_sales,
-            COALESCE(SUM(
-                CASE
-                    WHEN NOT (
-                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
-                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
-                    )
-                    THEN COALESCE(s.total_amount, 0)
-                    ELSE 0
-                END
-            ), 0) AS pos_sales,
-            COUNT(s.id) AS transactions,
-            COUNT(CASE
-                WHEN (
-                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
-                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
-                )
-                THEN 1
-            END) AS online_transactions,
-            COUNT(CASE
-                WHEN NOT (
-                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
-                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
-                )
-                THEN 1
-            END) AS pos_transactions
-        FROM sales s
-        WHERE {$whereSql}
-        GROUP BY {$groupBy}
-        ORDER BY MIN(s.sale_date) ASC
-    ";
+    case 'weekly':
+    default:
+        $groupBy = "YEARWEEK(s.sale_date, 1)";
+        $labelSql = "CONCAT('Week ', LPAD(WEEK(s.sale_date, 1), 2, '0'), ' ', YEAR(s.sale_date))";
+        break;
 }
+
+/*
+ * One row in sales = one transaction.
+ * This prevents sales_items from multiplying transaction counts.
+ */
+$sql = "
+    SELECT
+        {$labelSql} AS sale_label,
+
+        COALESCE(
+            SUM(
+                CASE
+                    WHEN COALESCE(s.total_amount, 0) > 0
+                        THEN s.total_amount
+                    ELSE COALESCE(s.total, 0)
+                END
+            ),
+            0
+        ) AS total_sales,
+
+        COALESCE(
+            SUM(
+                CASE
+                    WHEN (
+                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                    )
+                    THEN
+                        CASE
+                            WHEN COALESCE(s.total_amount, 0) > 0
+                                THEN s.total_amount
+                            ELSE COALESCE(s.total, 0)
+                        END
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS online_sales,
+
+        COALESCE(
+            SUM(
+                CASE
+                    WHEN NOT (
+                        COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                        OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                    )
+                    THEN
+                        CASE
+                            WHEN COALESCE(s.total_amount, 0) > 0
+                                THEN s.total_amount
+                            ELSE COALESCE(s.total, 0)
+                        END
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS pos_sales,
+
+        COUNT(*) AS transactions,
+
+        SUM(
+            CASE
+                WHEN (
+                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                )
+                THEN 1
+                ELSE 0
+            END
+        ) AS online_transactions,
+
+        SUM(
+            CASE
+                WHEN NOT (
+                    COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
+                    OR COALESCE(s.payment_method, '') LIKE 'Online/%'
+                )
+                THEN 1
+                ELSE 0
+            END
+        ) AS pos_transactions
+
+    FROM sales s
+    WHERE {$whereSql}
+    GROUP BY {$groupBy}
+    ORDER BY MIN(s.sale_date) ASC
+";
 
 $stmt = $conn->prepare($sql);
 
@@ -291,19 +307,59 @@ if (!$stmt) {
         'labels' => [],
         'totals' => [],
         'counts' => [],
+        'online_totals' => [],
+        'pos_totals' => [],
+        'online_counts' => [],
+        'pos_counts' => [],
         'total_revenue' => 0,
-        'total_transactions' => 0
-    ]);
+        'total_transactions' => 0,
+        'total_online_revenue' => 0,
+        'total_pos_revenue' => 0,
+        'total_online_transactions' => 0,
+        'total_pos_transactions' => 0
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-$stmt->bind_param($types, ...$params);
+/*
+ * mysqli bind_param requires references. Build them explicitly.
+ */
+$bind = [$types];
+
+foreach ($params as $key => &$value) {
+    $bind[] = &$value;
+}
+
+if (!call_user_func_array([$stmt, 'bind_param'], $bind)) {
+    error_log(
+        'fetch_sales_trend bind_param failed: ' . $stmt->error
+    );
+
+    http_response_code(500);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'Unable to bind the sales trend filters.',
+        'labels' => [],
+        'totals' => [],
+        'counts' => [],
+        'online_totals' => [],
+        'pos_totals' => [],
+        'online_counts' => [],
+        'pos_counts' => [],
+        'total_revenue' => 0,
+        'total_transactions' => 0,
+        'total_online_revenue' => 0,
+        'total_pos_revenue' => 0,
+        'total_online_transactions' => 0,
+        'total_pos_transactions' => 0
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+unset($value);
 
 if (!$stmt->execute()) {
-    $dbError = $stmt->error;
-
     error_log(
-        'fetch_sales_trend execute failed: ' . $dbError
+        'fetch_sales_trend execute failed: ' . $stmt->error
     );
 
     http_response_code(500);
@@ -313,10 +369,17 @@ if (!$stmt->execute()) {
         'labels' => [],
         'totals' => [],
         'counts' => [],
+        'online_totals' => [],
+        'pos_totals' => [],
+        'online_counts' => [],
+        'pos_counts' => [],
         'total_revenue' => 0,
-        'total_transactions' => 0
-    ]);
-    $stmt->close();
+        'total_transactions' => 0,
+        'total_online_revenue' => 0,
+        'total_pos_revenue' => 0,
+        'total_online_transactions' => 0,
+        'total_pos_transactions' => 0
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -329,6 +392,7 @@ $onlineTotals = [];
 $posTotals = [];
 $onlineCounts = [];
 $posCounts = [];
+
 $totalRevenue = 0.0;
 $totalTransactions = 0;
 $totalOnlineRevenue = 0.0;
@@ -337,14 +401,14 @@ $totalOnlineTransactions = 0;
 $totalPosTransactions = 0;
 
 while ($row = $result->fetch_assoc()) {
-    $amount = (float)$row['total_sales'];
-    $count  = (int)$row['transactions'];
+    $amount = (float)($row['total_sales'] ?? 0);
+    $count = (int)($row['transactions'] ?? 0);
     $onlineAmount = (float)($row['online_sales'] ?? 0);
     $posAmount = (float)($row['pos_sales'] ?? 0);
     $onlineCount = (int)($row['online_transactions'] ?? 0);
     $posCount = (int)($row['pos_transactions'] ?? 0);
 
-    $labels[] = $row['sale_label'];
+    $labels[] = (string)$row['sale_label'];
     $totals[] = round($amount, 2);
     $counts[] = $count;
     $onlineTotals[] = round($onlineAmount, 2);
@@ -360,6 +424,7 @@ while ($row = $result->fetch_assoc()) {
     $totalPosTransactions += $posCount;
 }
 
+$result->free();
 $stmt->close();
 
 echo json_encode([
