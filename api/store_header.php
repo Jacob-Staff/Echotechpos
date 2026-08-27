@@ -234,6 +234,181 @@ if (isset($_SESSION['client_id'])) {
     }
 }
 
+
+/* =========================================================
+   SUBSCRIPTION / CUSTOMER ENGAGEMENT
+
+   IMPORTANT BUSINESS RULE:
+   - A customer is subscribed when a matching row exists in
+     customers for the CURRENT pharmacy + branch.
+   - Match priority: client_id, then exact email, then exact phone.
+   - When an existing manual customer is matched, it is linked to
+     the logged-in client_id instead of creating a duplicate.
+   - Unsubscribe removes ONLY the matched subscription/customer row.
+   ========================================================= */
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    (string)($_POST['store_action'] ?? '') === 'toggle_subscription'
+) {
+    header('Content-Type: application/json; charset=utf-8');
+
+    $sid = (int)($_SESSION['client_id'] ?? 0);
+    $sbid = (int)($_POST['branch_id'] ?? 0);
+
+    if ($sid <= 0) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Please log in before subscribing.']);
+        exit;
+    }
+    if ($sbid <= 0) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Invalid branch.']);
+        exit;
+    }
+
+    $st = $conn->prepare("SELECT id, pharmacy_id, branch_name FROM branches WHERE id = ? AND is_active = 1 LIMIT 1");
+    if (!$st) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Unable to verify the branch.']);
+        exit;
+    }
+    $st->bind_param('i', $sbid);
+    $st->execute();
+    $branch = $st->get_result()->fetch_assoc();
+    $st->close();
+
+    if (!$branch) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'The selected branch is unavailable.']);
+        exit;
+    }
+
+    $spid = (int)$branch['pharmacy_id'];
+
+    $st = $conn->prepare("SELECT id, full_name, phone, email FROM clients WHERE id = ? LIMIT 1");
+    if (!$st) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Unable to load your account.']);
+        exit;
+    }
+    $st->bind_param('i', $sid);
+    $st->execute();
+    $client = $st->get_result()->fetch_assoc();
+    $st->close();
+
+    if (!$client) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Your customer account could not be found.']);
+        exit;
+    }
+
+    $sname  = trim((string)($client['full_name'] ?? 'Client'));
+    $sphone = trim((string)($client['phone'] ?? ''));
+    $semail = strtolower(trim((string)($client['email'] ?? '')));
+    if ($sname === '') $sname = 'Client';
+
+    /*
+       Find an existing customer record.
+       First use client_id. If an older/manual customer has no client_id,
+       match the same account by exact email or phone and link it.
+    */
+    $existing = null;
+
+    $st = $conn->prepare("SELECT id, client_id, name, phone, email
+                          FROM customers
+                          WHERE pharmacy_id = ? AND branch_id = ? AND client_id = ?
+                          LIMIT 1");
+    if ($st) {
+        $st->bind_param('iii', $spid, $sbid, $sid);
+        $st->execute();
+        $existing = $st->get_result()->fetch_assoc();
+        $st->close();
+    }
+
+    if (!$existing && $semail !== '') {
+        $st = $conn->prepare("SELECT id, client_id, name, phone, email
+                              FROM customers
+                              WHERE pharmacy_id = ? AND branch_id = ?
+                                AND LOWER(TRIM(COALESCE(email,''))) = ?
+                              LIMIT 1");
+        if ($st) {
+            $st->bind_param('iis', $spid, $sbid, $semail);
+            $st->execute();
+            $existing = $st->get_result()->fetch_assoc();
+            $st->close();
+        }
+    }
+
+    if (!$existing && $sphone !== '') {
+        $st = $conn->prepare("SELECT id, client_id, name, phone, email
+                              FROM customers
+                              WHERE pharmacy_id = ? AND branch_id = ?
+                                AND TRIM(COALESCE(phone,'')) = ?
+                              LIMIT 1");
+        if ($st) {
+            $st->bind_param('iis', $spid, $sbid, $sphone);
+            $st->execute();
+            $existing = $st->get_result()->fetch_assoc();
+            $st->close();
+        }
+    }
+
+    /* Already subscribed -> remove that subscription row. */
+    if ($existing) {
+        $rid = (int)$existing['id'];
+        $st = $conn->prepare("DELETE FROM customers
+                              WHERE id = ? AND pharmacy_id = ? AND branch_id = ?
+                              LIMIT 1");
+        if (!$st) {
+            echo json_encode(['success'=>false,'subscribed'=>true,'message'=>'Unable to unsubscribe right now.']);
+            exit;
+        }
+        $st->bind_param('iii', $rid, $spid, $sbid);
+        $ok = $st->execute();
+        $st->close();
+
+        if (!$ok) {
+            echo json_encode(['success'=>false,'subscribed'=>true,'message'=>'Unable to unsubscribe right now.']);
+            exit;
+        }
+
+        echo json_encode([
+            'success'=>true,
+            'subscribed'=>false,
+            'customer_id'=>$rid,
+            'message'=>'You are no longer subscribed to ' . (string)$branch['branch_name'] . '.'
+        ]);
+        exit;
+    }
+
+    /* Not subscribed -> create a customer record linked to this client. */
+    $st = $conn->prepare("INSERT INTO customers
+                          (pharmacy_id, branch_id, client_id, name, phone, email)
+                          VALUES (?, ?, ?, ?, ?, ?)");
+    if (!$st) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Unable to create your subscription.']);
+        exit;
+    }
+    $st->bind_param('iiisss', $spid, $sbid, $sid, $sname, $sphone, $semail);
+    $ok = $st->execute();
+    $rid = (int)$st->insert_id;
+    $err = (string)$st->error;
+    $st->close();
+
+    if (!$ok) {
+        echo json_encode([
+            'success'=>false,
+            'subscribed'=>false,
+            'message'=>$err !== '' ? 'Unable to subscribe: ' . $err : 'Unable to subscribe right now.'
+        ]);
+        exit;
+    }
+
+    echo json_encode([
+        'success'=>true,
+        'subscribed'=>true,
+        'customer_id'=>$rid,
+        'branch_id'=>$sbid,
+        'pharmacy_id'=>$spid,
+        'message'=>'Subscribed to ' . (string)$branch['branch_name'] . '. You are now in this pharmacy\'s customer list.'
+    ]);
+    exit;
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -268,6 +443,118 @@ if (isset($_SESSION['client_id'])) {
         .branch-menu .dropdown-item.active{background:var(--echo-green)!important;color:#fff!important;}
         .store-top-links{display:flex;align-items:center;gap:18px;white-space:nowrap;}
         .store-top-link{color:#333;text-decoration:none;font-size:13px;font-weight:600;}
+        .store-top-link.subscription-active{
+            color:#00a878!important;
+            font-weight:800!important;
+        }
+        .subscription-form{display:inline-flex!important;align-items:center;margin:0!important;}
+        #subscribeBtn{
+            cursor:pointer;
+            transition:color .18s ease,background .18s ease,transform .18s ease;
+        }
+        #subscribeBtn.subscription-active:hover{
+            color:#008c66!important;
+        }
+        #subscribeBtn:disabled{opacity:.65;cursor:wait;}
+        .subscription-confirm-overlay{
+            position:fixed;
+            inset:0;
+            display:none;
+            align-items:center;
+            justify-content:center;
+            padding:20px;
+            background:rgba(15,23,42,.58);
+            backdrop-filter:blur(4px);
+            z-index:99999;
+        }
+        .subscription-confirm-overlay.open{display:flex;}
+        .subscription-confirm-card{
+            width:min(410px,100%);
+            background:#fff;
+            border-radius:20px;
+            padding:25px 23px 21px;
+            box-shadow:0 25px 70px rgba(15,23,42,.28);
+            text-align:center;
+            animation:subscriptionPopIn .18s ease-out;
+        }
+        @keyframes subscriptionPopIn{
+            from{opacity:0;transform:translateY(10px) scale(.97)}
+            to{opacity:1;transform:translateY(0) scale(1)}
+        }
+        .subscription-confirm-icon{
+            width:56px;
+            height:56px;
+            margin:0 auto 13px;
+            border-radius:17px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:#e8f8f1;
+            color:#00a878;
+            font-size:25px;
+        }
+        .subscription-confirm-icon.unsubscribe{
+            background:#fff1ef;
+            color:#d9534f;
+        }
+        .subscription-confirm-title{
+            color:#17324d;
+            font-size:18px;
+            font-weight:850;
+            margin-bottom:7px;
+        }
+        .subscription-confirm-text{
+            color:#718091;
+            font-size:13px;
+            line-height:1.55;
+            margin-bottom:20px;
+        }
+        .subscription-confirm-actions{
+            display:flex;
+            justify-content:center;
+            gap:9px;
+        }
+        .subscription-confirm-btn{
+            min-width:112px;
+            border:0;
+            border-radius:10px;
+            padding:10px 15px;
+            font-size:12px;
+            font-weight:800;
+            cursor:pointer;
+        }
+        .subscription-confirm-cancel{
+            background:#eef1f4;
+            color:#536272;
+        }
+        .subscription-confirm-confirm{
+            background:#00a878;
+            color:#fff;
+        }
+        .subscription-confirm-confirm.unsubscribe{
+            background:#d9534f;
+        }
+        .subscription-toast{
+            position:fixed;
+            top:78px;
+            right:20px;
+            z-index:100000;
+            max-width:360px;
+            padding:13px 16px;
+            border-radius:12px;
+            background:#fff;
+            border:1px solid #e3e8ec;
+            box-shadow:0 12px 35px rgba(0,0,0,.16);
+            font:600 13px Arial,Helvetica,sans-serif;
+            opacity:0;
+            transform:translateY(-8px);
+            transition:opacity .2s ease,transform .2s ease;
+        }
+        .subscription-toast.show{
+            opacity:1;
+            transform:translateY(0);
+        }
+
         .store-top-link:hover{color:var(--echo-green);}
         .top-cart{font-size:25px;color:#17202a;}
         .top-account{border:1px solid #111;background:#fff;border-radius:22px;padding:7px 15px;font-size:12px;font-weight:700;}
@@ -812,107 +1099,102 @@ $make_section_url = static function(string $section, int $bid): string {
 
             <div class="store-top-links">
                 <?php
-                /*
-                 * =========================================================
-                 * SUBSCRIPTION STATE
-                 * =========================================================
-                 * A subscription is represented by a row in `customers`.
-                 *
-                 * IMPORTANT:
-                 * Do NOT rely only on customers.client_id here.
-                 * Older/manual customer rows may have client_id = NULL.
-                 * If the logged-in client already exists in this pharmacy
-                 * + branch by email OR phone, that customer is the
-                 * subscription and must be linked to this client_id.
-                 */
                 $is_subscribed = false;
-                $subscription_customer_id = 0;
-                $subscription_csrf = '';
+                $header_sub_client_id = (int)($_SESSION['client_id'] ?? 0);
+                $header_sub_email = '';
+                $header_sub_phone = '';
 
-                if (isset($_SESSION['client_id']) && $parent_pharmacy_id > 0 && $branch_id > 0) {
-                    $cid = (int)$_SESSION['client_id'];
-
-                    if (empty($_SESSION['subscription_csrf'])) {
-                        $_SESSION['subscription_csrf'] = bin2hex(random_bytes(32));
+                if ($header_sub_client_id > 0) {
+                    /* Load the logged-in account identity. */
+                    if ($cs = $conn->prepare("SELECT email, phone FROM clients WHERE id = ? LIMIT 1")) {
+                        $cs->bind_param('i', $header_sub_client_id);
+                        $cs->execute();
+                        $cr = $cs->get_result()->fetch_assoc() ?: [];
+                        $header_sub_email = strtolower(trim((string)($cr['email'] ?? '')));
+                        $header_sub_phone = trim((string)($cr['phone'] ?? ''));
+                        $cs->close();
                     }
-                    $subscription_csrf = $_SESSION['subscription_csrf'];
 
-                    $client_email = '';
-                    $client_phone = '';
+                    /* First: an already-linked app subscriber. */
+                    $linked_id = 0;
+                    if ($cs = $conn->prepare("SELECT id FROM customers WHERE pharmacy_id = ? AND branch_id = ? AND client_id = ? LIMIT 1")) {
+                        $cs->bind_param('iii', $parent_pharmacy_id, $branch_id, $header_sub_client_id);
+                        $cs->execute();
+                        $linked = $cs->get_result()->fetch_assoc();
+                        $linked_id = (int)($linked['id'] ?? 0);
+                        $cs->close();
+                    }
 
-                    if ($client_stmt = $conn->prepare(
-                        "SELECT email, phone FROM clients WHERE id = ? LIMIT 1"
-                    )) {
-                        $client_stmt->bind_param("i", $cid);
-                        $client_stmt->execute();
-                        $client_row = $client_stmt->get_result()->fetch_assoc() ?: [];
-                        $client_stmt->close();
-
-                        $client_email = strtolower(trim((string)($client_row['email'] ?? '')));
-                        $client_phone = preg_replace('/\\D+/', '', (string)($client_row['phone'] ?? ''));
-
-                        // Treat +260/260 and 0-prefixed Zambian numbers as the
-                        // same identity for subscription matching.
-                        if (str_starts_with($client_phone, '260') && strlen($client_phone) >= 12) {
-                            $client_phone = '0' . substr($client_phone, 3);
+                    /*
+                       Second: if an older/manual customer record already represents
+                       this account by email or phone, link it to client_id. This
+                       makes the Customers page identify it as a Subscribed App User.
+                    */
+                    if ($linked_id <= 0 && $header_sub_email !== '') {
+                        if ($cs = $conn->prepare("SELECT id FROM customers
+                                                 WHERE pharmacy_id = ? AND branch_id = ?
+                                                   AND LOWER(TRIM(COALESCE(email,''))) = ?
+                                                 LIMIT 1")) {
+                            $cs->bind_param('iis', $parent_pharmacy_id, $branch_id, $header_sub_email);
+                            $cs->execute();
+                            $match = $cs->get_result()->fetch_assoc();
+                            $linked_id = (int)($match['id'] ?? 0);
+                            $cs->close();
                         }
                     }
 
-                    if ($client_email !== '' || $client_phone !== '') {
-                        $candidate_stmt = $conn->prepare(
-                            "SELECT id, client_id, email, phone
-                             FROM customers
-                             WHERE pharmacy_id = ? AND branch_id = ?
-                             ORDER BY id ASC"
-                        );
+                    if ($linked_id <= 0 && $header_sub_phone !== '') {
+                        if ($cs = $conn->prepare("SELECT id FROM customers
+                                                 WHERE pharmacy_id = ? AND branch_id = ?
+                                                   AND TRIM(COALESCE(phone,'')) = ?
+                                                 LIMIT 1")) {
+                            $cs->bind_param('iis', $parent_pharmacy_id, $branch_id, $header_sub_phone);
+                            $cs->execute();
+                            $match = $cs->get_result()->fetch_assoc();
+                            $linked_id = (int)($match['id'] ?? 0);
+                            $cs->close();
+                        }
+                    }
 
-                        if ($candidate_stmt) {
-                            $candidate_stmt->bind_param("ii", $parent_pharmacy_id, $branch_id);
-                            $candidate_stmt->execute();
-                            $candidate_result = $candidate_stmt->get_result();
-
-                            while ($candidate = $candidate_result->fetch_assoc()) {
-                                $row_client_id = (int)($candidate['client_id'] ?? 0);
-                                $row_email = strtolower(trim((string)($candidate['email'] ?? '')));
-                                $row_phone = preg_replace('/\\D+/', '', (string)($candidate['phone'] ?? ''));
-
-                                if (str_starts_with($row_phone, '260') && strlen($row_phone) >= 12) {
-                                    $row_phone = '0' . substr($row_phone, 3);
-                                }
-
-                                $matches_client = ($row_client_id === $cid);
-                                $matches_email = ($client_email !== '' && $row_email !== '' && hash_equals($client_email, $row_email));
-                                $matches_phone = ($client_phone !== '' && $row_phone !== '' && hash_equals($client_phone, $row_phone));
-
-                                if ($matches_client || $matches_email || $matches_phone) {
-                                    $is_subscribed = true;
-
-                                    if ($subscription_customer_id === 0 || $matches_client) {
-                                        $subscription_customer_id = (int)$candidate['id'];
-                                    }
-                                }
+                    if ($linked_id > 0) {
+                        /* Link the existing customer row to the real app account. */
+                        if ($cs = $conn->prepare("UPDATE customers
+                                                 SET client_id = ?, name = ?, phone = ?, email = ?
+                                                 WHERE id = ? AND pharmacy_id = ? AND branch_id = ?
+                                                 LIMIT 1")) {
+                            $sync_name = 'Client';
+                            if ($ns = $conn->prepare("SELECT full_name FROM clients WHERE id = ? LIMIT 1")) {
+                                $ns->bind_param('i', $header_sub_client_id);
+                                $ns->execute();
+                                $nr = $ns->get_result()->fetch_assoc() ?: [];
+                                $sync_name = trim((string)($nr['full_name'] ?? 'Client')) ?: 'Client';
+                                $ns->close();
                             }
-
-                            $candidate_result->free();
-                            $candidate_stmt->close();
+                            $cs->bind_param('isssiii', $header_sub_client_id, $sync_name, $header_sub_phone, $header_sub_email, $linked_id, $parent_pharmacy_id, $branch_id);
+                            $cs->execute();
+                            $cs->close();
                         }
+                        $is_subscribed = true;
                     }
                 }
+
                 ?>
 
                 <?php if (isset($_SESSION['client_id'])): ?>
-                    <a href="javascript:void(0);"
-                       id="subscribeBtn"
-                       class="store-top-link toggle-subscribe"
-                       data-client="<?php echo (int)$_SESSION['client_id']; ?>"
-                       data-branch="<?php echo $branch_id; ?>"
-                       data-pharmacy="<?php echo $parent_pharmacy_id; ?>"
-                       data-customer="<?php echo $subscription_customer_id; ?>"
-                       data-csrf="<?php echo htmlspecialchars($subscription_csrf, ENT_QUOTES, 'UTF-8'); ?>"
-                       data-status="<?php echo $is_subscribed ? 'subscribed' : 'unsubscribed'; ?>"
-                       aria-label="<?php echo $is_subscribed ? 'Unsubscribe from this pharmacy' : 'Subscribe to this pharmacy'; ?>">
-                        <?php echo $is_subscribed ? 'âœ“ Subscribed' : 'Subscribe'; ?>
-                    </a>
+                    <form method="post" action="../dashboard/toggle_subscription.php" class="d-inline m-0 subscription-form">
+                        <input type="hidden" name="store_action" value="toggle_subscription">
+                        <input type="hidden" name="branch_id" value="<?php echo (int)$branch_id; ?>">
+                        <button type="submit"
+                                id="subscribeBtn"
+                                class="store-top-link toggle-subscribe border-0 bg-transparent p-0 <?php echo $is_subscribed ? 'subscription-active' : ''; ?>"
+                                data-client="<?php echo (int)$_SESSION['client_id']; ?>"
+                                data-branch="<?php echo (int)$branch_id; ?>"
+                                data-pharmacy="<?php echo (int)$parent_pharmacy_id; ?>"
+                                data-status="<?php echo $is_subscribed ? 'subscribed' : 'unsubscribed'; ?>"
+                                aria-pressed="<?php echo $is_subscribed ? 'true' : 'false'; ?>">
+                            <?php echo $is_subscribed ? 'Subscribed' : 'Subscribe'; ?>
+                        </button>
+                    </form>
                 <?php else: ?>
                     <a href="login_client.php?bid=<?php echo $branch_id; ?>" class="store-top-link">Login</a>
                 <?php endif; ?>
@@ -1091,6 +1373,61 @@ $make_section_url = static function(string $section, int $bid): string {
                     <a href="javascript:void(0);" onclick="openBankDetails()" class="hng-nav-icon"><i class="mdi mdi-bank"></i>Bank</a>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- CUSTOM SUBSCRIPTION CONFIRMATION -->
+<div
+    class="subscription-confirm-overlay"
+    id="subscriptionConfirmModal"
+    aria-hidden="true"
+>
+    <div
+        class="subscription-confirm-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="subscriptionConfirmTitle"
+    >
+        <div
+            class="subscription-confirm-icon"
+            id="subscriptionConfirmIcon"
+        >
+            <i class="mdi mdi-account-plus-outline"></i>
+        </div>
+
+        <div
+            class="subscription-confirm-title"
+            id="subscriptionConfirmTitle"
+        >
+            Subscribe to this pharmacy?
+        </div>
+
+        <div
+            class="subscription-confirm-text"
+            id="subscriptionConfirmText"
+        >
+            Join this pharmacy's customer list to receive updates,
+            offers and other customer engagement messages.
+        </div>
+
+        <div class="subscription-confirm-actions">
+            <button
+                type="button"
+                class="subscription-confirm-btn subscription-confirm-cancel"
+                id="subscriptionConfirmCancel"
+            >
+                Not Now
+            </button>
+
+            <button
+                type="button"
+                class="subscription-confirm-btn subscription-confirm-confirm"
+                id="subscriptionConfirmProceed"
+            >
+                Subscribe
+            </button>
         </div>
     </div>
 </div>
@@ -1298,125 +1635,240 @@ $make_section_url = static function(string $section, int $bid): string {
     if(mobileBranchOpen) mobileBranchOpen.addEventListener('click', showBranchSelector);
     if(mobileBranchLink) mobileBranchLink.addEventListener('click', showBranchSelector);
 
+
     /* =========================================================
-       PHARMACY SUBSCRIPTION
-       =========================================================
-       The server is the source of truth. We POST the action and then
-       use the verified database result returned by the endpoint.
-    */
-    document.querySelectorAll('.toggle-subscribe').forEach(function(btn){
-        btn.addEventListener('click', async function(e){
-            e.preventDefault();
+       SUBSCRIBE / UNSUBSCRIBE â€” CUSTOM CONFIRMATION + AJAX
+       Dedicated endpoint: ../dashboard/toggle_subscription.php
+    ========================================================= */
 
-            if(btn.dataset.busy === '1') return;
+    function showSubscriptionToast(message, success){
+        let toast = document.getElementById('subscriptionToast');
 
-            const currentStatus = btn.getAttribute('data-status') || 'unsubscribed';
-            const isSubscribed = currentStatus === 'subscribed';
+        if(!toast){
+            toast = document.createElement('div');
+            toast.id = 'subscriptionToast';
+            toast.className = 'subscription-toast';
+            document.body.appendChild(toast);
+        }
 
-            if(isSubscribed){
-                const confirmed = window.confirm(
-                    'Unsubscribe from this pharmacy?\\n\\nYour customer account will be removed from this pharmacy branch.'
-                );
+        toast.style.borderLeft = '4px solid ' + (success ? '#00a878' : '#d9534f');
+        toast.textContent = message;
+        toast.classList.add('show');
 
-                if(!confirmed) return;
-            }
+        clearTimeout(window.__subscriptionToastTimer);
+        window.__subscriptionToastTimer = setTimeout(function(){
+            toast.classList.remove('show');
+        }, 3500);
+    }
 
-            const branchId = btn.getAttribute('data-branch') || '';
-            const csrf = btn.getAttribute('data-csrf') || '';
+    function closeSubscriptionConfirm(){
+        const modal = document.getElementById('subscriptionConfirmModal');
+        if(!modal) return;
 
-            if(!branchId || !csrf){
-                window.alert('Your subscription session is not ready. Please refresh the page and try again.');
-                return;
-            }
+        modal.classList.remove('open');
+        modal.setAttribute('aria-hidden','true');
 
-            btn.dataset.busy = '1';
-            const originalText = btn.textContent.trim();
-            btn.style.pointerEvents = 'none';
-            btn.style.opacity = '0.65';
-            btn.textContent = isSubscribed ? 'Removing...' : 'Subscribing...';
+        window.__subscriptionPendingForm = null;
+    }
+
+    function openSubscriptionConfirm(form, currentlySubscribed){
+        const modal = document.getElementById('subscriptionConfirmModal');
+        const icon = document.getElementById('subscriptionConfirmIcon');
+        const title = document.getElementById('subscriptionConfirmTitle');
+        const text = document.getElementById('subscriptionConfirmText');
+        const confirmBtn = document.getElementById('subscriptionConfirmProceed');
+
+        if(!modal || !icon || !title || !text || !confirmBtn) return;
+
+        window.__subscriptionPendingForm = form;
+
+        if(currentlySubscribed){
+            icon.className = 'subscription-confirm-icon unsubscribe';
+            icon.innerHTML = '<i class="mdi mdi-account-minus-outline"></i>';
+
+            title.textContent = 'Unsubscribe from this pharmacy?';
+
+            text.innerHTML =
+                'You will be removed from this pharmacy\'s customer engagement list. ' +
+                'You can subscribe again at any time.';
+
+            confirmBtn.className =
+                'subscription-confirm-btn subscription-confirm-confirm unsubscribe';
+
+            confirmBtn.textContent = 'Unsubscribe';
+        }else{
+            icon.className = 'subscription-confirm-icon';
+            icon.innerHTML = '<i class="mdi mdi-account-plus-outline"></i>';
+
+            title.textContent = 'Subscribe to this pharmacy?';
+
+            text.innerHTML =
+                'Join this pharmacy\'s customer list to receive updates, offers ' +
+                'and other customer engagement messages.';
+
+            confirmBtn.className =
+                'subscription-confirm-btn subscription-confirm-confirm';
+
+            confirmBtn.textContent = 'Subscribe';
+        }
+
+        modal.classList.add('open');
+        modal.setAttribute('aria-hidden','false');
+    }
+
+    async function performSubscriptionToggle(form){
+
+        const btn = form.querySelector('.toggle-subscribe');
+        if(!btn || btn.dataset.busy === '1') return;
+
+        const currentlySubscribed =
+            btn.getAttribute('data-status') === 'subscribed';
+
+        const confirmBtn =
+            document.getElementById('subscriptionConfirmProceed');
+
+        if(confirmBtn){
+            confirmBtn.disabled = true;
+            confirmBtn.textContent =
+                currentlySubscribed ? 'Unsubscribing...' : 'Subscribing...';
+        }
+
+        btn.dataset.busy = '1';
+        btn.disabled = true;
+
+        try{
+
+            const body = new URLSearchParams(new FormData(form));
+
+            const response = await fetch(
+                form.action,
+                {
+                    method:'POST',
+                    credentials:'same-origin',
+                    cache:'no-store',
+                    headers:{
+                        'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With':'XMLHttpRequest',
+                        'Accept':'application/json'
+                    },
+                    body:body.toString()
+                }
+            );
+
+            const raw = await response.text();
+
+            let data;
 
             try{
-                const body = new URLSearchParams();
-                body.set('action', isSubscribed ? 'unsubscribe' : 'subscribe');
-                body.set('branch_id', branchId);
-                body.set('csrf', csrf);
-
-                /*
-                 * The endpoint is in the same public-store directory as
-                 * store_header.php / online_store.php.
-                 */
-                const response = await fetch('../dashboard/toggle_subscription.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: body.toString(),
-                    credentials: 'same-origin',
-                    cache: 'no-store'
-                });
-
-                const raw = await response.text();
-                let result = null;
-
-                try{
-                    result = JSON.parse(raw);
-                }catch(parseError){
-                    console.error('Subscription endpoint returned non-JSON:', raw);
-                    throw new Error('The server returned an invalid subscription response.');
-                }
-
-                if(!response.ok || !result || result.status !== 'success'){
-                    throw new Error(
-                        (result && result.message)
-                            ? result.message
-                            : 'The subscription request failed.'
-                    );
-                }
-
-                /*
-                 * Only trust the final state returned after the database
-                 * operation and verification have completed.
-                 */
-                const subscribed = result.subscribed === true;
-
-                btn.dataset.status = subscribed ? 'subscribed' : 'unsubscribed';
-                btn.dataset.customer = result.customer_id ? String(result.customer_id) : '0';
-                btn.textContent = subscribed ? 'âœ“ Subscribed' : 'Subscribe';
-                btn.setAttribute(
-                    'aria-label',
-                    subscribed
-                        ? 'Unsubscribe from this pharmacy'
-                        : 'Subscribe to this pharmacy'
+                data = JSON.parse(raw);
+            }catch(e){
+                throw new Error(
+                    'The subscription server returned an invalid response.'
                 );
+            }
 
-                /*
-                 * If the browser has multiple subscription controls,
-                 * synchronize all of them from the verified server state.
-                 */
-                document.querySelectorAll('.toggle-subscribe').forEach(function(other){
-                    other.dataset.status = subscribed ? 'subscribed' : 'unsubscribed';
-                    other.dataset.customer = result.customer_id ? String(result.customer_id) : '0';
-                    other.textContent = subscribed ? 'âœ“ Subscribed' : 'Subscribe';
-                    other.setAttribute(
-                        'aria-label',
-                        subscribed
-                            ? 'Unsubscribe from this pharmacy'
-                            : 'Subscribe to this pharmacy'
-                    );
-                });
+            if(!response.ok || data.success !== true){
+                throw new Error(
+                    data.message || 'Unable to update subscription.'
+                );
+            }
 
-                window.alert(result.message || (subscribed ? 'Subscribed.' : 'Unsubscribed.'));
-            }catch(error){
-                console.error('Subscription error:', error);
-                btn.textContent = originalText;
-                window.alert(error.message || 'Unable to change the subscription.');
-            }finally{
-                btn.dataset.busy = '0';
-                btn.style.pointerEvents = '';
-                btn.style.opacity = '';
+            const subscribed = data.subscribed === true;
+
+            btn.dataset.status =
+                subscribed ? 'subscribed' : 'unsubscribed';
+
+            btn.setAttribute(
+                'aria-pressed',
+                subscribed ? 'true' : 'false'
+            );
+
+            btn.classList.toggle(
+                'subscription-active',
+                subscribed
+            );
+
+            btn.textContent =
+                subscribed ? 'Subscribed' : 'Subscribe';
+
+            closeSubscriptionConfirm();
+
+            showSubscriptionToast(
+                data.message ||
+                (subscribed
+                    ? 'You are now subscribed.'
+                    : 'You have been unsubscribed.'),
+                true
+            );
+
+        }catch(error){
+
+            closeSubscriptionConfirm();
+
+            showSubscriptionToast(
+                error.message || 'Unable to update subscription.',
+                false
+            );
+
+        }finally{
+
+            btn.dataset.busy = '0';
+            btn.disabled = false;
+
+            if(confirmBtn){
+                confirmBtn.disabled = false;
+            }
+        }
+    }
+
+    document.addEventListener('submit', function(e){
+
+        const form = e.target.closest('.subscription-form');
+
+        if(!form) return;
+
+        e.preventDefault();
+
+        const btn = form.querySelector('.toggle-subscribe');
+
+        if(!btn || btn.dataset.busy === '1') return;
+
+        const currentlySubscribed =
+            btn.getAttribute('data-status') === 'subscribed';
+
+        openSubscriptionConfirm(
+            form,
+            currentlySubscribed
+        );
+    });
+
+    document.getElementById('subscriptionConfirmProceed')
+        ?.addEventListener('click', function(){
+
+            const form =
+                window.__subscriptionPendingForm;
+
+            if(form){
+                performSubscriptionToggle(form);
             }
         });
+
+    document.getElementById('subscriptionConfirmCancel')
+        ?.addEventListener('click', closeSubscriptionConfirm);
+
+    document.getElementById('subscriptionConfirmModal')
+        ?.addEventListener('click', function(e){
+
+            if(e.target === this){
+                closeSubscriptionConfirm();
+            }
+        });
+
+    document.addEventListener('keydown', function(e){
+
+        if(e.key === 'Escape'){
+            closeSubscriptionConfirm();
+        }
     });
 
     document.addEventListener('click', function(e){
