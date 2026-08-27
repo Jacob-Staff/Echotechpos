@@ -720,9 +720,9 @@ if (file_exists("../includes/footer.php")) {
     display: flex;
     align-items: center;
     gap: 12px;
-    width: min(100%, 430px);
-    min-height: 62px;
-    padding: 10px 13px;
+    width: min(100%, 330px);
+    min-height: 56px;
+    padding: 8px 10px;
     border: 1px solid #dce5ef;
     border-radius: 14px;
     background: #fff;
@@ -744,13 +744,13 @@ if (file_exists("../includes/footer.php")) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
-    flex: 0 0 40px;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
     border-radius: 11px;
     background: #eef5ff;
     color: #2878e8;
-    font-size: 19px;
+    font-size: 17px;
 }
 
 .online-orders-copy {
@@ -761,14 +761,14 @@ if (file_exists("../includes/footer.php")) {
 }
 
 .online-orders-title {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 800;
     color: #1f3348;
 }
 
 .online-orders-subtitle {
     margin-top: 4px;
-    font-size: 11px;
+    font-size: 10px;
     color: #7a8795;
 }
 
@@ -776,8 +776,8 @@ if (file_exists("../includes/footer.php")) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 24px;
-    height: 24px;
+    min-width: 23px;
+    height: 23px;
     padding: 0 7px;
     margin-left: auto;
     border-radius: 999px;
