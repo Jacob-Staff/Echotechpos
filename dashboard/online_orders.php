@@ -17,63 +17,6 @@ if($pharmacyId<=0||$branchId<=0){ header('Location: ../login.php?error=session_e
 function oo_h($v):string{return htmlspecialchars((string)($v??''),ENT_QUOTES,'UTF-8');}
 function oo_json(array $d,int $code=200):never{http_response_code($code);header('Content-Type: application/json; charset=utf-8');echo json_encode($d,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
 
-/* ---------------------------------------------------------
-   ONLINE PAYMENT METHOD NORMALIZATION
-
-   Older online orders may contain slightly different values
-   such as:
-     Bank
-     Bank / Transfer
-     Bank Transfer
-     Mobile
-     Mobile Money
-     Cash
-     Cash on Delivery
-
-   Always convert them to the single payment-method values
-   used by the POS transaction table.
---------------------------------------------------------- */
-function oo_normalize_payment_method(string $value): string
-{
-    $value = trim($value);
-
-    if ($value === '') {
-        return '';
-    }
-
-    $normalized = strtolower($value);
-    $normalized = preg_replace('/[\s_\-\/]+/', ' ', $normalized);
-    $normalized = trim((string)$normalized);
-
-    if (
-        $normalized === 'cash' ||
-        $normalized === 'cod' ||
-        $normalized === 'cash on delivery' ||
-        $normalized === 'cash delivery'
-    ) {
-        return 'Online/Cash on Delivery';
-    }
-
-    if (
-        $normalized === 'mobile' ||
-        $normalized === 'mobile money' ||
-        $normalized === 'mobilemoney'
-    ) {
-        return 'Online/Mobile Money';
-    }
-
-    if (
-        $normalized === 'bank' ||
-        $normalized === 'bank transfer' ||
-        $normalized === 'bank / transfer' ||
-        $normalized === 'banktransfer'
-    ) {
-        return 'Online/Bank Transfer';
-    }
-
-    return '';
-}
-
 $action=strtolower(trim((string)($_POST['action']??$_GET['action']??'')));
 
 if($action==='update_status'){
@@ -90,7 +33,20 @@ if($action==='update_status'){
          * is the ONLY point at which online-order stock is deducted.
          * Pending and cancelled orders therefore do not consume stock.
          */
-        $stmt=$conn->prepare("SELECT id,status FROM clients_orders WHERE id=? AND pharmacy_id=? AND branch_id=? LIMIT 1 FOR UPDATE");
+        $stmt=$conn->prepare("
+            SELECT
+                id,
+                order_number,
+                total_amount,
+                payment_method,
+                status
+            FROM clients_orders
+            WHERE id=?
+              AND pharmacy_id=?
+              AND branch_id=?
+            LIMIT 1
+            FOR UPDATE
+        ");
         if(!$stmt) throw new RuntimeException('Unable to prepare order lookup.');
         $stmt->bind_param('iii',$orderId,$pharmacyId,$branchId);
         if(!$stmt->execute()) throw new RuntimeException('Unable to load order.');
@@ -233,12 +189,28 @@ if($action==='update_status'){
             $zero = 0.00;
 
             $orderPayment = trim((string)($order['payment_method'] ?? ''));
-            $onlinePaymentMethod = oo_normalize_payment_method($orderPayment);
 
-            if ($onlinePaymentMethod === '') {
+            /*
+             * EchoTech supports exactly three online payment choices:
+             *   1. Cash on Delivery
+             *   2. Bank Transfer
+             *   3. Mobile Money
+             *
+             * The order lookup above MUST select payment_method.
+             * Otherwise $order['payment_method'] is always empty and
+             * every completion incorrectly fails.
+             */
+            if ($orderPayment === 'Cash on Delivery') {
+                $onlinePaymentMethod = 'Online/Cash on Delivery';
+            } elseif ($orderPayment === 'Bank Transfer') {
+                $onlinePaymentMethod = 'Online/Bank Transfer';
+            } elseif ($orderPayment === 'Mobile Money') {
+                $onlinePaymentMethod = 'Online/Mobile Money';
+            } else {
                 throw new RuntimeException(
                     'Unable to determine the online payment method for this order. ' .
-                    'Stored payment method: ' . ($orderPayment !== '' ? $orderPayment : 'empty')
+                    'Stored payment method: ' .
+                    ($orderPayment !== '' ? $orderPayment : 'empty')
                 );
             }
 
