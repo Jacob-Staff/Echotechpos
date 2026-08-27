@@ -262,6 +262,28 @@ $pending_orders_count = $po_res
 
 /*
 |--------------------------------------------------------------------------
+| ONLINE ORDERS
+|--------------------------------------------------------------------------
+| Pending + Processing customer orders for this pharmacy/branch.
+|--------------------------------------------------------------------------
+*/
+$online_orders_res = safe_query(
+    $conn,
+    "
+    SELECT COUNT(*) AS total
+    FROM clients_orders
+    WHERE pharmacy_id = {$pharmacy_id}
+      AND branch_id = {$branch_id}
+      AND status IN ('Pending', 'Processing')
+    "
+);
+
+$online_orders_count = $online_orders_res
+    ? (int) (mysqli_fetch_assoc($online_orders_res)['total'] ?? 0)
+    : 0;
+
+/*
+|--------------------------------------------------------------------------
 | Head
 |--------------------------------------------------------------------------
 */
@@ -631,6 +653,44 @@ require_once "../includes/head.php";
 
         </div>
 
+        <!-- =================================================
+             ONLINE ORDERS QUICK LINK
+             Pending + Processing incoming customer orders
+        ================================================== -->
+        <div class="online-orders-shortcut-wrap">
+            <a
+                href="online_orders.php"
+                class="online-orders-shortcut"
+                aria-label="Open Online Orders"
+            >
+                <span class="online-orders-icon">
+                    <i class="mdi mdi-cart-arrow-down"></i>
+                </span>
+
+                <span class="online-orders-copy">
+                    <span class="online-orders-title">
+                        Online Orders
+                    </span>
+                    <span class="online-orders-subtitle">
+                        Incoming customer orders
+                    </span>
+                </span>
+
+                <?php if ($online_orders_count > 0): ?>
+                    <span
+                        class="online-orders-badge"
+                        id="badge-online-orders"
+                    >
+                        <?php echo $online_orders_count; ?>
+                    </span>
+                <?php endif; ?>
+
+                <span class="online-orders-arrow">
+                    <i class="mdi mdi-chevron-right"></i>
+                </span>
+            </a>
+        </div>
+
     </div>
 
 </div>
@@ -643,6 +703,112 @@ if (file_exists("../includes/footer.php")) {
 }
 
 ?>
+
+
+
+<style>
+/* Online Orders quick link */
+.online-orders-shortcut-wrap {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    margin-top: 20px;
+    padding: 0 12px 6px;
+}
+
+.online-orders-shortcut {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: min(100%, 430px);
+    min-height: 62px;
+    padding: 10px 13px;
+    border: 1px solid #dce5ef;
+    border-radius: 14px;
+    background: #fff;
+    color: #26384a;
+    text-decoration: none;
+    box-shadow: 0 5px 16px rgba(30, 50, 70, .07);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.online-orders-shortcut:hover {
+    color: #26384a;
+    text-decoration: none;
+    transform: translateY(-2px);
+    border-color: #c9d6e4;
+    box-shadow: 0 9px 22px rgba(30, 50, 70, .11);
+}
+
+.online-orders-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    border-radius: 11px;
+    background: #eef5ff;
+    color: #2878e8;
+    font-size: 19px;
+}
+
+.online-orders-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.15;
+}
+
+.online-orders-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: #1f3348;
+}
+
+.online-orders-subtitle {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #7a8795;
+}
+
+.online-orders-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 7px;
+    margin-left: auto;
+    border-radius: 999px;
+    background: #ff4d67;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow: 0 2px 7px rgba(255, 77, 103, .24);
+}
+
+.online-orders-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #a1adba;
+    font-size: 19px;
+}
+
+@media (max-width: 575.98px) {
+    .online-orders-shortcut-wrap {
+        margin-top: 16px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+
+    .online-orders-shortcut {
+        width: 100%;
+    }
+}
+</style>
 
 
 <!-- ============================================================
