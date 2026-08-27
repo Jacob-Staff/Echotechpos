@@ -343,6 +343,10 @@ $sales_sql = "
 
         i.category,
 
+        s.payment_method,
+
+        s.client_reference,
+
         si.quantity,
 
         si.unit_price,
@@ -478,6 +482,22 @@ while ($row = mysqli_fetch_assoc($result)) {
         'item_name' =>
             $row['item_name']
             ?: 'Uncategorized Product',
+
+        'category' =>
+            $row['category']
+            ?: 'General',
+
+        'payment_method' =>
+            $row['payment_method']
+            ?: '',
+
+        'source' =>
+            str_starts_with(
+                (string)($row['client_reference'] ?? ''),
+                'ONLINE_ORDER:'
+            )
+                ? 'Online Order'
+                : 'POS Sale',
 
         'quantity' =>
             $qty,
