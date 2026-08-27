@@ -851,6 +851,8 @@ require_once "../includes/head.php";
                 }
             }
         });
+    }
+
     $('filter-btn').addEventListener('click', loadTrendData);
 
     $('reset-btn').addEventListener('click', () => {
