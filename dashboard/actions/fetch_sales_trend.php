@@ -234,14 +234,14 @@ if ($hasItemFilter) {
     $sql = "
         SELECT
             {$labelSql} AS sale_label,
-            COALESCE(SUM(COALESCE(s.total_amount, s.total, 0)), 0) AS total_sales,
+            COALESCE(SUM(COALESCE(s.total_amount, 0)), 0) AS total_sales,
             COALESCE(SUM(
                 CASE
                     WHEN (
                         COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
                         OR COALESCE(s.payment_method, '') LIKE 'Online/%'
                     )
-                    THEN COALESCE(s.total_amount, s.total, 0)
+                    THEN COALESCE(s.total_amount, 0)
                     ELSE 0
                 END
             ), 0) AS online_sales,
@@ -251,7 +251,7 @@ if ($hasItemFilter) {
                         COALESCE(s.client_reference, '') LIKE 'ONLINE_ORDER:%'
                         OR COALESCE(s.payment_method, '') LIKE 'Online/%'
                     )
-                    THEN COALESCE(s.total_amount, s.total, 0)
+                    THEN COALESCE(s.total_amount, 0)
                     ELSE 0
                 END
             ), 0) AS pos_sales,
@@ -280,10 +280,14 @@ if ($hasItemFilter) {
 $stmt = $conn->prepare($sql);
 
 if (!$stmt) {
+    error_log(
+        'fetch_sales_trend prepare failed: ' . $conn->error
+    );
+
     http_response_code(500);
     echo json_encode([
         'status' => 'error',
-        'message' => 'Unable to prepare trend query.',
+        'message' => 'Unable to prepare the sales trend query.',
         'labels' => [],
         'totals' => [],
         'counts' => [],
@@ -296,10 +300,16 @@ if (!$stmt) {
 $stmt->bind_param($types, ...$params);
 
 if (!$stmt->execute()) {
+    $dbError = $stmt->error;
+
+    error_log(
+        'fetch_sales_trend execute failed: ' . $dbError
+    );
+
     http_response_code(500);
     echo json_encode([
         'status' => 'error',
-        'message' => 'Unable to load sales trend data.',
+        'message' => 'Unable to load sales trend data from the database.',
         'labels' => [],
         'totals' => [],
         'counts' => [],
