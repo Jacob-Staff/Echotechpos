@@ -119,7 +119,7 @@ $res = $stmt->get_result();
 
 // =========================================================
 // ONLINE STORE CLASSIFICATION
-// This mirrors the category/group structure shown in the public store header.
+// This mirrors the category/group/navigation choices shown in the public store header.
 // =========================================================
 $product_classification = [
     'Medicines' => [],
@@ -161,7 +161,17 @@ $product_classification = [
     ],
 
     'Agrovert' => [
-        'Agrovet Products'
+        'Agrovet Products',
+        'Veterinary Medicines',
+        'Animal Health',
+        'Livestock Care',
+        'Poultry Care',
+        'Pet Care',
+        'Animal Supplements',
+        'Dewormers',
+        'Flea and Tick Control',
+        'Vaccines',
+        'Antiseptics and Disinfectants'
     ]
 ];
 
