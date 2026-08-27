@@ -91,6 +91,8 @@ $sixMonthsAgo = date('Y-m-d', strtotime('-6 months'));
 require_once "../includes/head.php";
 ?>
 
+<meta charset="UTF-8">
+
 <style>
 :root {
     --dash-blue: #1677ff;
@@ -339,7 +341,7 @@ require_once "../includes/head.php";
                         <h3 class="mb-1 fw-bold">Sales Trend</h3>
                         <div class="small text-muted">
                             <strong><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></strong>
-                            <span class="mx-1">Ã¢â‚¬Â¢</span>
+                            <span class="mx-1">•</span>
                             <?= htmlspecialchars($display_branch_name) ?>
                         </div>
                     </div>
@@ -395,7 +397,7 @@ require_once "../includes/head.php";
                         <div class="d-flex justify-content-between align-items-start">
                             <div>
                                 <div class="kpi-label">Best Period</div>
-                                <div class="kpi-value" id="best-period">Ã¢â‚¬â€</div>
+                                <div class="kpi-value" id="best-period">-</div>
                                 <small id="best-period-value">No sales yet</small>
                             </div>
                             <div class="kpi-icon"><i class="fas fa-trophy"></i></div>
@@ -522,7 +524,7 @@ require_once "../includes/head.php";
                     <div class="col-12 col-md-4">
                         <div class="insight-box">
                             <div class="small text-muted">Highest Revenue Period</div>
-                            <div class="insight-value" id="insight-highest">Ã¢â‚¬â€</div>
+                            <div class="insight-value" id="insight-highest">-</div>
                         </div>
                     </div>
                     <div class="col-12 col-md-4">
@@ -534,7 +536,7 @@ require_once "../includes/head.php";
                     <div class="col-12 col-md-4">
                         <div class="insight-box">
                             <div class="small text-muted">Selected Date Range</div>
-                            <div class="insight-value" id="insight-range">Ã¢â‚¬â€</div>
+                            <div class="insight-value" id="insight-range">-</div>
                         </div>
                     </div>
                 </div>
@@ -692,7 +694,7 @@ require_once "../includes/head.php";
             $('pos-revenue').textContent = 'K 0.00';
             $('online-transactions').textContent = '0';
             $('pos-transactions').textContent = '0';
-            $('best-period').textContent = 'Ã¢â‚¬â€';
+            $('best-period').textContent = '-';
             $('best-period-value').textContent = 'No sales yet';
             renderChart([], [], [], []);
         } finally {
@@ -731,19 +733,19 @@ require_once "../includes/head.php";
         });
 
         if (bestIndex >= 0) {
-            $('best-period').textContent = labels[bestIndex] || 'Ã¢â‚¬â€';
+            $('best-period').textContent = labels[bestIndex] || '-';
             $('best-period-value').textContent = formatMoney(bestValue);
-            $('insight-highest').textContent = `${labels[bestIndex]} Ã¢â‚¬â€ ${formatMoney(bestValue)}`;
+            $('insight-highest').textContent = `${labels[bestIndex]} - ${formatMoney(bestValue)}`;
             $('insight-count').textContent = (counts[bestIndex] || 0).toLocaleString('en-ZM');
         } else {
-            $('best-period').textContent = 'Ã¢â‚¬â€';
+            $('best-period').textContent = '-';
             $('best-period-value').textContent = 'No sales yet';
             $('insight-highest').textContent = 'No sales recorded';
             $('insight-count').textContent = '0';
         }
 
         $('insight-range').textContent =
-            `${$('startDate').value} Ã¢â€ â€™ ${$('endDate').value}`;
+            `${$('startDate').value} to ${$('endDate').value}`;
 
         renderChart(labels, totals, onlineTotals, posTotals);
     }
@@ -839,7 +841,7 @@ require_once "../includes/head.php";
                 }
             }
         });
-.addEventListener('click', loadTrendData);
+$('filter-btn').addEventListener('click', loadTrendData);
 
     $('reset-btn').addEventListener('click', () => {
         $('search').value = '';
