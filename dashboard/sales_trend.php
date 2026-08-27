@@ -341,7 +341,7 @@ require_once "../includes/head.php";
                         <h3 class="mb-1 fw-bold">Sales Trend</h3>
                         <div class="small text-muted">
                             <strong><?= htmlspecialchars(strtoupper($display_pharmacy_name)) ?></strong>
-                            <span class="mx-1">•</span>
+                            <span class="mx-1">â€¢</span>
                             <?= htmlspecialchars($display_branch_name) ?>
                         </div>
                     </div>
@@ -678,11 +678,21 @@ require_once "../includes/head.php";
             }
 
             if (!response.ok || data.status === 'error') {
+                console.error('Sales trend API response:', data);
                 throw new Error(data.message || 'Unable to load sales trend data.');
             }
 
+            console.log('Sales trend data:', data);
             updateDashboard(data);
-            setStatus('');
+
+            if (!Array.isArray(data.labels) || data.labels.length === 0) {
+                setStatus(
+                    'No completed sales were found for the selected branch and date range.',
+                    'loading'
+                );
+            } else {
+                setStatus('');
+            }
         } catch (error) {
             console.error(error);
             setStatus(error.message || 'Failed to load sales trend data.', 'error');
@@ -841,7 +851,7 @@ require_once "../includes/head.php";
                 }
             }
         });
-$('filter-btn').addEventListener('click', loadTrendData);
+    $('filter-btn').addEventListener('click', loadTrendData);
 
     $('reset-btn').addEventListener('click', () => {
         $('search').value = '';
