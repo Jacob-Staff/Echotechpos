@@ -551,7 +551,7 @@ require_once "../includes/head.php";
     .table-custom {
 
         min-width:
-            980px;
+            700px;
     }
 
 
@@ -2217,7 +2217,7 @@ function loadSales() {
 
                             const paymentMethod =
                                 escapeHtml(
-                                    s.payment_method || 'Not specified'
+                                    s.payment_method || ''
                                 );
 
                             const source =
