@@ -830,7 +830,7 @@ $make_section_url = static function(string $section, int $bid): string {
                        data-branch="<?php echo $branch_id; ?>"
                        data-pharmacy="<?php echo $parent_pharmacy_id; ?>"
                        data-status="<?php echo $is_subscribed ? 'subscribed' : 'unsubscribed'; ?>">
-                        <?php echo $is_subscribed ? 'Ã¢Å“â€œ Subscribed' : 'Subscribe'; ?>
+                        <?php echo $is_subscribed ? 'Subscribed' : 'Subscribe'; ?>
                     </a>
                 <?php else: ?>
                     <a href="login_client.php?bid=<?php echo $branch_id; ?>" class="store-top-link">Login</a>
