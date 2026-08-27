@@ -119,61 +119,14 @@ $res = $stmt->get_result();
 
 // =========================================================
 // ONLINE STORE CLASSIFICATION
-// This mirrors the category/group/navigation choices shown in the public store header.
+// This mirrors the category/group structure shown in the public store header.
 // =========================================================
-$product_classification = [
-    'Medicines' => [],
+$store_category_config = __DIR__ . '/../api/store_categories.php';
+if (!file_exists($store_category_config)) {
+    die('Shared store category configuration not found: ' . htmlspecialchars($store_category_config, ENT_QUOTES, 'UTF-8'));
+}
+require_once $store_category_config;
 
-    'Personal Care' => [
-        'Skin Care',
-        'Hair Care',
-        'Baby and Mom Care',
-        'Sexual Wellness',
-        'Oral Care',
-        'Elderly Care'
-    ],
-
-    'Health Conditions' => [
-        'Common Conditions',
-        'Digestive Care',
-        'Eye Care',
-        'Cold, Cough & Smoking'
-    ],
-
-    'Vitamins & Supplements' => [
-        'Shop by Type'
-    ],
-
-    'Diabetes Care' => [
-        'Diabetes Essentials'
-    ],
-
-    'Healthcare Devices' => [
-        'Devices & Supports'
-    ],
-
-    'Homeopathic Medicine' => [
-        'Homeopathy'
-    ],
-
-    'Health Guide' => [
-        'Health Information'
-    ],
-
-    'Agrovert' => [
-        'Agrovet Products',
-        'Veterinary Medicines',
-        'Animal Health',
-        'Livestock Care',
-        'Poultry Care',
-        'Pet Care',
-        'Animal Supplements',
-        'Dewormers',
-        'Flea and Tick Control',
-        'Vaccines',
-        'Antiseptics and Disinfectants'
-    ]
-];
 
 // ==============================
 // ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂºÃ‚Â  HELPERS
