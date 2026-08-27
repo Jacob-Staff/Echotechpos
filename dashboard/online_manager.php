@@ -121,7 +121,7 @@ $res = $stmt->get_result();
 // ONLINE STORE CLASSIFICATION
 // This mirrors the category/group structure shown in the public store header.
 // =========================================================
-$store_category_config = __DIR__ . '/../api/store_categories.php';
+$store_category_config = __DIR__ . '../includes/store_categories.php';
 if (!file_exists($store_category_config)) {
     die('Shared store category configuration not found: ' . htmlspecialchars($store_category_config, ENT_QUOTES, 'UTF-8'));
 }
