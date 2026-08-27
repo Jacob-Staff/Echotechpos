@@ -712,7 +712,7 @@ if (file_exists("../includes/footer.php")) {
     display: flex;
     justify-content: center;
     width: 100%;
-    margin-top: 20px;
+    margin-top: 18px;
     padding: 0 12px 6px;
 }
 
@@ -720,8 +720,8 @@ if (file_exists("../includes/footer.php")) {
     display: flex;
     align-items: center;
     gap: 12px;
-    width: min(100%, 330px);
-    min-height: 56px;
+    width: min(100%, 285px);
+    min-height: 54px;
     padding: 8px 10px;
     border: 1px solid #dce5ef;
     border-radius: 14px;
@@ -882,6 +882,73 @@ $(document).ready(function () {
 
     }
 
+
+
+    /* ============================================================
+       ONLINE ORDERS LIVE BADGE
+       Checks the current branch every 3 seconds.
+       No page refresh is required.
+       ============================================================ */
+    function pollOnlineOrdersBadge() {
+
+        $.ajax({
+            url: 'fetch_online_order_count.php?_=' + Date.now(),
+            type: 'GET',
+            dataType: 'json',
+            cache: false,
+
+            success: function (data) {
+
+                if (!data || data.status !== 'success') {
+                    return;
+                }
+
+                const count = parseInt(data.count || 0, 10);
+                const shortcut = $('.online-orders-shortcut');
+
+                if (!shortcut.length) {
+                    return;
+                }
+
+                let badge = $('#badge-online-orders');
+
+                if (count > 0) {
+
+                    if (!badge.length) {
+                        badge = $(
+                            '<span class="online-orders-badge" id="badge-online-orders"></span>'
+                        );
+
+                        shortcut.append(badge);
+                    }
+
+                    badge.text(count);
+
+                } else {
+
+                    if (badge.length) {
+                        badge.remove();
+                    }
+                }
+            },
+
+            error: function (xhr) {
+                console.warn(
+                    'Online Orders live check failed:',
+                    xhr.status
+                );
+            }
+        });
+    }
+
+    // Run immediately when the dashboard opens.
+    pollOnlineOrdersBadge();
+
+    // Keep listening while the dashboard remains open.
+    setInterval(
+        pollOnlineOrdersBadge,
+        3000
+    );
 
     /*
     |--------------------------------------------------------------------------
