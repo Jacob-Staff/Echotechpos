@@ -237,219 +237,174 @@ if (isset($_SESSION['client_id'])) {
 
 /* =========================================================
    SUBSCRIPTION / CUSTOMER ENGAGEMENT
-   Clicking Subscribe creates a branch customer record.
-   The Customers page already reads from this same customers
-   table, so subscribed users appear there automatically.
-========================================================= */
+
+   IMPORTANT BUSINESS RULE:
+   - A customer is subscribed when a matching row exists in
+     customers for the CURRENT pharmacy + branch.
+   - Match priority: client_id, then exact email, then exact phone.
+   - When an existing manual customer is matched, it is linked to
+     the logged-in client_id instead of creating a duplicate.
+   - Unsubscribe removes ONLY the matched subscription/customer row.
+   ========================================================= */
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST' &&
     (string)($_POST['store_action'] ?? '') === 'toggle_subscription'
 ) {
     header('Content-Type: application/json; charset=utf-8');
 
-    $subscription_client_id = (int)($_SESSION['client_id'] ?? 0);
-    $subscription_branch_id = (int)($_POST['branch_id'] ?? 0);
+    $sid = (int)($_SESSION['client_id'] ?? 0);
+    $sbid = (int)($_POST['branch_id'] ?? 0);
 
-    if ($subscription_client_id <= 0) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Please log in before subscribing.'
-        ]);
+    if ($sid <= 0) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Please log in before subscribing.']);
+        exit;
+    }
+    if ($sbid <= 0) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Invalid branch.']);
         exit;
     }
 
-    if ($subscription_branch_id <= 0) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'The selected branch is invalid.'
-        ]);
+    $st = $conn->prepare("SELECT id, pharmacy_id, branch_name FROM branches WHERE id = ? AND is_active = 1 LIMIT 1");
+    if (!$st) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Unable to verify the branch.']);
+        exit;
+    }
+    $st->bind_param('i', $sbid);
+    $st->execute();
+    $branch = $st->get_result()->fetch_assoc();
+    $st->close();
+
+    if (!$branch) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'The selected branch is unavailable.']);
         exit;
     }
 
-    /* Verify the branch and obtain its pharmacy. */
-    $branch_stmt = $conn->prepare(
-        "SELECT id, pharmacy_id, branch_name
-         FROM branches
-         WHERE id = ? AND is_active = 1
-         LIMIT 1"
-    );
+    $spid = (int)$branch['pharmacy_id'];
 
-    if (!$branch_stmt) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Unable to verify the selected branch.'
-        ]);
+    $st = $conn->prepare("SELECT id, full_name, phone, email FROM clients WHERE id = ? LIMIT 1");
+    if (!$st) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Unable to load your account.']);
+        exit;
+    }
+    $st->bind_param('i', $sid);
+    $st->execute();
+    $client = $st->get_result()->fetch_assoc();
+    $st->close();
+
+    if (!$client) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Your customer account could not be found.']);
         exit;
     }
 
-    $branch_stmt->bind_param('i', $subscription_branch_id);
-    $branch_stmt->execute();
-    $branch_row = $branch_stmt->get_result()->fetch_assoc();
-    $branch_stmt->close();
+    $sname  = trim((string)($client['full_name'] ?? 'Client'));
+    $sphone = trim((string)($client['phone'] ?? ''));
+    $semail = strtolower(trim((string)($client['email'] ?? '')));
+    if ($sname === '') $sname = 'Client';
 
-    if (!$branch_row) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'The selected branch is unavailable.'
-        ]);
-        exit;
+    /*
+       Find an existing customer record.
+       First use client_id. If an older/manual customer has no client_id,
+       match the same account by exact email or phone and link it.
+    */
+    $existing = null;
+
+    $st = $conn->prepare("SELECT id, client_id, name, phone, email
+                          FROM customers
+                          WHERE pharmacy_id = ? AND branch_id = ? AND client_id = ?
+                          LIMIT 1");
+    if ($st) {
+        $st->bind_param('iii', $spid, $sbid, $sid);
+        $st->execute();
+        $existing = $st->get_result()->fetch_assoc();
+        $st->close();
     }
 
-    $subscription_pharmacy_id = (int)$branch_row['pharmacy_id'];
-
-    /* Get the actual logged-in customer's details. */
-    $client_stmt = $conn->prepare(
-        "SELECT id, full_name, phone, email
-         FROM clients
-         WHERE id = ?
-         LIMIT 1"
-    );
-
-    if (!$client_stmt) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Unable to load your account details.'
-        ]);
-        exit;
+    if (!$existing && $semail !== '') {
+        $st = $conn->prepare("SELECT id, client_id, name, phone, email
+                              FROM customers
+                              WHERE pharmacy_id = ? AND branch_id = ?
+                                AND LOWER(TRIM(COALESCE(email,''))) = ?
+                              LIMIT 1");
+        if ($st) {
+            $st->bind_param('iis', $spid, $sbid, $semail);
+            $st->execute();
+            $existing = $st->get_result()->fetch_assoc();
+            $st->close();
+        }
     }
 
-    $client_stmt->bind_param('i', $subscription_client_id);
-    $client_stmt->execute();
-    $client_row = $client_stmt->get_result()->fetch_assoc();
-    $client_stmt->close();
-
-    if (!$client_row) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Your customer account could not be found.'
-        ]);
-        exit;
+    if (!$existing && $sphone !== '') {
+        $st = $conn->prepare("SELECT id, client_id, name, phone, email
+                              FROM customers
+                              WHERE pharmacy_id = ? AND branch_id = ?
+                                AND TRIM(COALESCE(phone,'')) = ?
+                              LIMIT 1");
+        if ($st) {
+            $st->bind_param('iis', $spid, $sbid, $sphone);
+            $st->execute();
+            $existing = $st->get_result()->fetch_assoc();
+            $st->close();
+        }
     }
 
-    /* Check whether this customer already subscribes to this branch. */
-    $check_stmt = $conn->prepare(
-        "SELECT id
-         FROM customers
-         WHERE client_id = ?
-           AND pharmacy_id = ?
-           AND branch_id = ?
-         LIMIT 1"
-    );
+    /* Already subscribed -> remove that subscription row. */
+    if ($existing) {
+        $rid = (int)$existing['id'];
+        $st = $conn->prepare("DELETE FROM customers
+                              WHERE id = ? AND pharmacy_id = ? AND branch_id = ?
+                              LIMIT 1");
+        if (!$st) {
+            echo json_encode(['success'=>false,'subscribed'=>true,'message'=>'Unable to unsubscribe right now.']);
+            exit;
+        }
+        $st->bind_param('iii', $rid, $spid, $sbid);
+        $ok = $st->execute();
+        $st->close();
 
-    if (!$check_stmt) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Unable to check your subscription.'
-        ]);
-        exit;
-    }
-
-    $check_stmt->bind_param(
-        'iii',
-        $subscription_client_id,
-        $subscription_pharmacy_id,
-        $subscription_branch_id
-    );
-    $check_stmt->execute();
-    $existing_customer = $check_stmt->get_result()->fetch_assoc();
-    $check_stmt->close();
-
-    /* Existing subscriber: unsubscribe. */
-    if ($existing_customer) {
-        $delete_stmt = $conn->prepare(
-            "DELETE FROM customers
-             WHERE id = ?
-               AND client_id = ?
-               AND pharmacy_id = ?
-               AND branch_id = ?
-             LIMIT 1"
-        );
-
-        if (!$delete_stmt) {
-            echo json_encode([
-                'success' => false,
-                'message' => 'Unable to update your subscription.'
-            ]);
+        if (!$ok) {
+            echo json_encode(['success'=>false,'subscribed'=>true,'message'=>'Unable to unsubscribe right now.']);
             exit;
         }
 
-        $customer_row_id = (int)$existing_customer['id'];
-
-        $delete_stmt->bind_param(
-            'iiii',
-            $customer_row_id,
-            $subscription_client_id,
-            $subscription_pharmacy_id,
-            $subscription_branch_id
-        );
-
-        $deleted = $delete_stmt->execute();
-        $delete_stmt->close();
-
         echo json_encode([
-            'success' => $deleted,
-            'subscribed' => false,
-            'message' => $deleted
-                ? 'You have unsubscribed from this pharmacy.'
-                : 'Unable to update your subscription.'
+            'success'=>true,
+            'subscribed'=>false,
+            'customer_id'=>$rid,
+            'message'=>'You are no longer subscribed to ' . (string)$branch['branch_name'] . '.'
         ]);
         exit;
     }
 
-    /* New subscriber: add the customer to this branch. */
-    $customer_name  = trim((string)($client_row['full_name'] ?? 'Client'));
-    $customer_phone = trim((string)($client_row['phone'] ?? ''));
-    $customer_email = trim((string)($client_row['email'] ?? ''));
-
-    if ($customer_name === '') {
-        $customer_name = 'Client';
-    }
-
-    $insert_stmt = $conn->prepare(
-        "INSERT INTO customers
-            (pharmacy_id, branch_id, client_id, name, phone, email)
-         VALUES (?, ?, ?, ?, ?, ?)"
-    );
-
-    if (!$insert_stmt) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Unable to create your customer subscription.'
-        ]);
+    /* Not subscribed -> create a customer record linked to this client. */
+    $st = $conn->prepare("INSERT INTO customers
+                          (pharmacy_id, branch_id, client_id, name, phone, email)
+                          VALUES (?, ?, ?, ?, ?, ?)");
+    if (!$st) {
+        echo json_encode(['success'=>false,'subscribed'=>false,'message'=>'Unable to create your subscription.']);
         exit;
     }
+    $st->bind_param('iiisss', $spid, $sbid, $sid, $sname, $sphone, $semail);
+    $ok = $st->execute();
+    $rid = (int)$st->insert_id;
+    $err = (string)$st->error;
+    $st->close();
 
-    $insert_stmt->bind_param(
-        'iiisss',
-        $subscription_pharmacy_id,
-        $subscription_branch_id,
-        $subscription_client_id,
-        $customer_name,
-        $customer_phone,
-        $customer_email
-    );
-
-    $inserted = $insert_stmt->execute();
-    $new_customer_id = $insert_stmt->insert_id;
-    $insert_error = $insert_stmt->error;
-    $insert_stmt->close();
-
-    if (!$inserted) {
+    if (!$ok) {
         echo json_encode([
-            'success' => false,
-            'message' => $insert_error !== ''
-                ? 'Unable to subscribe at the moment.'
-                : 'Unable to subscribe at the moment.'
+            'success'=>false,
+            'subscribed'=>false,
+            'message'=>$err !== '' ? 'Unable to subscribe: ' . $err : 'Unable to subscribe right now.'
         ]);
         exit;
     }
 
     echo json_encode([
-        'success' => true,
-        'subscribed' => true,
-        'customer_id' => (int)$new_customer_id,
-        'branch_id' => $subscription_branch_id,
-        'message' => 'You are now subscribed to ' . (string)$branch_row['branch_name'] . '.'
+        'success'=>true,
+        'subscribed'=>true,
+        'customer_id'=>$rid,
+        'branch_id'=>$sbid,
+        'pharmacy_id'=>$spid,
+        'message'=>'Subscribed to ' . (string)$branch['branch_name'] . '. You are now in this pharmacy\'s customer list.'
     ]);
     exit;
 }
@@ -1033,25 +988,98 @@ $make_section_url = static function(string $section, int $bid): string {
             <div class="store-top-links">
                 <?php
                 $is_subscribed = false;
-                if (isset($_SESSION['client_id'])) {
-                    $cid = (int)$_SESSION['client_id'];
-                    if ($check_sub = $conn->prepare("SELECT id FROM customers WHERE client_id = ? AND branch_id = ? LIMIT 1")) {
-                        $check_sub->bind_param("ii", $cid, $branch_id);
-                        $check_sub->execute();
-                        $is_subscribed = $check_sub->get_result()->num_rows > 0;
-                        $check_sub->close();
+                $header_sub_client_id = (int)($_SESSION['client_id'] ?? 0);
+                $header_sub_email = '';
+                $header_sub_phone = '';
+
+                if ($header_sub_client_id > 0) {
+                    /* Load the logged-in account identity. */
+                    if ($cs = $conn->prepare("SELECT email, phone FROM clients WHERE id = ? LIMIT 1")) {
+                        $cs->bind_param('i', $header_sub_client_id);
+                        $cs->execute();
+                        $cr = $cs->get_result()->fetch_assoc() ?: [];
+                        $header_sub_email = strtolower(trim((string)($cr['email'] ?? '')));
+                        $header_sub_phone = trim((string)($cr['phone'] ?? ''));
+                        $cs->close();
+                    }
+
+                    /* First: an already-linked app subscriber. */
+                    $linked_id = 0;
+                    if ($cs = $conn->prepare("SELECT id FROM customers WHERE pharmacy_id = ? AND branch_id = ? AND client_id = ? LIMIT 1")) {
+                        $cs->bind_param('iii', $parent_pharmacy_id, $branch_id, $header_sub_client_id);
+                        $cs->execute();
+                        $linked = $cs->get_result()->fetch_assoc();
+                        $linked_id = (int)($linked['id'] ?? 0);
+                        $cs->close();
+                    }
+
+                    /*
+                       Second: if an older/manual customer record already represents
+                       this account by email or phone, link it to client_id. This
+                       makes the Customers page identify it as a Subscribed App User.
+                    */
+                    if ($linked_id <= 0 && $header_sub_email !== '') {
+                        if ($cs = $conn->prepare("SELECT id FROM customers
+                                                 WHERE pharmacy_id = ? AND branch_id = ?
+                                                   AND LOWER(TRIM(COALESCE(email,''))) = ?
+                                                 LIMIT 1")) {
+                            $cs->bind_param('iis', $parent_pharmacy_id, $branch_id, $header_sub_email);
+                            $cs->execute();
+                            $match = $cs->get_result()->fetch_assoc();
+                            $linked_id = (int)($match['id'] ?? 0);
+                            $cs->close();
+                        }
+                    }
+
+                    if ($linked_id <= 0 && $header_sub_phone !== '') {
+                        if ($cs = $conn->prepare("SELECT id FROM customers
+                                                 WHERE pharmacy_id = ? AND branch_id = ?
+                                                   AND TRIM(COALESCE(phone,'')) = ?
+                                                 LIMIT 1")) {
+                            $cs->bind_param('iis', $parent_pharmacy_id, $branch_id, $header_sub_phone);
+                            $cs->execute();
+                            $match = $cs->get_result()->fetch_assoc();
+                            $linked_id = (int)($match['id'] ?? 0);
+                            $cs->close();
+                        }
+                    }
+
+                    if ($linked_id > 0) {
+                        /* Link the existing customer row to the real app account. */
+                        if ($cs = $conn->prepare("UPDATE customers
+                                                 SET client_id = ?, name = ?, phone = ?, email = ?
+                                                 WHERE id = ? AND pharmacy_id = ? AND branch_id = ?
+                                                 LIMIT 1")) {
+                            $sync_name = 'Client';
+                            if ($ns = $conn->prepare("SELECT full_name FROM clients WHERE id = ? LIMIT 1")) {
+                                $ns->bind_param('i', $header_sub_client_id);
+                                $ns->execute();
+                                $nr = $ns->get_result()->fetch_assoc() ?: [];
+                                $sync_name = trim((string)($nr['full_name'] ?? 'Client')) ?: 'Client';
+                                $ns->close();
+                            }
+                            $cs->bind_param('isssiii', $header_sub_client_id, $sync_name, $header_sub_phone, $header_sub_email, $linked_id, $parent_pharmacy_id, $branch_id);
+                            $cs->execute();
+                            $cs->close();
+                        }
+                        $is_subscribed = true;
                     }
                 }
+
                 ?>
 
                 <?php if (isset($_SESSION['client_id'])): ?>
-                    <a href="javascript:void(0);" id="subscribeBtn" class="store-top-link toggle-subscribe"
-                       data-client="<?php echo (int)$_SESSION['client_id']; ?>"
-                       data-branch="<?php echo $branch_id; ?>"
-                       data-pharmacy="<?php echo $parent_pharmacy_id; ?>"
-                       data-status="<?php echo $is_subscribed ? 'subscribed' : 'unsubscribed'; ?>">
-                        <?php echo $is_subscribed ? 'Subscribed' : 'Subscribe'; ?>
-                    </a>
+                    <form method="post" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" class="d-inline m-0 subscription-form">
+                        <input type="hidden" name="store_action" value="toggle_subscription">
+                        <input type="hidden" name="branch_id" value="<?php echo (int)$branch_id; ?>">
+                        <button type="submit" id="subscribeBtn" class="store-top-link toggle-subscribe border-0 bg-transparent p-0"
+                                data-client="<?php echo (int)$_SESSION['client_id']; ?>"
+                                data-branch="<?php echo (int)$branch_id; ?>"
+                                data-pharmacy="<?php echo (int)$parent_pharmacy_id; ?>"
+                                data-status="<?php echo $is_subscribed ? 'subscribed' : 'unsubscribed'; ?>">
+                            <?php echo $is_subscribed ? 'âœ“ Subscribed' : 'Subscribe'; ?>
+                        </button>
+                    </form>
                 <?php else: ?>
                     <a href="login_client.php?bid=<?php echo $branch_id; ?>" class="store-top-link">Login</a>
                 <?php endif; ?>
@@ -1484,97 +1512,65 @@ $make_section_url = static function(string $section, int $bid): string {
         }, 3500);
     }
 
-    document.querySelectorAll('.toggle-subscribe').forEach(function(btn){
-        btn.addEventListener('click', function(e){
-            e.preventDefault();
+    /* =========================================================
+       SUBSCRIBE â€” isolated delegated handler.
+       This is deliberately independent of the mega-menu code so a
+       menu error cannot prevent subscription from working.
+       ========================================================= */
+    document.addEventListener('submit', function(e){
+        const form = e.target.closest('.subscription-form');
+        if(!form) return;
 
-            if(btn.dataset.busy === '1') return;
+        const btn = form.querySelector('.toggle-subscribe');
+        if(!btn || btn.dataset.busy === '1') return;
 
-            const branchId = btn.getAttribute('data-branch');
-            if(!branchId){
-                showSubscriptionToast('The selected branch could not be identified.', false);
-                return;
+        e.preventDefault();
+
+        const currentlySubscribed = btn.getAttribute('data-status') === 'subscribed';
+        if(currentlySubscribed && !window.confirm('Unsubscribe from this pharmacy?')) return;
+
+        const originalText = btn.textContent.trim();
+        btn.dataset.busy = '1';
+        btn.disabled = true;
+        btn.textContent = currentlySubscribed ? 'Unsubscribing...' : 'Subscribing...';
+
+        const body = new URLSearchParams(new FormData(form));
+
+        fetch(form.action || window.location.href, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json'
+            },
+            body: body.toString()
+        })
+        .then(async function(response){
+            const raw = await response.text();
+            let data;
+            try { data = JSON.parse(raw); }
+            catch(err){ throw new Error('Server did not return a valid subscription response.'); }
+            if(!response.ok || !data.success){
+                throw new Error(data.message || 'Subscription update failed.');
             }
-
-            const currentlySubscribed = btn.getAttribute('data-status') === 'subscribed';
-
-            if(currentlySubscribed){
-                if(!window.confirm('Unsubscribe from this pharmacy?')){
-                    return;
-                }
-            }
-
-            const originalText = btn.textContent.trim();
-            btn.dataset.busy = '1';
-            btn.style.pointerEvents = 'none';
-            btn.style.opacity = '.65';
-            btn.textContent = currentlySubscribed ? 'Updating...' : 'Subscribing...';
-
-            const body = new URLSearchParams();
-            body.set('store_action', 'toggle_subscription');
-            body.set('branch_id', branchId);
-
-            fetch(window.location.href, {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
-                body: body.toString()
-            })
-            .then(function(response){
-                return response.text().then(function(raw){
-                    let data;
-
-                    try {
-                        data = JSON.parse(raw);
-                    } catch(error) {
-                        throw new Error(
-                            'The server returned an invalid response.'
-                        );
-                    }
-
-                    return data;
-                });
-            })
-            .then(function(data){
-                if(!data.success){
-                    throw new Error(data.message || 'Unable to update subscription.');
-                }
-
-                const subscribed = data.subscribed === true;
-
-                btn.setAttribute(
-                    'data-status',
-                    subscribed ? 'subscribed' : 'unsubscribed'
-                );
-
-                btn.textContent = subscribed ? 'Subscribed' : 'Subscribe';
-
-                showSubscriptionToast(
-                    data.message || (
-                        subscribed
-                            ? 'You are now subscribed.'
-                            : 'Subscription removed.'
-                    ),
-                    true
-                );
-            })
-            .catch(function(error){
-                btn.textContent = originalText;
-                showSubscriptionToast(
-                    error.message || 'Unable to update subscription.',
-                    false
-                );
-            })
-            .finally(function(){
-                btn.dataset.busy = '0';
-                btn.style.pointerEvents = '';
-                btn.style.opacity = '';
-            });
+            return data;
+        })
+        .then(function(data){
+            const subscribed = data.subscribed === true;
+            btn.dataset.status = subscribed ? 'subscribed' : 'unsubscribed';
+            btn.textContent = subscribed ? 'âœ“ Subscribed' : 'Subscribe';
+            showSubscriptionToast(data.message || (subscribed ? 'Subscribed.' : 'Unsubscribed.'), true);
+        })
+        .catch(function(err){
+            btn.textContent = originalText;
+            showSubscriptionToast(err.message || 'Unable to update subscription.', false);
+        })
+        .finally(function(){
+            btn.dataset.busy = '0';
+            btn.disabled = false;
         });
-    }
+    });
 
     document.addEventListener('click', function(e){
         if(!e.target.closest('.mega-item')){
