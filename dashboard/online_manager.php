@@ -143,6 +143,9 @@ $product_classification = [
     ],
     'Health Guide' => [
         'Health Information'
+    ],
+    'Agrovert' => [
+        'Agrovet Products'
     ]
 ];
 
