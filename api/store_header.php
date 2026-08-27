@@ -822,7 +822,7 @@ if (
  * routing are native to this pharmacy store. Product links are routed into
  * this store using search terms/sections rather than Truemeds URLs or assets.
  */
-require_once __DIR__ . '/store_categories.php';
+require_once __DIR__ . '/../includes/store_categories.php';
 
 $store_base = 'online_store.php';
 $make_search_url = static function(string $term, int $bid): string {
