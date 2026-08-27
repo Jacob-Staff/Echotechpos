@@ -370,8 +370,12 @@ if (isset($_SESSION['client_id'])) {
         .mega-link:hover{background:#eaf0f5;color:#1769d1;}
         .mega-link .mdi{display:none;}
 
-        /* Each dropdown is anchored to its own category trigger, exactly like the reference navigation. */
+        /* Smart edge-aware dropdown positioning.
+           Default: open toward the right.
+           When the full 390px panel would cross the viewport's right edge,
+           JavaScript adds .mega-open-left and the panel opens toward the left. */
         .mega-item > .mega-panel{left:0;right:auto;}
+        .mega-item > .mega-panel.mega-open-left{left:auto;right:0;}
 
         /* Mobile menu */
         .mobile-category-toggle{display:none;border:0;background:#fff;width:100%;padding:11px 14px;font-size:13px;font-weight:700;color:#34495e;text-align:left;}
@@ -1027,9 +1031,12 @@ $make_section_url = static function(string $section, int $bid): string {
         });
     }
 
-    /* Desktop Truemeds-style two-column mega menus.
-       The first group is visible immediately; hovering a group changes
-       only the right-hand column, exactly like the reference. */
+    /* =========================================================
+       DESKTOP MEGA MENU â€” SMART VIEWPORT EDGE DETECTION
+       The panel is 390px wide.  Before opening, measure the actual
+       trigger position and switch sides when the right edge is too close.
+       This fixes Health Guide / Agrovert and any future right-edge item.
+       ========================================================= */
     document.querySelectorAll('.mega-item').forEach(function(item){
         const panel = item.querySelector('.mega-panel');
         if(!panel) return;
@@ -1046,6 +1053,40 @@ $make_section_url = static function(string $section, int $bid): string {
             });
         }
 
+        function positionPanel(){
+            if(window.innerWidth < 992) return;
+
+            // Force the panel to be measurable while it is being positioned.
+            panel.classList.remove('mega-open-left');
+
+            const trigger = item.querySelector('.mega-trigger');
+            if(!trigger) return;
+
+            const triggerRect = trigger.getBoundingClientRect();
+            const panelWidth = panel.getBoundingClientRect().width || 390;
+            const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+            const edgeGap = 12;
+
+            // First choice: left edge of panel aligns with the category.
+            const rightEdge = triggerRect.left + panelWidth;
+
+            // If that would overflow, anchor the panel's RIGHT edge to the
+            // category's RIGHT edge so the entire panel opens to the left.
+            if(rightEdge > viewportWidth - edgeGap){
+                panel.classList.add('mega-open-left');
+            }
+        }
+
+        function openMenu(){
+            item.classList.add('menu-open');
+            const current = panel.querySelector('.mega-side-link.active') || sideLinks[0];
+            if(current) activate(current.dataset.megaGroup);
+
+            // The panel becomes display:block after menu-open, so measure it
+            // on the next frame using its real rendered width.
+            requestAnimationFrame(positionPanel);
+        }
+
         sideLinks.forEach(function(link){
             link.addEventListener('mouseenter', function(){
                 activate(link.dataset.megaGroup);
@@ -1055,33 +1096,41 @@ $make_section_url = static function(string $section, int $bid): string {
             });
         });
 
-        item.addEventListener('mouseenter', function(){
-            item.classList.add('menu-open');
-            const current = panel.querySelector('.mega-side-link.active') || sideLinks[0];
-            if(current) activate(current.dataset.megaGroup);
-        });
+        item.addEventListener('mouseenter', openMenu);
 
         item.addEventListener('mouseleave', function(){
             item.classList.remove('menu-open');
         });
 
-        /* Clicking a top-level category opens its menu on desktop instead
-           of immediately navigating when it has subcategories. */
         const trigger = item.querySelector('.mega-trigger');
         if(trigger && sideLinks.length){
             trigger.addEventListener('click', function(e){
                 if(window.innerWidth >= 992){
                     e.preventDefault();
                     const wasOpen = item.classList.contains('menu-open');
+
                     document.querySelectorAll('.mega-item.menu-open').forEach(function(other){
-                        if(other !== item) other.classList.remove('menu-open');
+                        if(other !== item){
+                            other.classList.remove('menu-open');
+                            const otherPanel = other.querySelector('.mega-panel');
+                            if(otherPanel) otherPanel.classList.remove('mega-open-left');
+                        }
                     });
-                    item.classList.toggle('menu-open', !wasOpen);
-                    const current = panel.querySelector('.mega-side-link.active') || sideLinks[0];
-                    if(current) activate(current.dataset.megaGroup);
+
+                    if(wasOpen){
+                        item.classList.remove('menu-open');
+                        panel.classList.remove('mega-open-left');
+                    }else{
+                        openMenu();
+                    }
                 }
             });
         }
+
+        // Recalculate when the browser is resized while this menu is open.
+        window.addEventListener('resize', function(){
+            if(item.classList.contains('menu-open')) positionPanel();
+        });
     });
 
 
