@@ -593,6 +593,24 @@ $nav = [
         'groups' => [
             'Health Information' => ['Health Articles','Diseases & Health Conditions','Health Stories','Ayurveda','Understanding Generic Medicines','Health Library']
         ]
+    ],
+    'Agrovert' => [
+        'icon' => 'mdi-sprout',
+        'section' => 'agrovert',
+        'groups' => [
+            'Agrovet Products' => [
+                'Veterinary Medicines',
+                'Animal Health',
+                'Livestock Care',
+                'Poultry Care',
+                'Pet Care',
+                'Animal Supplements',
+                'Dewormers',
+                'Flea and Tick Control',
+                'Vaccines',
+                'Antiseptics and Disinfectants'
+            ]
+        ]
     ]
 ];
 
@@ -636,7 +654,7 @@ $make_section_url = static function(string $section, int $bid): string {
             <i class="mdi mdi-map-marker-outline"></i>
             <span>Shopping in</span>
             <strong><?php echo htmlspecialchars($branch_name); ?></strong>
-            <span>Â·</span>
+            <span>Ã‚Â·</span>
             <a href="javascript:void(0);" id="tmMobileBranchOpen" style="color:#1769d1;text-decoration:none;font-weight:700;">Change</a>
         </div>
     </div>
@@ -655,7 +673,7 @@ $make_section_url = static function(string $section, int $bid): string {
             <img class="tm-mobile-drawer-logo" src="<?php echo $logo_web_path_html; ?>" alt="">
             <div class="tm-mobile-drawer-title">
                 <strong><?php echo htmlspecialchars($pharmacy_name); ?></strong>
-                <span>Online Pharmacy Â· <?php echo htmlspecialchars($branch_name); ?></span>
+                <span>Online Pharmacy Ã‚Â· <?php echo htmlspecialchars($branch_name); ?></span>
             </div>
             <button type="button" class="tm-mobile-drawer-close" id="tmMobileMenuClose" aria-label="Close menu"><i class="mdi mdi-close"></i></button>
         </div>
@@ -808,7 +826,7 @@ $make_section_url = static function(string $section, int $bid): string {
                        data-branch="<?php echo $branch_id; ?>"
                        data-pharmacy="<?php echo $parent_pharmacy_id; ?>"
                        data-status="<?php echo $is_subscribed ? 'subscribed' : 'unsubscribed'; ?>">
-                        <?php echo $is_subscribed ? 'âœ“ Subscribed' : 'Subscribe'; ?>
+                        <?php echo $is_subscribed ? 'Ã¢Å“â€œ Subscribed' : 'Subscribe'; ?>
                     </a>
                 <?php else: ?>
                     <a href="login_client.php?bid=<?php echo $branch_id; ?>" class="store-top-link">Login</a>
