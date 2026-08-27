@@ -234,6 +234,226 @@ if (isset($_SESSION['client_id'])) {
     }
 }
 
+
+/* =========================================================
+   SUBSCRIPTION / CUSTOMER ENGAGEMENT
+   Clicking Subscribe creates a branch customer record.
+   The Customers page already reads from this same customers
+   table, so subscribed users appear there automatically.
+========================================================= */
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    (string)($_POST['store_action'] ?? '') === 'toggle_subscription'
+) {
+    header('Content-Type: application/json; charset=utf-8');
+
+    $subscription_client_id = (int)($_SESSION['client_id'] ?? 0);
+    $subscription_branch_id = (int)($_POST['branch_id'] ?? 0);
+
+    if ($subscription_client_id <= 0) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Please log in before subscribing.'
+        ]);
+        exit;
+    }
+
+    if ($subscription_branch_id <= 0) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'The selected branch is invalid.'
+        ]);
+        exit;
+    }
+
+    /* Verify the branch and obtain its pharmacy. */
+    $branch_stmt = $conn->prepare(
+        "SELECT id, pharmacy_id, branch_name
+         FROM branches
+         WHERE id = ? AND is_active = 1
+         LIMIT 1"
+    );
+
+    if (!$branch_stmt) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Unable to verify the selected branch.'
+        ]);
+        exit;
+    }
+
+    $branch_stmt->bind_param('i', $subscription_branch_id);
+    $branch_stmt->execute();
+    $branch_row = $branch_stmt->get_result()->fetch_assoc();
+    $branch_stmt->close();
+
+    if (!$branch_row) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'The selected branch is unavailable.'
+        ]);
+        exit;
+    }
+
+    $subscription_pharmacy_id = (int)$branch_row['pharmacy_id'];
+
+    /* Get the actual logged-in customer's details. */
+    $client_stmt = $conn->prepare(
+        "SELECT id, full_name, phone, email
+         FROM clients
+         WHERE id = ?
+         LIMIT 1"
+    );
+
+    if (!$client_stmt) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Unable to load your account details.'
+        ]);
+        exit;
+    }
+
+    $client_stmt->bind_param('i', $subscription_client_id);
+    $client_stmt->execute();
+    $client_row = $client_stmt->get_result()->fetch_assoc();
+    $client_stmt->close();
+
+    if (!$client_row) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Your customer account could not be found.'
+        ]);
+        exit;
+    }
+
+    /* Check whether this customer already subscribes to this branch. */
+    $check_stmt = $conn->prepare(
+        "SELECT id
+         FROM customers
+         WHERE client_id = ?
+           AND pharmacy_id = ?
+           AND branch_id = ?
+         LIMIT 1"
+    );
+
+    if (!$check_stmt) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Unable to check your subscription.'
+        ]);
+        exit;
+    }
+
+    $check_stmt->bind_param(
+        'iii',
+        $subscription_client_id,
+        $subscription_pharmacy_id,
+        $subscription_branch_id
+    );
+    $check_stmt->execute();
+    $existing_customer = $check_stmt->get_result()->fetch_assoc();
+    $check_stmt->close();
+
+    /* Existing subscriber: unsubscribe. */
+    if ($existing_customer) {
+        $delete_stmt = $conn->prepare(
+            "DELETE FROM customers
+             WHERE id = ?
+               AND client_id = ?
+               AND pharmacy_id = ?
+               AND branch_id = ?
+             LIMIT 1"
+        );
+
+        if (!$delete_stmt) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'Unable to update your subscription.'
+            ]);
+            exit;
+        }
+
+        $customer_row_id = (int)$existing_customer['id'];
+
+        $delete_stmt->bind_param(
+            'iiii',
+            $customer_row_id,
+            $subscription_client_id,
+            $subscription_pharmacy_id,
+            $subscription_branch_id
+        );
+
+        $deleted = $delete_stmt->execute();
+        $delete_stmt->close();
+
+        echo json_encode([
+            'success' => $deleted,
+            'subscribed' => false,
+            'message' => $deleted
+                ? 'You have unsubscribed from this pharmacy.'
+                : 'Unable to update your subscription.'
+        ]);
+        exit;
+    }
+
+    /* New subscriber: add the customer to this branch. */
+    $customer_name  = trim((string)($client_row['full_name'] ?? 'Client'));
+    $customer_phone = trim((string)($client_row['phone'] ?? ''));
+    $customer_email = trim((string)($client_row['email'] ?? ''));
+
+    if ($customer_name === '') {
+        $customer_name = 'Client';
+    }
+
+    $insert_stmt = $conn->prepare(
+        "INSERT INTO customers
+            (pharmacy_id, branch_id, client_id, name, phone, email)
+         VALUES (?, ?, ?, ?, ?, ?)"
+    );
+
+    if (!$insert_stmt) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Unable to create your customer subscription.'
+        ]);
+        exit;
+    }
+
+    $insert_stmt->bind_param(
+        'iiisss',
+        $subscription_pharmacy_id,
+        $subscription_branch_id,
+        $subscription_client_id,
+        $customer_name,
+        $customer_phone,
+        $customer_email
+    );
+
+    $inserted = $insert_stmt->execute();
+    $new_customer_id = $insert_stmt->insert_id;
+    $insert_error = $insert_stmt->error;
+    $insert_stmt->close();
+
+    if (!$inserted) {
+        echo json_encode([
+            'success' => false,
+            'message' => $insert_error !== ''
+                ? 'Unable to subscribe at the moment.'
+                : 'Unable to subscribe at the moment.'
+        ]);
+        exit;
+    }
+
+    echo json_encode([
+        'success' => true,
+        'subscribed' => true,
+        'customer_id' => (int)$new_customer_id,
+        'branch_id' => $subscription_branch_id,
+        'message' => 'You are now subscribed to ' . (string)$branch_row['branch_name'] . '.'
+    ]);
+    exit;
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1216,6 +1436,145 @@ $make_section_url = static function(string $section, int $bid): string {
     const mobileBranchLink = document.getElementById('tmMobileBranchLink');
     if(mobileBranchOpen) mobileBranchOpen.addEventListener('click', showBranchSelector);
     if(mobileBranchLink) mobileBranchLink.addEventListener('click', showBranchSelector);
+
+
+    /* =========================================================
+       SUBSCRIBE / UNSUBSCRIBE
+       Sends the action back to this same PHP header so the
+       subscriber is inserted into the pharmacy's customers table.
+    ========================================================= */
+    function showSubscriptionToast(message, success){
+        let toast = document.getElementById('subscriptionToast');
+
+        if(!toast){
+            toast = document.createElement('div');
+            toast.id = 'subscriptionToast';
+            toast.style.cssText = [
+                'position:fixed',
+                'top:78px',
+                'right:20px',
+                'z-index:99999',
+                'max-width:360px',
+                'padding:13px 16px',
+                'border-radius:12px',
+                'background:#fff',
+                'border:1px solid #e3e8ec',
+                'box-shadow:0 12px 35px rgba(0,0,0,.16)',
+                'font:600 13px Arial,Helvetica,sans-serif',
+                'transition:opacity .2s ease,transform .2s ease',
+                'opacity:0',
+                'transform:translateY(-8px)'
+            ].join(';');
+            document.body.appendChild(toast);
+        }
+
+        toast.style.borderLeft = '4px solid ' + (success ? '#00a878' : '#dc3545');
+        toast.style.color = '#263746';
+        toast.textContent = message;
+
+        requestAnimationFrame(function(){
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateY(0)';
+        });
+
+        clearTimeout(window.__subscriptionToastTimer);
+        window.__subscriptionToastTimer = setTimeout(function(){
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-8px)';
+        }, 3500);
+    }
+
+    document.querySelectorAll('.toggle-subscribe').forEach(function(btn){
+        btn.addEventListener('click', function(e){
+            e.preventDefault();
+
+            if(btn.dataset.busy === '1') return;
+
+            const branchId = btn.getAttribute('data-branch');
+            if(!branchId){
+                showSubscriptionToast('The selected branch could not be identified.', false);
+                return;
+            }
+
+            const currentlySubscribed = btn.getAttribute('data-status') === 'subscribed';
+
+            if(currentlySubscribed){
+                if(!window.confirm('Unsubscribe from this pharmacy?')){
+                    return;
+                }
+            }
+
+            const originalText = btn.textContent.trim();
+            btn.dataset.busy = '1';
+            btn.style.pointerEvents = 'none';
+            btn.style.opacity = '.65';
+            btn.textContent = currentlySubscribed ? 'Updating...' : 'Subscribing...';
+
+            const body = new URLSearchParams();
+            body.set('store_action', 'toggle_subscription');
+            body.set('branch_id', branchId);
+
+            fetch(window.location.href, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: body.toString()
+            })
+            .then(function(response){
+                return response.text().then(function(raw){
+                    let data;
+
+                    try {
+                        data = JSON.parse(raw);
+                    } catch(error) {
+                        throw new Error(
+                            'The server returned an invalid response.'
+                        );
+                    }
+
+                    return data;
+                });
+            })
+            .then(function(data){
+                if(!data.success){
+                    throw new Error(data.message || 'Unable to update subscription.');
+                }
+
+                const subscribed = data.subscribed === true;
+
+                btn.setAttribute(
+                    'data-status',
+                    subscribed ? 'subscribed' : 'unsubscribed'
+                );
+
+                btn.textContent = subscribed ? 'Subscribed' : 'Subscribe';
+
+                showSubscriptionToast(
+                    data.message || (
+                        subscribed
+                            ? 'You are now subscribed.'
+                            : 'Subscription removed.'
+                    ),
+                    true
+                );
+            })
+            .catch(function(error){
+                btn.textContent = originalText;
+                showSubscriptionToast(
+                    error.message || 'Unable to update subscription.',
+                    false
+                );
+            })
+            .finally(function(){
+                btn.dataset.busy = '0';
+                btn.style.pointerEvents = '';
+                btn.style.opacity = '';
+            });
+        });
+    }
 
     document.addEventListener('click', function(e){
         if(!e.target.closest('.mega-item')){
