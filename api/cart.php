@@ -2703,7 +2703,7 @@ function echotech_cart_image_url(
 
                 <a
                     class="bige-cart-primary"
-                    href="client_orders.php"
+                    href="my_orders.php"
                 >
                     View My Orders
                 </a>
