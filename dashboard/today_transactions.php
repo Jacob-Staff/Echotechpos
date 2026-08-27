@@ -507,7 +507,32 @@ $paymentSummary = [
     'cash' => ['count' => 0, 'amount' => 0.00],
     'card' => ['count' => 0, 'amount' => 0.00],
     'mobile' => ['count' => 0, 'amount' => 0.00],
+    'online_bank' => ['count' => 0, 'amount' => 0.00],
+    'online_mobile' => ['count' => 0, 'amount' => 0.00],
+    'online_cod' => ['count' => 0, 'amount' => 0.00],
 ];
+
+/*
+|--------------------------------------------------------------------------
+| Payment Summary
+|--------------------------------------------------------------------------
+|
+| Keep online orders in their actual payment category.
+|
+| CASH SALES:
+|   Cash
+|   Online/Cash on Delivery
+|
+| CARD + MOBILE:
+|   Card
+|   Mobile / Mobile Money / MoMo
+|   Online/Bank Transfer
+|   Online/Mobile Money
+|
+| Bank Transfer and Mobile Money must NOT be counted as cash merely
+| because they are online orders.
+|--------------------------------------------------------------------------
+*/
 
 foreach ($sales_data as $tx) {
 
@@ -518,12 +543,13 @@ foreach ($sales_data as $tx) {
     );
 
     $amount = (float)(
-        $tx['total']
-        ?? $tx['total_amount']
+        $tx['total_amount']
+        ?? $tx['total']
         ?? 0
     );
 
     if ($method === 'card') {
+
         $paymentSummary['card']['count']++;
         $paymentSummary['card']['amount'] += $amount;
 
@@ -534,10 +560,27 @@ foreach ($sales_data as $tx) {
             true
         )
     ) {
+
         $paymentSummary['mobile']['count']++;
         $paymentSummary['mobile']['amount'] += $amount;
 
+    } elseif ($method === 'online/mobile money') {
+
+        $paymentSummary['online_mobile']['count']++;
+        $paymentSummary['online_mobile']['amount'] += $amount;
+
+    } elseif ($method === 'online/bank transfer') {
+
+        $paymentSummary['online_bank']['count']++;
+        $paymentSummary['online_bank']['amount'] += $amount;
+
+    } elseif ($method === 'online/cash on delivery') {
+
+        $paymentSummary['online_cod']['count']++;
+        $paymentSummary['online_cod']['amount'] += $amount;
+
     } else {
+
         $paymentSummary['cash']['count']++;
         $paymentSummary['cash']['amount'] += $amount;
     }
@@ -553,9 +596,10 @@ require_once "../includes/head.php";
 
 ?>
 
+<meta charset="UTF-8">
 <style>
 /* =========================================================
-   ECHOTECH POS Ã¢â‚¬â€ TODAY'S TRANSACTIONS
+   ECHOTECH POS â€” TODAY'S TRANSACTIONS
    Dashboard-matched professional UI
 ========================================================= */
 
@@ -1153,11 +1197,11 @@ require_once "../includes/head.php";
                                 strtoupper($display_pharm)
                             ) ?>
 
-                            <span class="mx-1">Ã¢â‚¬Â¢</span>
+                            <span class="mx-1">â€¢</span>
 
                             <?= tx_e($display_bran) ?>
 
-                            <span class="mx-1">Ã¢â‚¬Â¢</span>
+                            <span class="mx-1">â€¢</span>
 
                             <?= (int)$total_invoices ?>
                             transaction(s)
@@ -1465,14 +1509,18 @@ require_once "../includes/head.php";
                     <div class="tx-kpi-value">
                         <?= (
                             (int)$paymentSummary['card']['count'] +
-                            (int)$paymentSummary['mobile']['count']
+                            (int)$paymentSummary['mobile']['count'] +
+                            (int)$paymentSummary['online_bank']['count'] +
+                            (int)$paymentSummary['online_mobile']['count']
                         ) ?>
                     </div>
 
                     <div class="tx-kpi-note">
                         K<?= number_format(
                             $paymentSummary['card']['amount'] +
-                            $paymentSummary['mobile']['amount'],
+                            $paymentSummary['mobile']['amount'] +
+                            $paymentSummary['online_bank']['amount'] +
+                            $paymentSummary['online_mobile']['amount'],
                             2
                         ) ?>
                     </div>
