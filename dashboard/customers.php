@@ -111,137 +111,17 @@ $info = mysqli_fetch_assoc($info_res);
 $display_pharm = $info['name'] ?? 'PHARMANOVA';
 $display_bran  = $info['branch_name'] ?? 'Main Branch';
 
-/*
- * =========================================================
- * SYNC APP CLIENT LINKS
- * =========================================================
- * A customer record is considered subscribed when it belongs to
- * this pharmacy + branch and matches an existing app client by:
- *   1. client_id
- *   2. email
- *   3. normalized phone
- *
- * Legacy/manual rows may have client_id = NULL. Link those rows
- * automatically so the Customers page and Online Store always agree.
- */
-function normalize_customer_phone(string $phone): string {
-    $phone = preg_replace('/\D+/', '', trim($phone));
-
-    if ($phone === '') {
-        return '';
-    }
-
-    if (str_starts_with($phone, '260') && strlen($phone) >= 12) {
-        $phone = '0' . substr($phone, 3);
-    }
-
-    return $phone;
-}
-
-/* Load clients once for identity matching. */
-$app_clients = [];
-$client_identity_stmt = mysqli_prepare(
-    $conn,
-    "SELECT id, full_name, email, phone FROM clients"
-);
-
-if ($client_identity_stmt) {
-    mysqli_stmt_execute($client_identity_stmt);
-    $client_identity_result = mysqli_stmt_get_result($client_identity_stmt);
-
-    while ($client_row = mysqli_fetch_assoc($client_identity_result)) {
-        $app_clients[] = $client_row;
-    }
-
-    if ($client_identity_result) {
-        mysqli_free_result($client_identity_result);
-    }
-    mysqli_stmt_close($client_identity_stmt);
-}
-
-/* Load this branch's customer records. */
-$cust_stmt = mysqli_prepare(
-    $conn,
-    "SELECT * FROM customers
-     WHERE pharmacy_id = ? AND branch_id = ?
-     ORDER BY id DESC"
-);
+$cust_stmt = mysqli_prepare($conn, "SELECT * FROM customers WHERE pharmacy_id = ? AND branch_id = ? ORDER BY id DESC");
 mysqli_stmt_bind_param($cust_stmt, "ii", $p_id, $b_id);
 mysqli_stmt_execute($cust_stmt);
-$result = mysqli_stmt_get_result();
+$result = mysqli_stmt_get_result($cust_stmt);
 
 $customers = [];
-
 if ($result) {
     while ($row = mysqli_fetch_assoc($result)) {
-        $matched_client_id = (int)($row['client_id'] ?? 0);
-        $row_email = strtolower(trim((string)($row['email'] ?? '')));
-        $row_phone = normalize_customer_phone((string)($row['phone'] ?? ''));
-
-        /*
-         * If client_id is missing, identify the existing app account
-         * using email or phone. Do not invent a new client account.
-         */
-        if ($matched_client_id <= 0) {
-            foreach ($app_clients as $app_client) {
-                $app_email = strtolower(trim((string)($app_client['email'] ?? '')));
-                $app_phone = normalize_customer_phone((string)($app_client['phone'] ?? ''));
-
-                $email_match = (
-                    $row_email !== '' &&
-                    $app_email !== '' &&
-                    $row_email === $app_email
-                );
-
-                $phone_match = (
-                    $row_phone !== '' &&
-                    $app_phone !== '' &&
-                    $row_phone === $app_phone
-                );
-
-                if ($email_match || $phone_match) {
-                    $matched_client_id = (int)$app_client['id'];
-                    break;
-                }
-            }
-
-            /*
-             * Repair the legacy customer row immediately. This makes
-             * the Customers page and Online Store use the same identity.
-             */
-            if ($matched_client_id > 0) {
-                $link_stmt = mysqli_prepare(
-                    $conn,
-                    "UPDATE customers
-                     SET client_id = ?
-                     WHERE id = ? AND pharmacy_id = ? AND branch_id = ?"
-                );
-
-                if ($link_stmt) {
-                    mysqli_stmt_bind_param(
-                        $link_stmt,
-                        "iiii",
-                        $matched_client_id,
-                        $row['id'],
-                        $p_id,
-                        $b_id
-                    );
-                    mysqli_stmt_execute($link_stmt);
-                    mysqli_stmt_close($link_stmt);
-                }
-
-                $row['client_id'] = $matched_client_id;
-            }
-        }
-
         $customers[] = $row;
     }
-
-    mysqli_free_result($result);
 }
-
-mysqli_stmt_close($cust_stmt);
-
 $total_count = count($customers);
 
 require_once "../includes/head.php";
@@ -452,7 +332,9 @@ require_once "../includes/head.php";
                                                 <div class="text-muted small"><i class="fas fa-envelope me-1"></i><?php echo htmlspecialchars($row['email']); ?></div>
                                             <?php endif; ?>
                                             <?php if (!empty($row['client_id'])): ?>
-                                                <span class="badge bg-info text-dark mt-1" style="font-size: 0.7rem;">Subscribed App User</span>
+                                                <span class="badge bg-success text-white mt-1" style="font-size:0.7rem;font-weight:700;">
+        <i class="fas fa-check-circle me-1"></i>Subscribed App User
+    </span>
                                             <?php endif; ?>
                                         </td>
                                         <td>
