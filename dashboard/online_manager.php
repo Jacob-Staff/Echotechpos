@@ -26,7 +26,7 @@ $branch_id   = (int)$_SESSION['branch_id'];
 $today       = date('Y-m-d');
 
 // ==============================
-// ðŸ¢ FETCH BRANCH NAME FROM DB
+// Ã°Å¸ÂÂ¢ FETCH BRANCH NAME FROM DB
 // ==============================
 $branch_name = "Unknown Branch";
 $branch_stmt = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ?");
@@ -41,7 +41,7 @@ if ($branch_stmt) {
 }
 
 // ==============================
-// ðŸ”’ SAFE INPUT HANDLING
+// Ã°Å¸â€â€™ SAFE INPUT HANDLING
 // ==============================
 $search   = trim($_GET['search'] ?? '');
 $category = trim($_GET['category'] ?? '');
@@ -49,7 +49,7 @@ $category = trim($_GET['category'] ?? '');
 $is_ajax_inventory = isset($_GET['ajax_inventory']) && $_GET['ajax_inventory'] === '1';
 
 // ==============================
-// ðŸ“¦ FETCH CATEGORIES
+// Ã°Å¸â€œÂ¦ FETCH CATEGORIES
 // ==============================
 $cat_stmt = $conn->prepare("
     SELECT DISTINCT category 
@@ -62,7 +62,7 @@ $cat_stmt->execute();
 $cat_res = $cat_stmt->get_result();
 
 // ==============================
-// ðŸ”” NOTIFICATIONS
+// Ã°Å¸â€â€ NOTIFICATIONS
 // ==============================
 function getCount($conn, $table, $pharmacy_id, $branch_id) {
     $stmt = $conn->prepare("
@@ -81,7 +81,7 @@ $pending_labs = getCount($conn, "lab_results", $pharmacy_id, $branch_id);
 $pending_help = getCount($conn, "help_inquiries", $pharmacy_id, $branch_id);
 
 // ==============================
-// ðŸ” BUILD FILTER QUERY
+// Ã°Å¸â€Â BUILD FILTER QUERY
 // ==============================
 $where = "WHERE pharmacy_id = ? AND branch_id = ? 
           AND quantity > 0 
@@ -105,9 +105,9 @@ if (!empty($category)) {
 }
 
 // ==============================
-// ðŸ“¦ FETCH INVENTORY
+// Ã°Å¸â€œÂ¦ FETCH INVENTORY
 // ==============================
-$sql = "SELECT id, item_name, quantity, price, online_price, is_online, expiry_date, image, category 
+$sql = "SELECT id, item_name, quantity, price, online_price, is_online, expiry_date, image, category, online_group 
         FROM store_items 
         $where
         ORDER BY item_name ASC";
@@ -117,8 +117,37 @@ $stmt->bind_param($types, ...$params);
 $stmt->execute();
 $res = $stmt->get_result();
 
+// =========================================================
+// ONLINE STORE CLASSIFICATION
+// This mirrors the category/group structure in store_header.php.
+// =========================================================
+$product_classification = [
+    'Medicines' => [],
+    'Personal Care' => [
+        'Skin Care','Hair Care','Baby and Mom Care','Sexual Wellness','Oral Care','Elderly Care'
+    ],
+    'Health Conditions' => [
+        'Common Conditions','Digestive Care','Eye Care','Cold, Cough & Smoking'
+    ],
+    'Vitamins & Supplements' => [
+        'Shop by Type'
+    ],
+    'Diabetes Care' => [
+        'Diabetes Essentials'
+    ],
+    'Healthcare Devices' => [
+        'Devices & Supports'
+    ],
+    'Homeopathic Medicine' => [
+        'Homeopathy'
+    ],
+    'Health Guide' => [
+        'Health Information'
+    ]
+];
+
 // ==============================
-// ðŸ›  HELPERS
+// Ã°Å¸â€ºÂ  HELPERS
 // ==============================
 function e($v){ return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
 function money($v){ return "K".number_format((float)$v,2); }
@@ -245,6 +274,47 @@ require_once "../includes/head.php";
     .online-manager-toast-container {top:70px;right:12px;width:calc(100vw - 24px);}
 }
 
+
+/* =========================================================
+   PRODUCT CLASSIFICATION
+========================================================= */
+.btn-classify-product{
+    border:1px solid #cfe0f4;
+    background:#f4f8ff;
+    color:#1769d1;
+    border-radius:8px;
+    min-width:120px;
+    transition:.18s ease;
+}
+.btn-classify-product:hover{background:#1769d1;color:#fff;border-color:#1769d1;transform:translateY(-1px);}
+.classification-mini{font-size:10px;line-height:1.25;max-width:145px;margin-left:auto;margin-right:auto;}
+.classification-mini > span:first-child{display:block;font-weight:800;color:#334155;}
+.classification-group{display:block;color:#1769d1;margin-top:2px;}
+.classification-modal{border:0;border-radius:18px;overflow:hidden;box-shadow:0 24px 70px rgba(15,23,42,.22);}
+.classification-header{padding:20px 22px;background:#fff;border-bottom:1px solid #e8edf2;}
+.classification-kicker{font-size:10px;font-weight:800;letter-spacing:1.1px;color:#1769d1;margin-bottom:4px;}
+.classification-body{display:grid;grid-template-columns:1fr 1fr;min-height:430px;}
+.classification-pane{padding:18px;border-right:1px solid #e9eef3;background:#fff;}
+.classification-pane:last-child{border-right:0;background:#fbfcfe;}
+.classification-pane-title{font-size:14px;font-weight:800;color:#172b3a;}
+.classification-pane-help{font-size:11px;color:#7a8792;margin:3px 0 12px;}
+.classification-check-list{display:flex;flex-direction:column;gap:7px;max-height:330px;overflow-y:auto;padding-right:4px;}
+.classification-check{position:relative;display:block;}
+.classification-check input{position:absolute;opacity:0;pointer-events:none;}
+.classification-check label{display:flex;align-items:center;gap:10px;padding:10px 11px;border:1px solid #e2e8ee;border-radius:10px;background:#fff;cursor:pointer;font-size:12px;font-weight:650;color:#405160;transition:.15s ease;}
+.classification-check label:before{content:' ';width:17px;height:17px;border:1.5px solid #b8c4cf;border-radius:5px;background:#fff;flex:0 0 17px;}
+.classification-check input:checked + label{border-color:#1769d1;background:#f0f6ff;color:#1459ad;box-shadow:0 3px 10px rgba(23,105,209,.08);}
+.classification-check input:checked + label:before{content:'âœ“';display:flex;align-items:center;justify-content:center;border-color:#1769d1;background:#1769d1;color:#fff;font-size:11px;font-weight:900;}
+.classification-check label:hover{border-color:#b7d0ee;background:#f8fbff;}
+.classification-groups-pane.disabled{opacity:.55;}
+.classification-empty{padding:25px 10px;text-align:center;color:#8996a1;font-size:12px;border:1px dashed #d8e0e7;border-radius:10px;background:#fff;}
+.classification-selection{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-top:1px solid #e9eef3;background:#f8fafc;font-size:12px;}
+@media(max-width:767.98px){
+    .classification-body{grid-template-columns:1fr;}
+    .classification-pane{border-right:0;border-bottom:1px solid #e9eef3;}
+    .classification-groups-pane{min-height:250px;}
+}
+
 @media (max-width: 767.98px) {
     .page-wrapper-full {
         padding: 0.75rem;
@@ -281,7 +351,7 @@ require_once "../includes/head.php";
                     <div>
                         <h2 class="fw-bold text-dark mb-0 page-title">ONLINE INVENTORY MANAGER</h2>
                         <span class="badge bg-light text-dark border mt-1">
-                            ðŸ“ <?php echo e($branch_name); ?>
+                            Ã°Å¸â€œÂ <?php echo e($branch_name); ?>
                         </span>
                     </div>
 
@@ -359,6 +429,7 @@ require_once "../includes/head.php";
                                     <th width="40"></th>
                                     <th style="width: 70px;" class="text-center">Image</th>
                                     <th>Product Details</th>
+                                    <th style="width: 155px;" class="text-center">Category</th>
                                     <th>Stock</th>
                                     <th>Price</th>
                                     <th>Expiry</th>
@@ -378,7 +449,8 @@ require_once "../includes/head.php";
                                 <tr class="inventory-row"
                                     data-name="<?php echo e(strtolower($row['item_name'])); ?>"
                                     data-barcode="<?php echo e(strtolower($row['barcode'] ?? '')); ?>"
-                                    data-category="<?php echo e(strtolower($row['category'] ?? '')); ?>">
+                                    data-category="<?php echo e(strtolower($row['category'] ?? '')); ?>"
+                                    data-group="<?php echo e(strtolower($row['online_group'] ?? '')); ?>">
                                     <td><input type="checkbox" class="item-checkbox" name="item_ids[]" value="<?php echo $row['id']; ?>"></td>
                                     
                                     <td class="text-center">
@@ -396,6 +468,21 @@ require_once "../includes/head.php";
                                     <td>
                                         <span class="fw-bold text-dark d-block"><?php echo e($row['item_name']); ?></span>
                                         <small class="text-muted"><?php echo e($row['category']); ?></small>
+                                    </td>
+                                    <td class="text-center">
+                                        <button type="button"
+                                                class="btn btn-sm btn-classify-product fw-bold"
+                                                onclick="openClassificationModal(<?php echo (int)$row['id']; ?>, <?php echo htmlspecialchars(json_encode($row['item_name'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(json_encode($row['category'] ?? '', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8'); ?>, <?php echo htmlspecialchars(json_encode($row['online_group'] ?? '', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8'); ?>)">
+                                            <i class="fas fa-layer-group me-1"></i> Classify
+                                        </button>
+                                        <?php if (!empty($row['category']) || !empty($row['online_group'])): ?>
+                                            <div class="classification-mini mt-1">
+                                                <span><?php echo e($row['category'] ?: 'Unclassified'); ?></span>
+                                                <?php if (!empty($row['online_group'])): ?><span class="classification-group"><?php echo e($row['online_group']); ?></span><?php endif; ?>
+                                            </div>
+                                        <?php else: ?>
+                                            <div class="classification-mini mt-1 text-muted">Not classified</div>
+                                        <?php endif; ?>
                                     </td>
                                     <td><span class="badge-qty <?php echo ($row['quantity'] <= 5 ? 'qty-low' : 'qty-ok'); ?>"><?php echo $row['quantity']; ?></span></td>
                                     <td>
@@ -430,7 +517,7 @@ require_once "../includes/head.php";
                                     </td>
                                 </tr>
                                 <?php endwhile; else: ?>
-                                <tr><td colspan="9" class="text-center py-5 text-muted">No inventory found matching your criteria.</td></tr>
+                                <tr><td colspan="10" class="text-center py-5 text-muted">No inventory found matching your criteria.</td></tr>
                                 <?php endif; ?>
                             </tbody>
                         </table>
@@ -495,7 +582,7 @@ require_once "../includes/head.php";
                             </div>
                             <div class="col-12">
                                 <label class="form-label fw-bold">Storage Info</label>
-                                <input type="text" name="storage_info" class="form-control" placeholder="e.g., Store below 30Â°C">
+                                <input type="text" name="storage_info" class="form-control" placeholder="e.g., Store below 30Ã‚Â°C">
                             </div>
                         </div>
                     </div>
@@ -535,6 +622,48 @@ require_once "../includes/head.php";
     </div>
 </div>
 
+
+
+<!-- Product Classification Modal -->
+<div class="modal fade" id="classificationModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content classification-modal">
+            <div class="modal-header classification-header">
+                <div>
+                    <div class="classification-kicker"><i class="fas fa-layer-group me-1"></i> PRODUCT CLASSIFICATION</div>
+                    <h5 class="modal-title fw-bold mb-0" id="classificationProductName">Classify Product</h5>
+                    <small class="text-muted">Choose the online category and group where customers will find this product.</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <form id="classificationForm">
+                    <input type="hidden" name="product_id" id="classificationProductId">
+                    <div class="classification-body">
+                        <div class="classification-pane">
+                            <div class="classification-pane-title">1. Category</div>
+                            <div class="classification-pane-help">Select one main category.</div>
+                            <div id="classificationCategories" class="classification-check-list"></div>
+                        </div>
+                        <div class="classification-pane classification-groups-pane">
+                            <div class="classification-pane-title">2. Group</div>
+                            <div class="classification-pane-help" id="classificationGroupHelp">Select a category first.</div>
+                            <div id="classificationGroups" class="classification-check-list"></div>
+                        </div>
+                    </div>
+                    <div class="classification-selection">
+                        <div><span class="text-muted">Selected:</span> <strong id="classificationSelectionText">Not classified</strong></div>
+                        <button type="button" class="btn btn-sm btn-light border" id="clearClassificationBtn"><i class="fas fa-eraser me-1"></i> Clear</button>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer bg-light border-0">
+                <button type="button" class="btn btn-light border fw-bold" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary fw-bold" id="saveClassificationBtn"><i class="fas fa-save me-1"></i> Save Classification</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- Custom Offer Modal -->
 <div class="modal fade" id="offerModal" tabindex="-1" aria-hidden="true">
@@ -630,7 +759,7 @@ $(document).ready(function() {
 
     /* =====================================================
        TRUE LIVE FILTERING
-       Search and category update immediately â€” no Apply.
+       Search and category update immediately Ã¢â‚¬â€ no Apply.
     ===================================================== */
     function applyLiveInventoryFilter() {
         const search = ($('#inventorySearch').val() || '').toLowerCase().trim();
@@ -675,7 +804,7 @@ $(document).ready(function() {
             if (!$empty.length) {
                 $('table tbody').append(`
                     <tr id="liveFilterEmpty">
-                        <td colspan="9" class="text-center py-5 text-muted">
+                        <td colspan="10" class="text-center py-5 text-muted">
                             <i class="fas fa-search fa-2x mb-2 d-block opacity-50"></i>
                             No products match the current filter.
                         </td>
@@ -737,6 +866,145 @@ $(document).ready(function() {
             showOMToast('error', 'Server Error', 'The clinical information could not be saved.');
         })
         .always(function() {
+            $btn.prop('disabled', false).html(original);
+        });
+    });
+
+
+    /* =====================================================
+       PRODUCT CLASSIFICATION
+       Category and Group are single-select checkbox lists.
+    ===================================================== */
+    const classificationTree = <?php echo json_encode($product_classification, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    let classificationProductId = null;
+    let classificationCategory = '';
+    let classificationGroup = '';
+
+    function renderClassificationCategories(selectedCategory) {
+        const $box = $('#classificationCategories').empty();
+        Object.keys(classificationTree).forEach(function(category, index){
+            const id = 'class-cat-' + index;
+            $box.append(`
+                <div class="classification-check">
+                    <input type="checkbox" id="${id}" class="classification-category-checkbox" value="${esc(category)}" ${category === selectedCategory ? 'checked' : ''}>
+                    <label for="${id}"><span>${esc(category)}</span></label>
+                </div>
+            `);
+        });
+        renderClassificationGroups(selectedCategory);
+    }
+
+    function renderClassificationGroups(category, selectedGroup = '') {
+        const $box = $('#classificationGroups').empty();
+        const groups = classificationTree[category] || [];
+        $('#classificationGroupHelp').text(category ? 'Select one group under this category.' : 'Select a category first.');
+        $('.classification-groups-pane').toggleClass('disabled', !category);
+
+        if (!category) {
+            $box.html('<div class="classification-empty"><i class="fas fa-arrow-left mb-2 d-block"></i>Choose a category to see its groups.</div>');
+            return;
+        }
+        if (!groups.length) {
+            $box.html('<div class="classification-empty"><i class="fas fa-folder-open mb-2 d-block"></i>No groups are defined for this category.</div>');
+            return;
+        }
+        groups.forEach(function(group, index){
+            const id = 'class-group-' + index;
+            $box.append(`
+                <div class="classification-check">
+                    <input type="checkbox" id="${id}" class="classification-group-checkbox" value="${esc(group)}" ${group === selectedGroup ? 'checked' : ''}>
+                    <label for="${id}"><span>${esc(group)}</span></label>
+                </div>
+            `);
+        });
+    }
+
+    function updateClassificationSelection(){
+        classificationCategory = $('.classification-category-checkbox:checked').first().val() || '';
+        classificationGroup = $('.classification-group-checkbox:checked').first().val() || '';
+        let text = classificationCategory || 'Not classified';
+        if (classificationGroup) text += ' â€º ' + classificationGroup;
+        $('#classificationSelectionText').text(text);
+    }
+
+    window.openClassificationModal = function(id, name, category, group){
+        classificationProductId = parseInt(id, 10) || 0;
+        classificationCategory = category || '';
+        classificationGroup = group || '';
+        $('#classificationProductId').val(classificationProductId);
+        $('#classificationProductName').text(name || 'Classify Product');
+        renderClassificationCategories(classificationCategory);
+        updateClassificationSelection();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('classificationModal')).show();
+    };
+
+    $(document).on('change', '.classification-category-checkbox', function(){
+        $('.classification-category-checkbox').not(this).prop('checked', false);
+        classificationCategory = $(this).is(':checked') ? $(this).val() : '';
+        classificationGroup = '';
+        renderClassificationGroups(classificationCategory, '');
+        updateClassificationSelection();
+    });
+
+    $(document).on('change', '.classification-group-checkbox', function(){
+        $('.classification-group-checkbox').not(this).prop('checked', false);
+        classificationGroup = $(this).is(':checked') ? $(this).val() : '';
+        updateClassificationSelection();
+    });
+
+    $('#clearClassificationBtn').on('click', function(){
+        $('.classification-category-checkbox, .classification-group-checkbox').prop('checked', false);
+        classificationCategory = '';
+        classificationGroup = '';
+        renderClassificationGroups('', '');
+        updateClassificationSelection();
+    });
+
+    $('#saveClassificationBtn').on('click', function(){
+        const $btn = $(this);
+        const productId = parseInt($('#classificationProductId').val(), 10) || 0;
+        const category = $('.classification-category-checkbox:checked').first().val() || '';
+        const group = $('.classification-group-checkbox:checked').first().val() || '';
+
+        if (!productId) {
+            showOMToast('error', 'Invalid Product', 'The product could not be identified.');
+            return;
+        }
+        if (!category) {
+            showOMToast('error', 'Category Required', 'Please select a category before saving.');
+            return;
+        }
+
+        const original = $btn.html();
+        $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
+
+        $.ajax({
+            url: 'actions/save_product_classification.php',
+            type: 'POST',
+            dataType: 'json',
+            data: { product_id: productId, category: category, online_group: group }
+        }).done(function(res){
+            if (res && res.success) {
+                const $row = $('.inventory-row').filter(function(){
+                    return String($(this).find('.item-checkbox').val()) === String(productId);
+                }).first();
+                $row.attr('data-category', category.toLowerCase()).data('category', category.toLowerCase());
+                $row.attr('data-group', group.toLowerCase()).data('group', group.toLowerCase());
+                const $cell = $row.find('.btn-classify-product').closest('td');
+                $cell.find('.classification-mini').remove();
+                const mini = $('<div class="classification-mini mt-1"></div>');
+                $('<span></span>').text(category).appendTo(mini);
+                if (group) $('<span class="classification-group"></span>').text(group).appendTo(mini);
+                $cell.append(mini);
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('classificationModal')).hide();
+                showOMToast('success', 'Classification Saved', res.message || 'Product classification updated successfully.');
+            } else {
+                showOMToast('error', 'Unable to Save', (res && res.message) || 'The product classification could not be saved.');
+            }
+        }).fail(function(xhr){
+            console.error('Classification save error:', xhr.responseText);
+            showOMToast('error', 'Server Error', 'The product classification could not be saved.');
+        }).always(function(){
             $btn.prop('disabled', false).html(original);
         });
     });
@@ -850,7 +1118,7 @@ $(document).ready(function() {
                     $('[name="directions"]').val(info.directions || '');
                     $('[name="side_effects"]').val(info.side_effects || '');
                     $('[name="how_it_works"]').val(info.how_it_works || '');
-                    $('[name="storage_info"]').val(info.storage_info || 'Store below 30Â°C');
+                    $('[name="storage_info"]').val(info.storage_info || 'Store below 30Ã‚Â°C');
                 }
             })
             .fail(function(){
