@@ -26,7 +26,7 @@ $branch_id   = (int)$_SESSION['branch_id'];
 $today       = date('Y-m-d');
 
 // ==============================
-// Ã°Å¸ÂÂ¢ FETCH BRANCH NAME FROM DB
+// ÃƒÂ°Ã…Â¸Ã‚ÂÃ‚Â¢ FETCH BRANCH NAME FROM DB
 // ==============================
 $branch_name = "Unknown Branch";
 $branch_stmt = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ?");
@@ -41,7 +41,7 @@ if ($branch_stmt) {
 }
 
 // ==============================
-// Ã°Å¸â€â€™ SAFE INPUT HANDLING
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬â„¢ SAFE INPUT HANDLING
 // ==============================
 $search   = trim($_GET['search'] ?? '');
 $category = trim($_GET['category'] ?? '');
@@ -49,7 +49,7 @@ $category = trim($_GET['category'] ?? '');
 $is_ajax_inventory = isset($_GET['ajax_inventory']) && $_GET['ajax_inventory'] === '1';
 
 // ==============================
-// Ã°Å¸â€œÂ¦ FETCH CATEGORIES
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â¦ FETCH CATEGORIES
 // ==============================
 $cat_stmt = $conn->prepare("
     SELECT DISTINCT category 
@@ -62,7 +62,7 @@ $cat_stmt->execute();
 $cat_res = $cat_stmt->get_result();
 
 // ==============================
-// Ã°Å¸â€â€ NOTIFICATIONS
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬Â NOTIFICATIONS
 // ==============================
 function getCount($conn, $table, $pharmacy_id, $branch_id) {
     $stmt = $conn->prepare("
@@ -81,7 +81,7 @@ $pending_labs = getCount($conn, "lab_results", $pharmacy_id, $branch_id);
 $pending_help = getCount($conn, "help_inquiries", $pharmacy_id, $branch_id);
 
 // ==============================
-// Ã°Å¸â€Â BUILD FILTER QUERY
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â BUILD FILTER QUERY
 // ==============================
 $where = "WHERE pharmacy_id = ? AND branch_id = ? 
           AND quantity > 0 
@@ -105,7 +105,7 @@ if (!empty($category)) {
 }
 
 // ==============================
-// Ã°Å¸â€œÂ¦ FETCH INVENTORY
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â¦ FETCH INVENTORY
 // ==============================
 $sql = "SELECT id, item_name, quantity, price, online_price, is_online, expiry_date, image, category, online_group 
         FROM store_items 
@@ -119,38 +119,54 @@ $res = $stmt->get_result();
 
 // =========================================================
 // ONLINE STORE CLASSIFICATION
-// This mirrors the category/group structure in store_header.php.
+// This mirrors the category/group structure shown in the public store header.
 // =========================================================
 $product_classification = [
     'Medicines' => [],
+
     'Personal Care' => [
-        'Skin Care','Hair Care','Baby and Mom Care','Sexual Wellness','Oral Care','Elderly Care'
+        'Skin Care',
+        'Hair Care',
+        'Baby and Mom Care',
+        'Sexual Wellness',
+        'Oral Care',
+        'Elderly Care'
     ],
+
     'Health Conditions' => [
-        'Common Conditions','Digestive Care','Eye Care','Cold, Cough & Smoking'
+        'Common Conditions',
+        'Digestive Care',
+        'Eye Care',
+        'Cold, Cough & Smoking'
     ],
+
     'Vitamins & Supplements' => [
         'Shop by Type'
     ],
+
     'Diabetes Care' => [
         'Diabetes Essentials'
     ],
+
     'Healthcare Devices' => [
         'Devices & Supports'
     ],
+
     'Homeopathic Medicine' => [
         'Homeopathy'
     ],
+
     'Health Guide' => [
         'Health Information'
     ],
+
     'Agrovert' => [
         'Agrovet Products'
     ]
 ];
 
 // ==============================
-// Ã°Å¸â€ºÂ  HELPERS
+// ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂºÃ‚Â  HELPERS
 // ==============================
 function e($v){ return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
 function money($v){ return "K".number_format((float)$v,2); }
@@ -354,7 +370,7 @@ require_once "../includes/head.php";
                     <div>
                         <h2 class="fw-bold text-dark mb-0 page-title">ONLINE INVENTORY MANAGER</h2>
                         <span class="badge bg-light text-dark border mt-1">
-                            Ã°Å¸â€œÂ <?php echo e($branch_name); ?>
+                            ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â <?php echo e($branch_name); ?>
                         </span>
                     </div>
 
@@ -585,7 +601,7 @@ require_once "../includes/head.php";
                             </div>
                             <div class="col-12">
                                 <label class="form-label fw-bold">Storage Info</label>
-                                <input type="text" name="storage_info" class="form-control" placeholder="e.g., Store below 30Ã‚Â°C">
+                                <input type="text" name="storage_info" class="form-control" placeholder="e.g., Store below 30Ãƒâ€šÃ‚Â°C">
                             </div>
                         </div>
                     </div>
@@ -762,7 +778,7 @@ $(document).ready(function() {
 
     /* =====================================================
        TRUE LIVE FILTERING
-       Search and category update immediately Ã¢â‚¬â€ no Apply.
+       Search and category update immediately ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no Apply.
     ===================================================== */
     function applyLiveInventoryFilter() {
         const search = ($('#inventorySearch').val() || '').toLowerCase().trim();
@@ -908,7 +924,7 @@ $(document).ready(function() {
             return;
         }
         if (!groups.length) {
-            $box.html('<div class="classification-empty"><i class="fas fa-folder-open mb-2 d-block"></i>No groups are defined for this category.</div>');
+            $box.html('<div class="classification-empty"><i class="fas fa-folder-open mb-2 d-block"></i>This category does not use product groups.</div>');
             return;
         }
         groups.forEach(function(group, index){
@@ -1121,7 +1137,7 @@ $(document).ready(function() {
                     $('[name="directions"]').val(info.directions || '');
                     $('[name="side_effects"]').val(info.side_effects || '');
                     $('[name="how_it_works"]').val(info.how_it_works || '');
-                    $('[name="storage_info"]').val(info.storage_info || 'Store below 30Ã‚Â°C');
+                    $('[name="storage_info"]').val(info.storage_info || 'Store below 30Ãƒâ€šÃ‚Â°C');
                 }
             })
             .fail(function(){
