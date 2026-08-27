@@ -26,7 +26,7 @@ $branch_id   = (int)$_SESSION['branch_id'];
 $today       = date('Y-m-d');
 
 // ==============================
-// ÃƒÂ°Ã…Â¸Ã‚ÂÃ‚Â¢ FETCH BRANCH NAME FROM DB
+// FETCH BRANCH NAME FROM DB
 // ==============================
 $branch_name = "Unknown Branch";
 $branch_stmt = $conn->prepare("SELECT branch_name FROM branches WHERE id = ? AND pharmacy_id = ?");
@@ -41,7 +41,7 @@ if ($branch_stmt) {
 }
 
 // ==============================
-// ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬â„¢ SAFE INPUT HANDLING
+// SAFE INPUT HANDLING
 // ==============================
 $search   = trim($_GET['search'] ?? '');
 $category = trim($_GET['category'] ?? '');
@@ -49,7 +49,7 @@ $category = trim($_GET['category'] ?? '');
 $is_ajax_inventory = isset($_GET['ajax_inventory']) && $_GET['ajax_inventory'] === '1';
 
 // ==============================
-// ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â¦ FETCH CATEGORIES
+// FETCH CATEGORIES
 // ==============================
 $cat_stmt = $conn->prepare("
     SELECT DISTINCT category 
@@ -62,7 +62,7 @@ $cat_stmt->execute();
 $cat_res = $cat_stmt->get_result();
 
 // ==============================
-// ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ¢â‚¬Â NOTIFICATIONS
+//  NOTIFICATIONS
 // ==============================
 function getCount($conn, $table, $pharmacy_id, $branch_id) {
     $stmt = $conn->prepare("
@@ -81,7 +81,7 @@ $pending_labs = getCount($conn, "lab_results", $pharmacy_id, $branch_id);
 $pending_help = getCount($conn, "help_inquiries", $pharmacy_id, $branch_id);
 
 // ==============================
-// ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ‚Â BUILD FILTER QUERY
+// BUILD FILTER QUERY
 // ==============================
 $where = "WHERE pharmacy_id = ? AND branch_id = ? 
           AND quantity > 0 
@@ -105,7 +105,7 @@ if (!empty($category)) {
 }
 
 // ==============================
-// ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â¦ FETCH INVENTORY
+// FETCH INVENTORY
 // ==============================
 $sql = "SELECT id, item_name, quantity, price, online_price, is_online, expiry_date, image, category, online_group 
         FROM store_items 
@@ -135,7 +135,7 @@ require_once $store_category_config;
 
 
 // ==============================
-// ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂºÃ‚Â  HELPERS
+// HELPERS
 // ==============================
 function e($v){ return htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8'); }
 function money($v){ return "K".number_format((float)$v,2); }
@@ -339,7 +339,7 @@ require_once "../includes/head.php";
                     <div>
                         <h2 class="fw-bold text-dark mb-0 page-title">ONLINE INVENTORY MANAGER</h2>
                         <span class="badge bg-light text-dark border mt-1">
-                            ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â <?php echo e($branch_name); ?>
+                            <?php echo e($branch_name); ?>
                         </span>
                     </div>
 
@@ -747,7 +747,7 @@ $(document).ready(function() {
 
     /* =====================================================
        TRUE LIVE FILTERING
-       Search and category update immediately ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no Apply.
+       Search and category update immediately no Apply.
     ===================================================== */
     function applyLiveInventoryFilter() {
         const search = ($('#inventorySearch').val() || '').toLowerCase().trim();
