@@ -1,334 +1,442 @@
 <?php
 /**
  * ============================================================
- * EchoTech POS
- * Admin Payroll - Phase 1
+ * EchoTech POS - COMPLETE PAYROLL MODULE
  * ============================================================
  *
- * Uses the reusable Admin shell:
- *   /admin/actions/admin_aside.php
- *   /admin/actions/admin_header.php
+ * ONE payroll action file:
+ *   /admin/actions/payroll.php
  *
- * Phase 1:
- * - Staff payroll register
- * - Monthly period selector
- * - Branch filter
- * - Staff search
- * - Basic salary from staff records
- * - Gross / deductions / net summary
- * - Print payroll
+ * Main page:
+ *   /admin/payroll.php
  *
- * No payroll table is required for this phase.
- * Payroll figures are calculated from the existing staff records.
+ * Includes:
+ *   - Monthly payroll preparation
+ *   - Earnings and deductions
+ *   - Zambia PAYE / NAPSA / NHIMA
+ *   - Employer statutory costs
+ *   - Recalculation
+ *   - Approval / Paid / Locked workflow
+ *   - Statutory remittance tracking
+ *   - Payroll history
+ *   - YTD register
+ *   - Printable payslip
+ *
+ * The Admin Header and Admin Aside remain separate reusable files.
  */
 
 declare(strict_types=1);
 
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443);
 
-require_once __DIR__ . '/../includes/auth.php';
-require_once __DIR__ . '/../includes/conn.php';
-
-require_admin();
-
-$pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? 0);
-
-if ($pharmacy_id <= 0) {
-    header('Location: ../index.php?error=session_expired');
-    exit;
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => $https,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_start();
 }
 
-$user_role = current_role();
-$user_display_name = current_user();
+/* ---------- Existing project includes ---------- */
 
-/* ------------------------------------------------------------
-| Helpers
------------------------------------------------------------- */
-
-function payroll_esc(mixed $value): string
-{
-    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
-}
-
-function payroll_table_exists(mysqli $conn, string $table): bool
-{
-    $table = $conn->real_escape_string($table);
-    $result = @$conn->query("SHOW TABLES LIKE '{$table}'");
-
-    return $result instanceof mysqli_result && $result->num_rows > 0;
-}
-
-function payroll_column_exists(mysqli $conn, string $table, string $column): bool
-{
-    $table = $conn->real_escape_string($table);
-    $column = $conn->real_escape_string($column);
-
-    $result = @$conn->query(
-        "SHOW COLUMNS FROM `{$table}` LIKE '{$column}'"
-    );
-
-    return $result instanceof mysqli_result && $result->num_rows > 0;
-}
-
-function payroll_first_column(
-    mysqli $conn,
-    string $table,
-    array $candidates
-): ?string {
-    foreach ($candidates as $column) {
-        if (payroll_column_exists($conn, $table, $column)) {
-            return $column;
-        }
-    }
-
-    return null;
-}
-
-function payroll_rows(
-    mysqli $conn,
-    string $sql,
-    string $types = '',
-    array $params = []
-): array {
-    $stmt = @$conn->prepare($sql);
-
-    if (!$stmt) {
-        return [];
-    }
-
-    if ($types !== '') {
-        @$stmt->bind_param($types, ...$params);
-    }
-
-    if (!@$stmt->execute()) {
-        $stmt->close();
-        return [];
-    }
-
-    $result = @$stmt->get_result();
-    $rows = [];
-
-    if ($result) {
-        while ($row = $result->fetch_assoc()) {
-            $rows[] = $row;
-        }
-    }
-
-    $stmt->close();
-
-    return $rows;
-}
-
-function payroll_scalar(
-    mysqli $conn,
-    string $sql,
-    string $types = '',
-    array $params = [],
-    mixed $default = 0
-): mixed {
-    $stmt = @$conn->prepare($sql);
-
-    if (!$stmt) {
-        return $default;
-    }
-
-    if ($types !== '') {
-        @$stmt->bind_param($types, ...$params);
-    }
-
-    if (!@$stmt->execute()) {
-        $stmt->close();
-        return $default;
-    }
-
-    $result = @$stmt->get_result();
-    $row = $result ? $result->fetch_assoc() : null;
-
-    $stmt->close();
-
-    if (!$row) {
-        return $default;
-    }
-
-    return array_values($row)[0] ?? $default;
-}
-
-function payroll_money(float $amount): string
-{
-    return 'K' . number_format($amount, 2);
-}
-
-/* ------------------------------------------------------------
-| Period
------------------------------------------------------------- */
-
-$selected_month = isset($_GET['month'])
-    ? max(1, min(12, (int)$_GET['month']))
-    : (int)date('n');
-
-$selected_year = isset($_GET['year'])
-    ? max(2020, min(2100, (int)$_GET['year']))
-    : (int)date('Y');
-
-$period_start = sprintf(
-    '%04d-%02d-01',
-    $selected_year,
-    $selected_month
-);
-
-$period_end = date(
-    'Y-m-t',
-    strtotime($period_start)
-);
-
-$period_label = date(
-    'F Y',
-    strtotime($period_start)
-);
-
-$search = trim((string)($_GET['search'] ?? ''));
-$branch_filter = (int)($_GET['branch_id'] ?? 0);
-
-/* ------------------------------------------------------------
-| Pharmacy
------------------------------------------------------------- */
-
-$pharmacy_name = 'PHARMANOVA';
-
-if (payroll_table_exists($conn, 'pharmacies')) {
-    $name_column = payroll_first_column(
-        $conn,
-        'pharmacies',
-        ['name', 'pharmacy_name', 'business_name']
-    );
-
-    if ($name_column) {
-        $found_name = payroll_scalar(
-            $conn,
-            "SELECT `{$name_column}`
-             FROM pharmacies
-             WHERE id = ?
-             LIMIT 1",
-            'i',
-            [$pharmacy_id],
-            ''
-        );
-
-        if ($found_name !== '') {
-            $pharmacy_name = (string)$found_name;
-        }
+foreach ([
+    __DIR__ . '/../../includes/auth.php',
+    __DIR__ . '/../../includes/auth_helpers.php',
+    __DIR__ . '/../../auth.php'
+] as $f) {
+    if (is_file($f)) {
+        require_once $f;
+        break;
     }
 }
 
-/* ------------------------------------------------------------
-| Branches
------------------------------------------------------------- */
-
-$branches = [];
-
-if (payroll_table_exists($conn, 'branches')) {
-    $branch_name_column = payroll_first_column(
-        $conn,
-        'branches',
-        ['branch_name', 'name', 'branch']
-    );
-
-    if ($branch_name_column) {
-        $branches = payroll_rows(
-            $conn,
-            "SELECT id, `{$branch_name_column}` AS branch_name
-             FROM branches
-             WHERE pharmacy_id = ?
-             ORDER BY `{$branch_name_column}` ASC",
-            'i',
-            [$pharmacy_id]
-        );
-    }
-}
-
-$branch_count = count($branches);
-
-/* ------------------------------------------------------------
-| Locate staff table
-|
-| The project has evolved through different staff/user layouts,
-| so Phase 1 detects the existing employee table safely instead
-| of assuming a single schema.
------------------------------------------------------------- */
-
-$staff_table = null;
-
-foreach (['staff', 'users', 'employees', 'profiles'] as $candidate) {
-    if (payroll_table_exists($conn, $candidate)) {
-        $salary_candidate = payroll_first_column(
-            $conn,
-            $candidate,
-            [
-                'basic_salary',
-                'basicSalary',
-                'salary',
-                'monthly_salary',
-                'base_salary'
-            ]
-        );
-
-        if ($salary_candidate) {
-            $staff_table = $candidate;
+foreach ([
+    __DIR__ . '/../../includes/conn.php',
+    __DIR__ . '/../../config.php',
+    __DIR__ . '/../../db.php'
+] as $f) {
+    if (is_file($f)) {
+        require_once $f;
+        if (isset($conn) && $conn instanceof mysqli) {
             break;
         }
     }
 }
 
-/* ------------------------------------------------------------
-| Staff columns
------------------------------------------------------------- */
+if (function_exists('require_login')) {
+    require_login();
+}
 
-$staff_rows = [];
+if (function_exists('require_admin')) {
+    require_admin();
+} elseif (($_SESSION['role'] ?? '') !== 'Admin') {
+    http_response_code(403);
+    exit('Access denied.');
+}
 
-$staff_id_column = null;
-$name_column = null;
-$role_column = null;
-$branch_id_column = null;
-$status_column = null;
-$salary_column = null;
-$email_column = null;
-$employee_number_column = null;
+if (!isset($conn) || !($conn instanceof mysqli)) {
+    http_response_code(500);
+    exit('Database connection unavailable.');
+}
 
-if ($staff_table) {
-    $staff_id_column = payroll_first_column(
-        $conn,
-        $staff_table,
-        ['id', 'staff_id', 'user_id', 'employee_id']
+$conn->set_charset('utf8mb4');
+
+/*
+ * Payroll is the single owner of staff salary.
+ * Keep the master salary on users so staff accounts can be created
+ * without choosing a salary, while Payroll controls the value.
+ */
+function payroll_complete_ensure_column(
+    mysqli $db,
+    string $table,
+    string $column,
+    string $definition
+): void {
+    if (!payroll_complete_table($db, $table)) {
+        return;
+    }
+
+    if (!payroll_complete_col($db, $table, $column)) {
+        @$db->query(
+            "ALTER TABLE `{$table}` ADD COLUMN `{$column}` {$definition}"
+        );
+    }
+}
+
+/* ---------- Helpers ---------- */
+
+function payroll_complete_h(mixed $v): string {
+    return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+}
+
+function payroll_complete_money(float $v): string {
+    return 'K' . number_format($v, 2);
+}
+
+function payroll_complete_table(mysqli $db, string $table): bool {
+    $safe = $db->real_escape_string($table);
+    $r = @$db->query("SHOW TABLES LIKE '{$safe}'");
+    return $r instanceof mysqli_result && $r->num_rows > 0;
+}
+
+function payroll_complete_col(mysqli $db, string $table, string $column): bool {
+    $safeTable = str_replace('`', '``', $table);
+    $safeColumn = $db->real_escape_string($column);
+    $r = @$db->query(
+        "SHOW COLUMNS FROM `{$safeTable}` LIKE '{$safeColumn}'"
+    );
+    return $r instanceof mysqli_result && $r->num_rows > 0;
+}
+
+function payroll_complete_first_col(
+    mysqli $db,
+    string $table,
+    array $candidates
+): ?string {
+    foreach ($candidates as $c) {
+        if (payroll_complete_col($db, $table, $c)) {
+            return $c;
+        }
+    }
+    return null;
+}
+
+function payroll_complete_rows(
+    mysqli $db,
+    string $sql,
+    string $types = '',
+    array $params = []
+): array {
+    $stmt = @$db->prepare($sql);
+    if (!$stmt) {
+        return [];
+    }
+
+    if ($types !== '') {
+        @$stmt->bind_param($types, ...$params);
+    }
+
+    if (!@$stmt->execute()) {
+        $stmt->close();
+        return [];
+    }
+
+    $r = @$stmt->get_result();
+    $rows = [];
+
+    if ($r) {
+        while ($row = $r->fetch_assoc()) {
+            $rows[] = $row;
+        }
+    }
+
+    $stmt->close();
+    return $rows;
+}
+
+function payroll_complete_user(): string {
+    return (string)(
+        $_SESSION['full_name']
+        ?? $_SESSION['username']
+        ?? $_SESSION['sessionUsername']
+        ?? 'Administrator'
+    );
+}
+
+function payroll_complete_redirect(array $params = []): never {
+    $url = '../payroll.php';
+    if ($params) {
+        $url .= '?' . http_build_query($params);
+    }
+    header('Location: ' . $url);
+    exit;
+}
+
+/*
+ * Master salary is intentionally maintained by Payroll only.
+ */
+payroll_complete_ensure_column(
+    $conn,
+    'users',
+    'salary_amount',
+    'DECIMAL(15,2) NOT NULL DEFAULT 0'
+);
+
+/* ---------- Zambia statutory calculations ---------- */
+
+const EP_PAYE_B1 = 5100.00;
+const EP_PAYE_B2 = 7100.00;
+const EP_PAYE_B3 = 9200.00;
+
+const EP_NAPSA_RATE = 0.05;
+const EP_NAPSA_CEILING = 57840.60;
+const EP_NAPSA_MAX = 2892.03;
+
+const EP_NHIMA_RATE = 0.01;
+
+function payroll_complete_paye(float $gross): float {
+    $gross = max(0, $gross);
+    $tax = 0;
+
+    if ($gross <= EP_PAYE_B1) {
+        return 0.00;
+    }
+
+    $part = min($gross, EP_PAYE_B2) - EP_PAYE_B1;
+    if ($part > 0) {
+        $tax += $part * 0.20;
+    }
+
+    $part = min($gross, EP_PAYE_B3) - EP_PAYE_B2;
+    if ($part > 0) {
+        $tax += $part * 0.30;
+    }
+
+    $part = $gross - EP_PAYE_B3;
+    if ($part > 0) {
+        $tax += $part * 0.37;
+    }
+
+    return round($tax, 2);
+}
+
+function payroll_complete_napsa(float $gross): float {
+    $base = min(max(0, $gross), EP_NAPSA_CEILING);
+    return round(min($base * EP_NAPSA_RATE, EP_NAPSA_MAX), 2);
+}
+
+function payroll_complete_nhima(float $basic): float {
+    return round(max(0, $basic) * EP_NHIMA_RATE, 2);
+}
+
+function payroll_complete_calculate(
+    float $basic,
+    float $allowances,
+    float $bonus,
+    float $overtime,
+    float $otherEarnings,
+    float $loan,
+    float $advance,
+    float $otherDeductions
+): array {
+    $gross = round(
+        max(0, $basic)
+        + max(0, $allowances)
+        + max(0, $bonus)
+        + max(0, $overtime)
+        + max(0, $otherEarnings),
+        2
     );
 
-    $name_column = payroll_first_column(
-        $conn,
-        $staff_table,
-        ['full_name', 'name', 'staff_name', 'employee_name', 'username']
+    $paye = payroll_complete_paye($gross);
+    $napsa = payroll_complete_napsa($gross);
+    $nhima = payroll_complete_nhima($basic);
+
+    $other = round(
+        max(0, $loan)
+        + max(0, $advance)
+        + max(0, $otherDeductions),
+        2
     );
 
-    $role_column = payroll_first_column(
+    $total = round($paye + $napsa + $nhima + $other, 2);
+    $net = round(max(0, $gross - $total), 2);
+
+    return [
+        'gross' => $gross,
+        'paye' => $paye,
+        'napsa' => $napsa,
+        'nhima' => $nhima,
+        'employer_napsa' => $napsa,
+        'employer_nhima' => $nhima,
+        'other' => $other,
+        'total' => $total,
+        'net' => $net,
+        'employer_cost' => round($gross + $napsa + $nhima, 2),
+    ];
+}
+
+/* ---------- Tenant ---------- */
+
+$pharmacyId = (int)($_SESSION['pharmacy_id'] ?? 0);
+
+if ($pharmacyId <= 0 && function_exists('require_pharmacy')) {
+    require_pharmacy();
+    $pharmacyId = (int)($_SESSION['pharmacy_id'] ?? 0);
+}
+
+if ($pharmacyId <= 0) {
+    http_response_code(403);
+    exit('Your account is not assigned to a valid pharmacy.');
+}
+
+$userRole = function_exists('current_role')
+    ? current_role()
+    : (string)($_SESSION['role'] ?? 'Admin');
+
+$userDisplayName = function_exists('current_user')
+    ? current_user()
+    : payroll_complete_user();
+
+$admin_page_title = 'Payroll';
+
+/* ---------- Period ---------- */
+
+$selectedMonth = max(
+    1,
+    min(12, (int)($_GET['month'] ?? $_POST['month'] ?? date('n')))
+);
+
+$selectedYear = max(
+    2020,
+    min(2100, (int)($_GET['year'] ?? $_POST['year'] ?? date('Y')))
+);
+
+$period = sprintf('%04d-%02d', $selectedYear, $selectedMonth);
+$periodLabel = date('F Y', strtotime($period . '-01'));
+
+$search = trim((string)($_GET['search'] ?? ''));
+$branchFilter = (int)($_GET['branch_id'] ?? 0);
+
+$view = (string)($_GET['view'] ?? 'payroll');
+
+if (!in_array(
+    $view,
+    ['payroll', 'salary', 'statutory', 'remittance', 'history', 'ytd'],
+    true
+)) {
+    $view = 'payroll';
+}
+
+$success = '';
+$error = '';
+
+if (isset($_GET['saved'])) {
+    $success = (string)$_GET['saved'];
+}
+
+if (isset($_GET['error'])) {
+    $error = (string)$_GET['error'];
+}
+
+/* ---------- Pharmacy ---------- */
+
+$pharmacyName = 'PHARMANOVA';
+
+if (payroll_complete_table($conn, 'pharmacies')) {
+    $nameCol = payroll_complete_first_col(
         $conn,
-        $staff_table,
-        ['role', 'user_role', 'position', 'designation']
+        'pharmacies',
+        ['name', 'pharmacy_name', 'business_name']
     );
 
-    $branch_id_column = payroll_first_column(
+    if ($nameCol) {
+        $name = payroll_complete_rows(
+            $conn,
+            "SELECT `{$nameCol}` AS name
+             FROM pharmacies
+             WHERE id = ?
+             LIMIT 1",
+            'i',
+            [$pharmacyId]
+        );
+
+        if (!empty($name[0]['name'])) {
+            $pharmacyName = (string)$name[0]['name'];
+        }
+    }
+}
+
+/* ---------- Branches ---------- */
+
+$branches = [];
+
+if (payroll_complete_table($conn, 'branches')) {
+    $branchCol = payroll_complete_first_col(
         $conn,
-        $staff_table,
-        ['branch_id', 'branch']
+        'branches',
+        ['branch_name', 'name', 'branch']
     );
 
-    $status_column = payroll_first_column(
-        $conn,
-        $staff_table,
-        ['status', 'is_active', 'active']
-    );
+    if ($branchCol) {
+        $branches = payroll_complete_rows(
+            $conn,
+            "SELECT id, `{$branchCol}` AS branch_name
+             FROM branches
+             WHERE pharmacy_id = ?
+             ORDER BY `{$branchCol}` ASC",
+            'i',
+            [$pharmacyId]
+        );
+    }
+}
 
-    $salary_column = payroll_first_column(
+$branchNames = [];
+foreach ($branches as $branch) {
+    $branchNames[(int)$branch['id']] = (string)$branch['branch_name'];
+}
+
+$branchCount = count($branches);
+
+/* ---------- Staff table detection ---------- */
+
+$staffTable = null;
+
+foreach (['users', 'staff', 'employees', 'profiles'] as $candidate) {
+
+    if (!payroll_complete_table($conn, $candidate)) {
+        continue;
+    }
+
+    $salaryColTest = payroll_complete_first_col(
         $conn,
-        $staff_table,
+        $candidate,
         [
+            'salary_amount',
             'basic_salary',
             'basicSalary',
             'salary',
@@ -337,225 +445,1109 @@ if ($staff_table) {
         ]
     );
 
-    $email_column = payroll_first_column(
+    if ($salaryColTest) {
+        $staffTable = $candidate;
+        break;
+    }
+}
+
+$staffRows = [];
+
+if ($staffTable) {
+
+    $staffIdCol = payroll_complete_first_col(
         $conn,
-        $staff_table,
+        $staffTable,
+        ['id', 'staff_id', 'user_id', 'employee_id']
+    );
+
+    $nameCol = payroll_complete_first_col(
+        $conn,
+        $staffTable,
+        ['full_name', 'name', 'staff_name', 'employee_name', 'username']
+    );
+
+    $roleCol = payroll_complete_first_col(
+        $conn,
+        $staffTable,
+        ['role', 'user_role', 'position', 'designation']
+    );
+
+    $branchCol = payroll_complete_first_col(
+        $conn,
+        $staffTable,
+        ['branch_id', 'branch']
+    );
+
+    $statusCol = payroll_complete_first_col(
+        $conn,
+        $staffTable,
+        ['status', 'is_active', 'active']
+    );
+
+    $salaryCol = payroll_complete_first_col(
+        $conn,
+        $staffTable,
+        [
+            'salary_amount',
+            'basic_salary',
+            'basicSalary',
+            'salary',
+            'monthly_salary',
+            'base_salary'
+        ]
+    );
+
+    $emailCol = payroll_complete_first_col(
+        $conn,
+        $staffTable,
         ['email', 'email_address']
     );
 
-    $employee_number_column = payroll_first_column(
+    $employeeNoCol = payroll_complete_first_col(
         $conn,
-        $staff_table,
+        $staffTable,
         ['employee_number', 'employee_no', 'staff_number', 'staff_no']
     );
 
-    if ($staff_id_column && $name_column && $salary_column) {
+    if ($staffIdCol && $nameCol && $salaryCol) {
 
         $select = [
-            "s.`{$staff_id_column}` AS staff_id",
-            "s.`{$name_column}` AS staff_name",
-            "s.`{$salary_column}` AS basic_salary"
+            "s.`{$staffIdCol}` AS staff_id",
+            "s.`{$nameCol}` AS staff_name",
+            "s.`{$salaryCol}` AS basic_salary",
+            $roleCol
+                ? "s.`{$roleCol}` AS staff_role"
+                : "'Staff' AS staff_role",
+            $branchCol
+                ? "s.`{$branchCol}` AS branch_id"
+                : "0 AS branch_id",
+            $emailCol
+                ? "s.`{$emailCol}` AS email"
+                : "'' AS email",
+            $employeeNoCol
+                ? "s.`{$employeeNoCol}` AS employee_number"
+                : "'' AS employee_number",
         ];
 
-        $select[] = $role_column
-            ? "s.`{$role_column}` AS staff_role"
-            : "'Staff' AS staff_role";
-
-        $select[] = $branch_id_column
-            ? "s.`{$branch_id_column}` AS branch_id"
-            : "0 AS branch_id";
-
-        $select[] = $status_column
-            ? "s.`{$status_column}` AS staff_status"
-            : "'Active' AS staff_status";
-
-        $select[] = $email_column
-            ? "s.`{$email_column}` AS email"
-            : "'' AS email";
-
-        $select[] = $employee_number_column
-            ? "s.`{$employee_number_column}` AS employee_number"
-            : "'' AS employee_number";
-
-        $where = [
-            "s.`pharmacy_id` = ?"
-        ];
-
+        $where = ["s.`pharmacy_id` = ?"];
         $types = 'i';
-        $params = [$pharmacy_id];
+        $params = [$pharmacyId];
 
-        if ($branch_filter > 0 && $branch_id_column) {
-            $where[] = "s.`{$branch_id_column}` = ?";
+        if ($branchFilter > 0 && $branchCol) {
+            $where[] = "s.`{$branchCol}` = ?";
             $types .= 'i';
-            $params[] = $branch_filter;
+            $params[] = $branchFilter;
         }
 
         if ($search !== '') {
             $where[] = "(
-                s.`{$name_column}` LIKE ?
-                OR " . ($email_column
-                    ? "s.`{$email_column}` LIKE ?"
-                    : "'' LIKE ?") . "
-                OR " . ($employee_number_column
-                    ? "s.`{$employee_number_column}` LIKE ?"
-                    : "'' LIKE ?") . "
+                s.`{$nameCol}` LIKE ?
+                OR " . (
+                    $emailCol ? "s.`{$emailCol}` LIKE ?" : "'' LIKE ?"
+                ) . "
+                OR " . (
+                    $employeeNoCol
+                        ? "s.`{$employeeNoCol}` LIKE ?"
+                        : "'' LIKE ?"
+                ) . "
             )";
 
             $like = '%' . $search . '%';
-
             $types .= 'sss';
             $params[] = $like;
             $params[] = $like;
             $params[] = $like;
         }
 
-        /*
-         * Active staff should be included by default.
-         * This deliberately accepts common active representations.
-         */
-        if ($status_column) {
+        if ($statusCol) {
             $where[] = "(
-                s.`{$status_column}` IS NULL
-                OR s.`{$status_column}` = ''
-                OR s.`{$status_column}` = 'Active'
-                OR s.`{$status_column}` = 'active'
-                OR s.`{$status_column}` = 1
-                OR s.`{$status_column}` = '1'
+                s.`{$statusCol}` IS NULL
+                OR s.`{$statusCol}` = ''
+                OR s.`{$statusCol}` = 'Active'
+                OR s.`{$statusCol}` = 'active'
+                OR s.`{$statusCol}` = 1
+                OR s.`{$statusCol}` = '1'
             )";
         }
 
-        $sql = "
-            SELECT " . implode(",\n", $select) . "
-            FROM `{$staff_table}` s
-            WHERE " . implode("\n AND ", $where) . "
-            ORDER BY s.`{$name_column}` ASC
-        ";
-
-        $staff_rows = payroll_rows(
+        $staffRows = payroll_complete_rows(
             $conn,
-            $sql,
+            "SELECT " . implode(",\n", $select) . "
+             FROM `{$staffTable}` s
+             WHERE " . implode("\n AND ", $where) . "
+             ORDER BY s.`{$nameCol}` ASC",
             $types,
             $params
         );
     }
 }
 
-/* ------------------------------------------------------------
-| Branch lookup
------------------------------------------------------------- */
+/* ---------- Create/upgrade payroll records ---------- */
 
-$branch_names = [];
+if (!payroll_complete_table($conn, 'payroll_records')) {
 
-foreach ($branches as $branch) {
-    $branch_names[(int)$branch['id']] = $branch['branch_name'];
+    $create = "
+        CREATE TABLE `payroll_records` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `pharmacy_id` INT UNSIGNED NULL,
+            `branch_id` INT UNSIGNED NULL,
+            `staff_id` INT UNSIGNED NOT NULL,
+            `payroll_period` CHAR(7) NOT NULL,
+            `basic_salary` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `allowances` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `bonus` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `overtime` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `other_earnings` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `paye` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `napsa` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `nhima` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `loan_deduction` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `salary_advance` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `other_deductions` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `gross_salary` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `total_deductions` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `net_salary` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `employer_napsa` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `employer_nhima` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `statutory_year` INT NULL,
+            `statutory_calculated_at` DATETIME NULL,
+            `status` VARCHAR(20) NOT NULL DEFAULT 'draft',
+            `created_by` VARCHAR(150) NULL,
+            `updated_by` VARCHAR(150) NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_payroll_staff_period`
+                (`pharmacy_id`,`staff_id`,`payroll_period`),
+            KEY `idx_payroll_period`
+                (`pharmacy_id`,`payroll_period`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ";
+
+    if (!$conn->query($create)) {
+        $error = 'Could not create payroll records table: ' . $conn->error;
+    }
 }
 
-/* ------------------------------------------------------------
-| Payroll calculations
-|
-| Phase 1 intentionally starts from the existing basic salary.
-| Allowances and deductions are zero until their dedicated
-| payroll controls are introduced.
------------------------------------------------------------- */
+if ($error === '') {
 
-$payroll = [];
-
-$total_basic = 0.0;
-$total_allowances = 0.0;
-$total_deductions = 0.0;
-$total_net = 0.0;
-
-foreach ($staff_rows as $staff) {
-
-    $basic = is_numeric($staff['basic_salary'])
-        ? (float)$staff['basic_salary']
-        : 0.0;
-
-    $allowances = 0.0;
-    $deductions = 0.0;
-
-    $gross = $basic + $allowances;
-    $net = max(0, $gross - $deductions);
-
-    $branch_id = (int)($staff['branch_id'] ?? 0);
-
-    $status_raw = (string)($staff['staff_status'] ?? 'Active');
-
-    $active = !in_array(
-        strtolower($status_raw),
-        ['0', 'inactive', 'disabled', 'terminated'],
-        true
-    );
-
-    $payroll[] = [
-        'staff_id' => (int)$staff['staff_id'],
-        'employee_number' => (string)($staff['employee_number'] ?? ''),
-        'staff_name' => (string)($staff['staff_name'] ?? 'Unnamed Staff'),
-        'role' => (string)($staff['staff_role'] ?? 'Staff'),
-        'branch_id' => $branch_id,
-        'branch_name' => $branch_names[$branch_id] ?? 'Main Branch',
-        'basic' => $basic,
-        'allowances' => $allowances,
-        'gross' => $gross,
-        'deductions' => $deductions,
-        'net' => $net,
-        'active' => $active
+    $upgradeColumns = [
+        'pharmacy_id' => 'INT UNSIGNED NULL',
+        'branch_id' => 'INT UNSIGNED NULL',
+        'allowances' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'bonus' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'overtime' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'other_earnings' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'loan_deduction' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'salary_advance' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'other_deductions' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'gross_salary' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'total_deductions' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'net_salary' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'employer_napsa' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'employer_nhima' => 'DECIMAL(15,2) NOT NULL DEFAULT 0',
+        'statutory_year' => 'INT NULL',
+        'statutory_calculated_at' => 'DATETIME NULL',
+        'created_by' => 'VARCHAR(150) NULL',
+        'updated_by' => 'VARCHAR(150) NULL',
     ];
 
-    $total_basic += $basic;
-    $total_allowances += $allowances;
-    $total_deductions += $deductions;
-    $total_net += $net;
+    foreach ($upgradeColumns as $col => $definition) {
+        if (!payroll_complete_col($conn, 'payroll_records', $col)) {
+            @$conn->query(
+                "ALTER TABLE payroll_records
+                 ADD COLUMN `{$col}` {$definition}"
+            );
+        }
+    }
 }
 
-$staff_count = count($payroll);
+/* ---------- Remittance table ---------- */
 
-/* ------------------------------------------------------------
-| Admin shell variables
------------------------------------------------------------- */
+if ($error === '' && !payroll_complete_table($conn, 'payroll_remittances')) {
 
-$admin_page_title = 'Payroll';
+    $create = "
+        CREATE TABLE `payroll_remittances` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `pharmacy_id` INT UNSIGNED NULL,
+            `payroll_period` CHAR(7) NOT NULL,
+            `statutory_type` VARCHAR(10) NOT NULL,
+            `liability_amount` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `employee_amount` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `employer_amount` DECIMAL(15,2) NOT NULL DEFAULT 0,
+            `due_date` DATE NOT NULL,
+            `return_status` VARCHAR(20) NOT NULL DEFAULT 'pending',
+            `payment_date` DATE NULL,
+            `payment_reference` VARCHAR(150) NULL,
+            `return_reference` VARCHAR(150) NULL,
+            `notes` TEXT NULL,
+            `created_by` VARCHAR(150) NULL,
+            `updated_by` VARCHAR(150) NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_remit_period_type`
+                (`pharmacy_id`,`payroll_period`,`statutory_type`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ";
 
-/* ------------------------------------------------------------
-| Months
------------------------------------------------------------- */
+    if (!$conn->query($create)) {
+        $error = 'Could not create payroll remittance table: ' . $conn->error;
+    }
+}
 
-$months = [
-    1 => 'January',
-    2 => 'February',
-    3 => 'March',
-    4 => 'April',
-    5 => 'May',
-    6 => 'June',
-    7 => 'July',
-    8 => 'August',
-    9 => 'September',
-    10 => 'October',
-    11 => 'November',
-    12 => 'December'
+/* ---------- POST actions ---------- */
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
+
+    $action = (string)($_POST['action'] ?? '');
+
+    /*
+     * Salary Setup:
+     * Payroll is the only module allowed to change the master salary.
+     * The staff-management page deliberately does not expose this field.
+     */
+    if ($action === 'set_salary') {
+
+        $staffId = (int)($_POST['staff_id'] ?? 0);
+        $salary = max(0, (float)($_POST['salary'] ?? 0));
+
+        if ($staffId <= 0) {
+            payroll_complete_redirect([
+                'view' => 'salary',
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Invalid staff member.'
+            ]);
+        }
+
+        $check = $conn->prepare("
+            SELECT id
+            FROM users
+            WHERE id = ?
+              AND pharmacy_id = ?
+            LIMIT 1
+        ");
+
+        if (!$check) {
+            payroll_complete_redirect([
+                'view' => 'salary',
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Could not validate the staff member.'
+            ]);
+        }
+
+        $check->bind_param('ii', $staffId, $pharmacyId);
+        $check->execute();
+        $exists = $check->get_result()->num_rows > 0;
+        $check->close();
+
+        if (!$exists) {
+            payroll_complete_redirect([
+                'view' => 'salary',
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Staff member was not found.'
+            ]);
+        }
+
+        $stmt = $conn->prepare("
+            UPDATE users
+            SET salary_amount = ?
+            WHERE id = ?
+              AND pharmacy_id = ?
+        ");
+
+        if (!$stmt) {
+            payroll_complete_redirect([
+                'view' => 'salary',
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Could not prepare the salary update: ' . $conn->error
+            ]);
+        }
+
+        $stmt->bind_param('dii', $salary, $staffId, $pharmacyId);
+        $ok = $stmt->execute();
+        $stmt->close();
+
+        if (!$ok) {
+            payroll_complete_redirect([
+                'view' => 'salary',
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Salary could not be saved.'
+            ]);
+        }
+
+        payroll_complete_redirect([
+            'view' => 'salary',
+            'month' => $selectedMonth,
+            'year' => $selectedYear,
+            'saved' => 'Salary updated successfully. The new master salary will be used when payroll is prepared.'
+        ]);
+    }
+
+    if ($action === 'prepare_payroll') {
+
+        if (!$staffRows) {
+            payroll_complete_redirect([
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'No active staff records were found.'
+            ]);
+        }
+
+        $stmt = $conn->prepare("
+            INSERT INTO payroll_records
+            (
+                pharmacy_id,
+                branch_id,
+                staff_id,
+                payroll_period,
+                basic_salary,
+                status,
+                created_by,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)
+            ON DUPLICATE KEY UPDATE
+                branch_id = VALUES(branch_id),
+                basic_salary = VALUES(basic_salary),
+                updated_by = VALUES(updated_by)
+        ");
+
+        if (!$stmt) {
+            payroll_complete_redirect([
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Could not prepare payroll: ' . $conn->error
+            ]);
+        }
+
+        $user = payroll_complete_user();
+
+        foreach ($staffRows as $staff) {
+
+            $branchId = (int)($staff['branch_id'] ?? 0);
+            $staffId = (int)$staff['staff_id'];
+            $basic = (float)$staff['basic_salary'];
+
+            $stmt->bind_param(
+                'iiisdss',
+                $pharmacyId,
+                $branchId,
+                $staffId,
+                $period,
+                $basic,
+                $user,
+                $user
+            );
+
+            $stmt->execute();
+        }
+
+        $stmt->close();
+
+        payroll_complete_redirect([
+            'month' => $selectedMonth,
+            'year' => $selectedYear,
+            'view' => 'payroll',
+            'saved' => 'Payroll prepared for ' . $periodLabel . '.'
+        ]);
+    }
+
+    if ($action === 'save_row') {
+
+        $recordId = (int)($_POST['record_id'] ?? 0);
+
+        $found = payroll_complete_rows(
+            $conn,
+            "SELECT *
+             FROM payroll_records
+             WHERE id = ?
+               AND pharmacy_id = ?
+             LIMIT 1",
+            'ii',
+            [$recordId, $pharmacyId]
+        );
+
+        if (!$found) {
+            payroll_complete_redirect([
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Payroll record not found.'
+            ]);
+        }
+
+        $record = $found[0];
+
+        if (in_array(
+            strtolower((string)$record['status']),
+            ['approved','paid','locked'],
+            true
+        )) {
+            payroll_complete_redirect([
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'This payroll row is protected and cannot be edited.'
+            ]);
+        }
+
+        $basic = max(0, (float)($_POST['basic_salary'] ?? 0));
+        $allowances = max(0, (float)($_POST['allowances'] ?? 0));
+        $bonus = max(0, (float)($_POST['bonus'] ?? 0));
+        $overtime = max(0, (float)($_POST['overtime'] ?? 0));
+        $otherEarnings = max(0, (float)($_POST['other_earnings'] ?? 0));
+        $loan = max(0, (float)($_POST['loan_deduction'] ?? 0));
+        $advance = max(0, (float)($_POST['salary_advance'] ?? 0));
+        $otherDeductions = max(0, (float)($_POST['other_deductions'] ?? 0));
+
+        $calc = payroll_complete_calculate(
+            $basic,
+            $allowances,
+            $bonus,
+            $overtime,
+            $otherEarnings,
+            $loan,
+            $advance,
+            $otherDeductions
+        );
+
+        $yearValue = $selectedYear;
+        $status = 'calculated';
+        $user = payroll_complete_user();
+
+        $stmt = $conn->prepare("
+            UPDATE payroll_records
+            SET
+                basic_salary = ?,
+                allowances = ?,
+                bonus = ?,
+                overtime = ?,
+                other_earnings = ?,
+                paye = ?,
+                napsa = ?,
+                nhima = ?,
+                loan_deduction = ?,
+                salary_advance = ?,
+                other_deductions = ?,
+                gross_salary = ?,
+                total_deductions = ?,
+                net_salary = ?,
+                employer_napsa = ?,
+                employer_nhima = ?,
+                statutory_year = ?,
+                statutory_calculated_at = NOW(),
+                status = ?,
+                updated_by = ?
+            WHERE id = ?
+              AND pharmacy_id = ?
+        ");
+
+        if (!$stmt) {
+            payroll_complete_redirect([
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Could not update payroll: ' . $conn->error
+            ]);
+        }
+
+        $stmt->bind_param(
+            'ddddddddddddddddissii',
+            $basic,
+            $allowances,
+            $bonus,
+            $overtime,
+            $otherEarnings,
+            $calc['paye'],
+            $calc['napsa'],
+            $calc['nhima'],
+            $loan,
+            $advance,
+            $otherDeductions,
+            $calc['gross'],
+            $calc['total'],
+            $calc['net'],
+            $calc['employer_napsa'],
+            $calc['employer_nhima'],
+            $yearValue,
+            $status,
+            $user,
+            $recordId,
+            $pharmacyId
+        );
+
+        if (!$stmt->execute()) {
+            $msg = $stmt->error;
+            $stmt->close();
+
+            payroll_complete_redirect([
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Could not save payroll: ' . $msg
+            ]);
+        }
+
+        $stmt->close();
+
+        payroll_complete_redirect([
+            'month' => $selectedMonth,
+            'year' => $selectedYear,
+            'view' => 'payroll',
+            'saved' => 'Payroll row saved and statutory values calculated.'
+        ]);
+    }
+
+    if ($action === 'recalculate') {
+
+        $records = payroll_complete_rows(
+            $conn,
+            "SELECT *
+             FROM payroll_records
+             WHERE pharmacy_id = ?
+               AND payroll_period = ?",
+            'is',
+            [$pharmacyId, $period]
+        );
+
+        $stmt = $conn->prepare("
+            UPDATE payroll_records
+            SET
+                paye = ?,
+                napsa = ?,
+                nhima = ?,
+                employer_napsa = ?,
+                employer_nhima = ?,
+                gross_salary = ?,
+                total_deductions = ?,
+                net_salary = ?,
+                statutory_year = ?,
+                statutory_calculated_at = NOW(),
+                status = 'calculated',
+                updated_by = ?
+            WHERE id = ?
+              AND pharmacy_id = ?
+              AND status NOT IN ('approved','paid','locked')
+        ");
+
+        if ($stmt) {
+
+            $user = payroll_complete_user();
+            $changed = 0;
+
+            foreach ($records as $record) {
+
+                $calc = payroll_complete_calculate(
+                    (float)$record['basic_salary'],
+                    (float)$record['allowances'],
+                    (float)$record['bonus'],
+                    (float)$record['overtime'],
+                    (float)$record['other_earnings'],
+                    (float)$record['loan_deduction'],
+                    (float)$record['salary_advance'],
+                    (float)$record['other_deductions']
+                );
+
+                $yearValue = $selectedYear;
+                $id = (int)$record['id'];
+
+                $stmt->bind_param(
+                    'ddddddddisii',
+                    $calc['paye'],
+                    $calc['napsa'],
+                    $calc['nhima'],
+                    $calc['employer_napsa'],
+                    $calc['employer_nhima'],
+                    $calc['gross'],
+                    $calc['total'],
+                    $calc['net'],
+                    $yearValue,
+                    $user,
+                    $id,
+                    $pharmacyId
+                );
+
+                if ($stmt->execute()) {
+                    $changed++;
+                }
+            }
+
+            $stmt->close();
+
+            payroll_complete_redirect([
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'view' => 'payroll',
+                'saved' => $changed . ' payroll record(s) recalculated.'
+            ]);
+        }
+    }
+
+    foreach ([
+        'approve' => ['from' => 'calculated', 'to' => 'approved'],
+        'mark_paid' => ['from' => 'approved', 'to' => 'paid'],
+        'lock' => ['from' => 'paid', 'to' => 'locked'],
+        'reopen' => ['from' => 'approved', 'to' => 'calculated'],
+    ] as $workflowAction => $flow) {
+
+        if ($action !== $workflowAction) {
+            continue;
+        }
+
+        $stmt = $conn->prepare("
+            UPDATE payroll_records
+            SET status = ?, updated_by = ?
+            WHERE pharmacy_id = ?
+              AND payroll_period = ?
+              AND status = ?
+        ");
+
+        if ($stmt) {
+
+            $to = $flow['to'];
+            $user = payroll_complete_user();
+            $from = $flow['from'];
+
+            $stmt->bind_param(
+                'ssiss',
+                $to,
+                $user,
+                $pharmacyId,
+                $period,
+                $from
+            );
+
+            $stmt->execute();
+            $changed = $stmt->affected_rows;
+            $stmt->close();
+
+            payroll_complete_redirect([
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'view' => 'payroll',
+                'saved' => $changed . ' payroll record(s) moved to ' . strtoupper($to) . '.'
+            ]);
+        }
+    }
+
+    if ($action === 'save_remittance') {
+
+        $id = (int)($_POST['remittance_id'] ?? 0);
+        $status = (string)($_POST['return_status'] ?? 'pending');
+
+        if (!in_array(
+            $status,
+            ['pending','submitted','paid','overdue'],
+            true
+        )) {
+            $status = 'pending';
+        }
+
+        $paymentDate = trim((string)($_POST['payment_date'] ?? ''));
+        $paymentReference = trim((string)($_POST['payment_reference'] ?? ''));
+        $returnReference = trim((string)($_POST['return_reference'] ?? ''));
+        $notes = trim((string)($_POST['notes'] ?? ''));
+        $user = payroll_complete_user();
+
+        $stmt = $conn->prepare("
+            UPDATE payroll_remittances
+            SET
+                return_status = ?,
+                payment_date = NULLIF(?, ''),
+                payment_reference = NULLIF(?, ''),
+                return_reference = NULLIF(?, ''),
+                notes = NULLIF(?, ''),
+                updated_by = ?
+            WHERE id = ?
+              AND pharmacy_id = ?
+              AND payroll_period = ?
+        ");
+
+        if ($stmt) {
+
+            $stmt->bind_param(
+                'ssssssiis',
+                $status,
+                $paymentDate,
+                $paymentReference,
+                $returnReference,
+                $notes,
+                $user,
+                $id,
+                $pharmacyId,
+                $period
+            );
+
+            if (!$stmt->execute()) {
+                $msg = $stmt->error;
+                $stmt->close();
+
+                payroll_complete_redirect([
+                    'month' => $selectedMonth,
+                    'year' => $selectedYear,
+                    'view' => 'remittance',
+                    'error' => 'Could not save remittance: ' . $msg
+                ]);
+            }
+
+            $stmt->close();
+
+            payroll_complete_redirect([
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'view' => 'remittance',
+                'saved' => 'Remittance updated successfully.'
+            ]);
+        }
+    }
+}
+
+/* ---------- Load payroll ---------- */
+
+$payrollRows = payroll_complete_rows(
+    $conn,
+    "SELECT *
+     FROM payroll_records
+     WHERE pharmacy_id = ?
+       AND payroll_period = ?
+     ORDER BY staff_id ASC",
+    'is',
+    [$pharmacyId, $period]
+);
+
+/*
+ * Attach current staff display data.
+ */
+$staffMap = [];
+
+foreach ($staffRows as $staff) {
+    $staffMap[(int)$staff['staff_id']] = $staff;
+}
+
+foreach ($payrollRows as &$row) {
+
+    $staff = $staffMap[(int)$row['staff_id']] ?? [];
+
+    $row['staff_name'] =
+        $staff['staff_name']
+        ?? ('Staff #' . (int)$row['staff_id']);
+
+    $row['staff_role'] =
+        $staff['staff_role']
+        ?? 'Staff';
+
+    $row['employee_number'] =
+        $staff['employee_number']
+        ?? '';
+
+    $row['branch_name'] =
+        $branchNames[(int)($row['branch_id'] ?? 0)]
+        ?? 'Main Branch';
+
+    foreach ([
+        'basic_salary',
+        'allowances',
+        'bonus',
+        'overtime',
+        'other_earnings',
+        'paye',
+        'napsa',
+        'nhima',
+        'loan_deduction',
+        'salary_advance',
+        'other_deductions',
+        'gross_salary',
+        'total_deductions',
+        'net_salary',
+        'employer_napsa',
+        'employer_nhima'
+    ] as $numericColumn) {
+        $row[$numericColumn] = (float)$row[$numericColumn];
+    }
+}
+
+unset($row);
+
+/* ---------- Totals ---------- */
+
+$totals = [
+    'basic' => 0.0,
+    'gross' => 0.0,
+    'paye' => 0.0,
+    'napsa' => 0.0,
+    'nhima' => 0.0,
+    'deductions' => 0.0,
+    'net' => 0.0,
+    'employer_napsa' => 0.0,
+    'employer_nhima' => 0.0,
 ];
 
-$year_options = range(
-    (int)date('Y') - 2,
-    (int)date('Y') + 2
+foreach ($payrollRows as $row) {
+    $totals['basic'] += $row['basic_salary'];
+    $totals['gross'] += $row['gross_salary'];
+    $totals['paye'] += $row['paye'];
+    $totals['napsa'] += $row['napsa'];
+    $totals['nhima'] += $row['nhima'];
+    $totals['deductions'] += $row['total_deductions'];
+    $totals['net'] += $row['net_salary'];
+    $totals['employer_napsa'] += $row['employer_napsa'];
+    $totals['employer_nhima'] += $row['employer_nhima'];
+}
+
+$employerCost =
+    $totals['gross']
+    + $totals['employer_napsa']
+    + $totals['employer_nhima'];
+
+$periodStatus = 'draft';
+
+foreach ($payrollRows as $row) {
+
+    if ($row['status'] === 'locked') {
+        $periodStatus = 'locked';
+        break;
+    }
+
+    if ($row['status'] === 'paid') {
+        $periodStatus = 'paid';
+        continue;
+    }
+
+    if ($row['status'] === 'approved') {
+        $periodStatus = 'approved';
+        continue;
+    }
+
+    if ($row['status'] === 'calculated') {
+        $periodStatus = 'calculated';
+    }
+}
+
+/* ---------- Remittance ---------- */
+
+$nextMonth = new DateTimeImmutable($period . '-01');
+$nextMonth = $nextMonth->modify('first day of next month');
+
+$dueDate = $nextMonth->setDate(
+    (int)$nextMonth->format('Y'),
+    (int)$nextMonth->format('m'),
+    10
 );
+
+if ($error === '' && payroll_complete_table($conn, 'payroll_remittances')) {
+
+    $remitData = [
+        'PAYE' => [
+            'employee' => $totals['paye'],
+            'employer' => 0.0,
+        ],
+        'NAPSA' => [
+            'employee' => $totals['napsa'],
+            'employer' => $totals['employer_napsa'],
+        ],
+        'NHIMA' => [
+            'employee' => $totals['nhima'],
+            'employer' => $totals['employer_nhima'],
+        ],
+    ];
+
+    $stmt = $conn->prepare("
+        INSERT INTO payroll_remittances
+        (
+            pharmacy_id,
+            payroll_period,
+            statutory_type,
+            liability_amount,
+            employee_amount,
+            employer_amount,
+            due_date,
+            created_by
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            liability_amount = VALUES(liability_amount),
+            employee_amount = VALUES(employee_amount),
+            employer_amount = VALUES(employer_amount),
+            due_date = VALUES(due_date)
+    ");
+
+    if ($stmt) {
+
+        $dueSql = $dueDate->format('Y-m-d');
+        $user = payroll_complete_user();
+
+        foreach ($remitData as $type => $values) {
+
+            $employee = $values['employee'];
+            $employer = $values['employer'];
+            $liability = $employee + $employer;
+
+            $stmt->bind_param(
+                'issdddss',
+                $pharmacyId,
+                $period,
+                $type,
+                $liability,
+                $employee,
+                $employer,
+                $dueSql,
+                $user
+            );
+
+            $stmt->execute();
+        }
+
+        $stmt->close();
+    }
+}
+
+$remittances = [];
+
+if (payroll_complete_table($conn, 'payroll_remittances')) {
+    $remittances = payroll_complete_rows(
+        $conn,
+        "SELECT *
+         FROM payroll_remittances
+         WHERE pharmacy_id = ?
+           AND payroll_period = ?
+         ORDER BY FIELD(statutory_type,'PAYE','NAPSA','NHIMA')",
+        'is',
+        [$pharmacyId, $period]
+    );
+}
+
+$totalLiability = 0.0;
+$totalPaid = 0.0;
+$totalOutstanding = 0.0;
+$today = new DateTimeImmutable('today');
+
+foreach ($remittances as &$remit) {
+
+    $amount = (float)$remit['liability_amount'];
+
+    $displayStatus = (string)$remit['return_status'];
+
+    if (
+        $displayStatus === 'pending'
+        && $today > new DateTimeImmutable($remit['due_date'])
+    ) {
+        $displayStatus = 'overdue';
+    }
+
+    $remit['display_status'] = $displayStatus;
+
+    $totalLiability += $amount;
+
+    if ($remit['return_status'] === 'paid') {
+        $totalPaid += $amount;
+    } else {
+        $totalOutstanding += $amount;
+    }
+}
+
+unset($remit);
+
+/* ---------- History ---------- */
+
+$history = [];
+
+if ($view === 'history') {
+
+    $history = payroll_complete_rows(
+        $conn,
+        "SELECT
+            payroll_period,
+            COUNT(*) AS staff_count,
+            SUM(gross_salary) AS gross,
+            SUM(total_deductions) AS deductions,
+            SUM(net_salary) AS net,
+            SUM(paye) AS paye,
+            SUM(napsa) AS napsa,
+            SUM(nhima) AS nhima
+         FROM payroll_records
+         WHERE pharmacy_id = ?
+         GROUP BY payroll_period
+         ORDER BY payroll_period DESC
+         LIMIT 36",
+        'i',
+        [$pharmacyId]
+    );
+}
+
+/* ---------- YTD ---------- */
+
+$ytdRows = [];
+
+if ($view === 'ytd') {
+
+    $ytdRows = payroll_complete_rows(
+        $conn,
+        "SELECT
+            staff_id,
+            SUM(basic_salary) AS basic,
+            SUM(gross_salary) AS gross,
+            SUM(paye) AS paye,
+            SUM(napsa) AS napsa,
+            SUM(nhima) AS nhima,
+            SUM(total_deductions) AS deductions,
+            SUM(net_salary) AS net
+         FROM payroll_records
+         WHERE pharmacy_id = ?
+           AND payroll_period LIKE ?
+         GROUP BY staff_id
+         ORDER BY staff_id ASC",
+        'is',
+        [$pharmacyId, sprintf('%04d-%%', $selectedYear)]
+    );
+
+    foreach ($ytdRows as &$yr) {
+        $staff = $staffMap[(int)$yr['staff_id']] ?? [];
+        $yr['staff_name'] =
+            $staff['staff_name']
+            ?? ('Staff #' . (int)$yr['staff_id']);
+        $yr['role'] =
+            $staff['staff_role']
+            ?? 'Staff';
+    }
+
+    unset($yr);
+}
+
+/* ---------- Payslip ---------- */
+
+$payslipStaffId = (int)($_GET['payslip'] ?? 0);
+$payslip = null;
+
+if ($payslipStaffId > 0) {
+    foreach ($payrollRows as $row) {
+        if ((int)$row['staff_id'] === $payslipStaffId) {
+            $payslip = $row;
+            break;
+        }
+    }
+}
+
+/* ---------- Shared shell ---------- */
+
 ?>
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
-<title>Payroll | <?php echo payroll_esc($pharmacy_name); ?></title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Payroll | <?= payroll_complete_h($pharmacyName) ?></title>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
 <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
     rel="stylesheet"
 >
-
 <link
     rel="stylesheet"
     href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
@@ -565,7 +1557,7 @@ $year_options = range(
 :root{
     --bg:#f4f6f8;
     --surface:#fff;
-    --surface-soft:#f8fafc;
+    --soft:#f8fafc;
     --charcoal:#202831;
     --text:#1d252d;
     --muted:#71808f;
@@ -578,13 +1570,10 @@ $year_options = range(
     --yellow-soft:#fff6df;
     --red:#d94d61;
     --red-soft:#fff0f2;
-    --purple:#7658e8;
     --radius:12px;
     --shadow:0 4px 18px rgba(31,40,49,.06);
 }
-
 *{box-sizing:border-box}
-
 html,body{
     margin:0;
     min-height:100%;
@@ -593,117 +1582,79 @@ html,body{
     font-family:Inter,Arial,sans-serif;
     font-size:14px;
 }
-
 body{overflow-x:hidden}
-
-button,
-input,
-select{
-    font:inherit;
-}
-
-button,
-select{
-    cursor:pointer;
-}
-
-a{
-    text-decoration:none;
-    color:inherit;
-}
-
-.main{
-    margin-left:250px;
-    min-height:100vh;
-}
-
-.payroll-content{
-    max-width:1600px;
-    margin:auto;
-    padding:24px 28px 40px;
-}
-
-/* ------------------------------------------------------------
-| Page heading
------------------------------------------------------------- */
+button,input,select,textarea{font:inherit}
+button,select{cursor:pointer}
+a{text-decoration:none;color:inherit}
+.main{margin-left:250px;min-height:100vh}
+.payroll-content{max-width:1600px;margin:auto;padding:24px 28px 40px}
 
 .page-heading{
     display:flex;
     justify-content:space-between;
     align-items:flex-end;
     gap:20px;
-    margin-bottom:18px;
+    margin-bottom:18px
 }
-
 .page-heading h1{
     margin:0;
     font-size:27px;
     line-height:1.1;
     font-weight:800;
-    letter-spacing:-.6px;
+    letter-spacing:-.6px
 }
-
 .page-heading p{
     margin:7px 0 0;
     color:var(--muted);
-    font-size:12px;
+    font-size:12px
 }
-
-.page-actions{
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-}
-
+.page-actions{display:flex;gap:8px;flex-wrap:wrap}
 .btn{
-    height:39px;
+    min-height:39px;
     border:1px solid var(--border);
     background:#fff;
     color:#52606d;
     border-radius:8px;
-    padding:0 14px;
+    padding:0 13px;
     font-size:12px;
     font-weight:700;
     display:inline-flex;
     align-items:center;
     justify-content:center;
-    gap:8px;
+    gap:8px
 }
-
 .btn:hover{
     border-color:#b8c7da;
-    box-shadow:0 3px 10px rgba(30,50,80,.08);
+    box-shadow:0 3px 10px rgba(30,50,80,.08)
 }
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.green{background:var(--green);border-color:var(--green);color:#fff}
+.btn.yellow{color:#a36d00;border-color:#ecd79b;background:#fffaf0}
+.btn.small{min-height:32px;padding:0 9px;font-size:11px}
 
-.btn.primary{
-    background:var(--blue);
-    border-color:var(--blue);
-    color:#fff;
+.notice{
+    padding:11px 13px;
+    margin-bottom:14px;
+    border-radius:9px;
+    border:1px solid;
+    font-size:12px
 }
-
-.btn.green{
-    background:var(--green);
-    border-color:var(--green);
-    color:#fff;
-}
-
-/* ------------------------------------------------------------
-| Payroll navigation
------------------------------------------------------------- */
+.notice.success{background:var(--green-soft);border-color:#b9e8d1;color:#08754f}
+.notice.error{background:var(--red-soft);border-color:#efc0c8;color:#b4233b}
+.notice.info{background:var(--blue-soft);border-color:#cbdcff;color:#2458b8}
 
 .payroll-tabs{
     display:flex;
     align-items:center;
-    gap:6px;
+    gap:5px;
     background:#fff;
     border:1px solid var(--border);
     border-radius:10px;
     padding:6px;
     box-shadow:var(--shadow);
     margin-bottom:16px;
-    overflow:auto;
+    overflow:auto
 }
-
 .payroll-tab{
     min-height:36px;
     padding:0 13px;
@@ -714,30 +1665,17 @@ a{
     display:flex;
     align-items:center;
     gap:7px;
-    white-space:nowrap;
+    white-space:nowrap
 }
-
-.payroll-tab:hover{
-    background:#f3f6fa;
-    color:var(--text);
-}
-
-.payroll-tab.active{
-    background:var(--blue-soft);
-    color:var(--blue);
-}
-
-/* ------------------------------------------------------------
-| Summary cards
------------------------------------------------------------- */
+.payroll-tab:hover{background:#f3f6fa;color:var(--text)}
+.payroll-tab.active{background:var(--blue-soft);color:var(--blue)}
 
 .summary-grid{
     display:grid;
     grid-template-columns:repeat(4,1fr);
     gap:13px;
-    margin-bottom:16px;
+    margin-bottom:16px
 }
-
 .summary-card{
     position:relative;
     overflow:hidden;
@@ -746,20 +1684,8 @@ a{
     border-radius:var(--radius);
     box-shadow:var(--shadow);
     padding:16px 17px;
-    min-height:112px;
+    min-height:112px
 }
-
-.summary-card:after{
-    content:"";
-    position:absolute;
-    width:85px;
-    height:85px;
-    right:-34px;
-    bottom:-42px;
-    border-radius:50%;
-    background:rgba(36,107,254,.05);
-}
-
 .summary-top{
     display:flex;
     align-items:center;
@@ -768,50 +1694,25 @@ a{
     font-size:10px;
     font-weight:800;
     text-transform:uppercase;
-    letter-spacing:.8px;
+    letter-spacing:.8px
 }
-
 .summary-icon{
-    width:34px;
-    height:34px;
-    display:grid;
-    place-items:center;
+    width:34px;height:34px;
+    display:grid;place-items:center;
     border-radius:8px;
     background:var(--blue-soft);
-    color:var(--blue);
+    color:var(--blue)
 }
-
 .summary-value{
     margin-top:9px;
     font-size:23px;
     font-weight:800;
-    letter-spacing:-.4px;
+    letter-spacing:-.4px
 }
-
-.summary-sub{
-    margin-top:4px;
-    color:var(--muted);
-    font-size:10px;
-}
-
-.summary-card.green .summary-icon{
-    color:var(--green);
-    background:var(--green-soft);
-}
-
-.summary-card.yellow .summary-icon{
-    color:var(--yellow);
-    background:var(--yellow-soft);
-}
-
-.summary-card.red .summary-icon{
-    color:var(--red);
-    background:var(--red-soft);
-}
-
-/* ------------------------------------------------------------
-| Filters
------------------------------------------------------------- */
+.summary-sub{margin-top:4px;color:var(--muted);font-size:10px}
+.summary-card.green .summary-icon{color:var(--green);background:var(--green-soft)}
+.summary-card.yellow .summary-icon{color:var(--yellow);background:var(--yellow-soft)}
+.summary-card.red .summary-icon{color:var(--red);background:var(--red-soft)}
 
 .filter-panel{
     background:#fff;
@@ -819,16 +1720,14 @@ a{
     border-radius:var(--radius);
     box-shadow:var(--shadow);
     padding:14px;
-    margin-bottom:14px;
+    margin-bottom:14px
 }
-
 .filter-row{
     display:grid;
     grid-template-columns:minmax(220px,1.8fr) 180px 150px auto;
     gap:9px;
-    align-items:center;
+    align-items:center
 }
-
 .field{
     height:40px;
     border:1px solid var(--border);
@@ -838,54 +1737,36 @@ a{
     outline:none;
     padding:0 11px;
     width:100%;
-    font-size:12px;
+    font-size:12px
 }
-
 .field:focus{
     border-color:#8bb0ff;
-    box-shadow:0 0 0 3px var(--blue-soft);
+    box-shadow:0 0 0 3px var(--blue-soft)
 }
-
-.search-wrap{
-    position:relative;
-}
-
+.search-wrap{position:relative}
 .search-wrap i{
-    position:absolute;
-    left:12px;
-    top:50%;
+    position:absolute;left:12px;top:50%;
     transform:translateY(-50%);
-    color:#93a0ad;
-    font-size:12px;
-    pointer-events:none;
+    color:#93a0ad;font-size:12px;pointer-events:none
 }
-
-.search-wrap .field{
-    padding-left:34px;
-}
-
+.search-wrap .field{padding-left:34px}
 .filter-note{
     display:flex;
     justify-content:space-between;
-    align-items:center;
     gap:10px;
     margin-top:10px;
     color:var(--muted);
-    font-size:10px;
+    font-size:10px
 }
 
-/* ------------------------------------------------------------
-| Payroll table
------------------------------------------------------------- */
-
-.payroll-panel{
+.panel{
     background:#fff;
     border:1px solid var(--border);
     border-radius:var(--radius);
     box-shadow:var(--shadow);
     overflow:hidden;
+    margin-bottom:14px
 }
-
 .panel-head{
     min-height:61px;
     padding:0 17px;
@@ -893,22 +1774,10 @@ a{
     align-items:center;
     justify-content:space-between;
     gap:15px;
-    border-bottom:1px solid var(--border);
+    border-bottom:1px solid var(--border)
 }
-
-.panel-title b{
-    display:block;
-    color:var(--charcoal);
-    font-size:13px;
-}
-
-.panel-title span{
-    display:block;
-    color:var(--muted);
-    font-size:10px;
-    margin-top:4px;
-}
-
+.panel-title b{display:block;color:var(--charcoal);font-size:13px}
+.panel-title span{display:block;color:var(--muted);font-size:10px;margin-top:4px}
 .period-pill{
     background:#f5f7fa;
     border:1px solid var(--border);
@@ -917,21 +1786,15 @@ a{
     padding:7px 11px;
     font-size:10px;
     font-weight:800;
-    white-space:nowrap;
+    white-space:nowrap
 }
-
-.table-wrap{
+.table-wrap{width:100%;overflow:auto}
+table{
     width:100%;
-    overflow:auto;
+    min-width:1050px;
+    border-collapse:collapse
 }
-
-.payroll-table{
-    width:100%;
-    min-width:980px;
-    border-collapse:collapse;
-}
-
-.payroll-table th{
+th{
     background:#f7f9fb;
     border-bottom:1px solid var(--border);
     color:#657382;
@@ -941,891 +1804,1666 @@ a{
     font-weight:800;
     text-align:left;
     padding:12px 13px;
-    white-space:nowrap;
+    white-space:nowrap
 }
-
-.payroll-table th.money,
-.payroll-table td.money{
-    text-align:right;
-}
-
-.payroll-table td{
+td{
     border-bottom:1px solid #edf0f3;
-    padding:12px 13px;
+    padding:10px 13px;
     vertical-align:middle;
     color:#53616d;
-    font-size:11px;
+    font-size:11px
 }
-
-.payroll-table tbody tr:hover{
-    background:#fbfcfd;
-}
-
-.payroll-table tbody tr:last-child td{
-    border-bottom:0;
-}
-
+tbody tr:hover{background:#fbfcfd}
+.money{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .employee{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    min-width:220px;
+    display:flex;align-items:center;gap:10px;min-width:210px
 }
-
-.employee-avatar{
-    width:34px;
-    height:34px;
-    flex:0 0 34px;
-    display:grid;
-    place-items:center;
+.avatar{
+    width:34px;height:34px;flex:0 0 34px;
+    display:grid;place-items:center;
     border-radius:9px;
     background:var(--blue-soft);
     color:var(--blue);
-    font-size:11px;
-    font-weight:800;
+    font-size:11px;font-weight:800
 }
-
-.employee-name{
-    min-width:0;
-}
-
 .employee-name b{
-    display:block;
-    color:var(--charcoal);
-    font-size:11px;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
+    display:block;color:var(--charcoal);font-size:11px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    max-width:220px
 }
-
 .employee-name span{
-    display:block;
-    margin-top:3px;
-    color:#87939f;
-    font-size:9px;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
+    display:block;color:var(--muted);font-size:9px;margin-top:3px
 }
-
-.role{
-    color:#667582;
-    white-space:nowrap;
-}
-
-.branch-name{
-    white-space:nowrap;
-}
-
-.money-basic{
-    color:var(--charcoal);
-    font-weight:800;
-}
-
-.money-gross{
-    color:var(--blue);
-    font-weight:800;
-}
-
-.money-net{
-    color:var(--green);
-    font-weight:800;
-}
-
 .status{
     display:inline-flex;
-    align-items:center;
-    gap:5px;
-    border-radius:20px;
     padding:5px 8px;
-    background:var(--green-soft);
-    color:var(--green);
+    border-radius:999px;
     font-size:9px;
     font-weight:800;
+    text-transform:uppercase
 }
+.status.draft{background:#f1f5f9;color:#64748b}
+.status.calculated{background:var(--blue-soft);color:var(--blue)}
+.status.approved{background:var(--yellow-soft);color:#a36d00}
+.status.paid{background:var(--green-soft);color:#08754f}
+.status.locked{background:#eef0f2;color:#4b5563}
+.action-stack{display:flex;gap:5px;flex-wrap:wrap}
 
-.status i{
-    font-size:6px;
+.row-form{
+    display:grid;
+    grid-template-columns:repeat(8,minmax(90px,1fr)) auto;
+    gap:7px;
+    padding:10px 13px;
+    background:#fbfcfd;
+    border-bottom:1px solid var(--border)
 }
-
-.action-btn{
-    width:34px;
+.row-form label{
+    font-size:9px;color:var(--muted);
+    display:flex;flex-direction:column;gap:3px
+}
+.row-form input{
     height:34px;
     border:1px solid var(--border);
-    background:#fff;
     border-radius:7px;
-    color:#71808d;
-    display:grid;
-    place-items:center;
+    padding:0 8px;
+    font-size:11px;
+    min-width:0
 }
 
-.action-btn:hover{
-    color:var(--blue);
-    border-color:#9eb9e8;
-    background:var(--blue-soft);
+.salary-panel{
+    margin-bottom:14px
 }
-
-.table-total td{
-    background:#f7f9fb;
-    border-top:1px solid var(--border);
-    font-weight:800;
-    color:var(--charcoal);
-}
-
-.table-total td:first-child{
-    border-radius:0;
-}
-
-.empty-state{
-    padding:55px 20px;
-    text-align:center;
-    color:#7c8996;
-}
-
-.empty-state i{
-    display:block;
-    font-size:30px;
-    margin-bottom:12px;
-    color:#a8b3bd;
-}
-
-.empty-state b{
-    display:block;
-    color:#56636f;
-    font-size:13px;
-}
-
-.empty-state span{
-    display:block;
-    margin-top:5px;
+.salary-note{
+    padding:12px 17px;
+    background:#f8fafc;
+    border-bottom:1px solid var(--border);
+    color:var(--muted);
     font-size:10px;
+    line-height:1.6
+}
+.salary-table{
+    min-width:760px;
+}
+.salary-form{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:7px;
+}
+.salary-input{
+    width:145px;
+    height:36px;
+    border:1px solid var(--border);
+    border-radius:7px;
+    padding:0 9px;
+    font-size:11px;
+    outline:none;
+}
+.salary-input:focus{
+    border-color:#8bb0ff;
+    box-shadow:0 0 0 3px var(--blue-soft);
+}
+.salary-actions{
+    white-space:nowrap;
+}
+.salary-master{
+    color:var(--charcoal);
+    font-weight:800;
+}
+@media(max-width:700px){
+    .salary-form{
+        justify-content:flex-start;
+    }
 }
 
-/* ------------------------------------------------------------
-| Footer note
------------------------------------------------------------- */
+.stat-grid{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:12px;
+    padding:16px
+}
+.stat-card{
+    border:1px solid var(--border);
+    background:var(--soft);
+    border-radius:9px;
+    padding:13px
+}
+.stat-card span{display:block;color:var(--muted);font-size:10px;margin-bottom:6px}
+.stat-card strong{font-size:17px}
 
-.payroll-footer{
-    margin-top:12px;
+.remit-form{
+    padding:14px;
+    background:#fbfcfd;
+    border-top:1px solid var(--border)
+}
+.form-grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px
+}
+.form-field{display:flex;flex-direction:column;gap:5px}
+.form-field.full{grid-column:1/-1}
+.form-field label{font-size:10px;color:var(--muted);font-weight:700}
+.form-field input,.form-field select,.form-field textarea{
+    width:100%;
+    min-height:38px;
+    border:1px solid var(--border);
+    border-radius:7px;
+    padding:7px 9px;
+    font-size:12px;
+    background:#fff
+}
+.form-field textarea{min-height:65px;resize:vertical}
+
+.empty{text-align:center;padding:45px!important;color:var(--muted)}
+.footer-total{
+    padding:13px 17px;
     display:flex;
     justify-content:space-between;
     gap:15px;
-    color:#87929d;
-    font-size:9px;
+    color:var(--muted);
+    font-size:11px
 }
+.net{color:var(--green);font-weight:800}
 
-/* ------------------------------------------------------------
-| Print
------------------------------------------------------------- */
-
-@media print{
-    body{
-        background:#fff;
-    }
-
-    .admin-aside,
-    .admin-header,
-    .payroll-tabs,
-    .filter-panel,
-    .page-actions,
-    .action-column,
-    .payroll-footer{
-        display:none!important;
-    }
-
-    .main{
-        margin-left:0;
-    }
-
-    .payroll-content{
-        padding:0;
-        max-width:none;
-    }
-
-    .summary-grid{
-        grid-template-columns:repeat(4,1fr);
-    }
-
-    .summary-card,
-    .payroll-panel{
-        box-shadow:none;
-    }
-
-    .payroll-table{
-        min-width:0;
-    }
-
-    .payroll-table th,
-    .payroll-table td{
-        font-size:9px;
-        padding:7px;
-    }
+.payslip-sheet{
+    display:none;
+    width:800px;
+    max-width:100%;
+    margin:0 auto;
+    background:#fff;
+    padding:30px;
 }
-
-/* ------------------------------------------------------------
-| Responsive
------------------------------------------------------------- */
+.payslip-sheet .company{
+    text-align:center;
+    border-bottom:2px solid var(--charcoal);
+    padding-bottom:16px
+}
+.payslip-sheet h2{margin:0 0 5px}
+.payslip-sheet p{margin:3px;color:var(--muted)}
+.ps-heading{
+    display:flex;
+    justify-content:space-between;
+    margin:20px 0;
+    gap:20px
+}
+.ps-employee{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    padding:13px;
+    background:var(--soft);
+    border:1px solid var(--border)
+}
+.ps-line{
+    display:flex;
+    justify-content:space-between;
+    padding:6px 0
+}
+.ps-section{margin-top:20px}
+.ps-section h3{
+    font-size:13px;
+    border-bottom:1px solid var(--border);
+    padding-bottom:6px
+}
+.ps-total{border-top:1px solid #ccd4dc;font-weight:800;padding-top:9px}
+.ps-net{
+    display:flex;
+    justify-content:space-between;
+    padding:14px;
+    margin-top:20px;
+    background:var(--green-soft);
+    color:#08754f;
+    font-size:18px;
+    font-weight:800
+}
 
 @media(max-width:1200px){
-    .summary-grid{
-        grid-template-columns:repeat(2,1fr);
-    }
-
-    .filter-row{
-        grid-template-columns:1fr 1fr;
-    }
+    .summary-grid{grid-template-columns:repeat(2,1fr)}
+    .filter-row{grid-template-columns:1fr 1fr}
+    .stat-grid{grid-template-columns:repeat(3,1fr)}
+    .row-form{grid-template-columns:repeat(4,1fr)}
 }
-
 @media(max-width:900px){
-    .main{
-        margin-left:0;
-    }
-
-    .payroll-content{
-        padding:20px 16px 32px;
-    }
-
-    .page-heading{
-        align-items:flex-start;
-        flex-direction:column;
-    }
-
-    .page-actions{
-        width:100%;
-    }
+    .main{margin-left:0}
+    .payroll-content{padding:20px 16px 32px}
+    .page-heading{align-items:flex-start;flex-direction:column}
+    .page-actions{width:100%}
 }
-
-@media(max-width:560px){
-    .summary-grid{
-        grid-template-columns:1fr;
+@media(max-width:600px){
+    .summary-grid{grid-template-columns:1fr}
+    .filter-row{grid-template-columns:1fr}
+    .stat-grid{grid-template-columns:1fr}
+    .form-grid{grid-template-columns:1fr}
+    .form-field.full{grid-column:auto}
+    .page-heading h1{font-size:23px}
+    .payroll-content{padding:16px 12px 30px}
+}
+@media print{
+    .admin-aside,.admin-header,.payroll-tabs,.filter-panel,
+    .page-actions,.row-form,.action-stack,.notice,.footer-total{
+        display:none!important
     }
-
-    .filter-row{
-        grid-template-columns:1fr;
-    }
-
-    .page-heading h1{
-        font-size:23px;
-    }
-
-    .payroll-footer{
-        flex-direction:column;
-    }
+    .main{margin-left:0}
+    .payroll-content{padding:0;max-width:none}
+    .panel,.summary-card{box-shadow:none}
 }
 </style>
 </head>
 
 <body>
 
-<?php
-/*
- * Reusable Admin header/aside.
- *
- * IMPORTANT:
- * The aside and header are independent files under /admin/actions/.
- */
-?>
-
 <div class="app">
 
-    <?php require_once __DIR__ . '/actions/admin_aside.php'; ?>
+<?php require_once __DIR__ . '/admin_aside.php'; ?>
 
-    <main class="main">
+<main class="main">
 
-        <?php require_once __DIR__ . '/actions/admin_header.php'; ?>
+<?php require_once __DIR__ . '/admin_header.php'; ?>
 
-        <section class="payroll-content">
+<section class="payroll-content">
 
-            <!-- Page heading -->
-            <div class="page-heading">
-                <div>
-                    <h1>Payroll</h1>
-                    <p>
-                        Manage monthly staff payroll, salary totals and payroll records
-                        for <?php echo payroll_esc($pharmacy_name); ?>.
-                    </p>
-                </div>
+<div class="page-heading">
 
-                <div class="page-actions">
-                    <button
-                        type="button"
-                        class="btn"
-                        onclick="window.print()"
-                    >
-                        <i class="fas fa-print"></i>
-                        Print Payroll
-                    </button>
-
-                    <button
-                        type="button"
-                        class="btn primary"
-                        onclick="window.location.href='payroll.php?month=<?php echo $selected_month; ?>&year=<?php echo $selected_year; ?>'"
-                    >
-                        <i class="fas fa-arrows-rotate"></i>
-                        Refresh
-                    </button>
-                </div>
-            </div>
-
-            <!-- Payroll tabs -->
-            <nav class="payroll-tabs" aria-label="Payroll navigation">
-                <a class="payroll-tab active" href="payroll.php">
-                    <i class="fas fa-file-invoice-dollar"></i>
-                    Payroll
-                </a>
-
-                <a class="payroll-tab" href="staff_management.php">
-                    <i class="fas fa-users"></i>
-                    Staff
-                </a>
-
-                <a class="payroll-tab" href="payroll.php">
-                    <i class="fas fa-calendar-days"></i>
-                    Monthly Payroll
-                </a>
-
-                <a class="payroll-tab" href="payroll.php">
-                    <i class="fas fa-receipt"></i>
-                    Payroll Register
-                </a>
-            </nav>
-
-            <!-- Summary -->
-            <div class="summary-grid">
-
-                <div class="summary-card">
-                    <div class="summary-top">
-                        <span>Staff on Payroll</span>
-                        <span class="summary-icon">
-                            <i class="fas fa-users"></i>
-                        </span>
-                    </div>
-
-                    <div class="summary-value">
-                        <?php echo number_format($staff_count); ?>
-                    </div>
-
-                    <div class="summary-sub">
-                        Active staff records
-                    </div>
-                </div>
-
-                <div class="summary-card green">
-                    <div class="summary-top">
-                        <span>Total Basic Salary</span>
-                        <span class="summary-icon">
-                            <i class="fas fa-money-bill-wave"></i>
-                        </span>
-                    </div>
-
-                    <div class="summary-value">
-                        <?php echo payroll_money($total_basic); ?>
-                    </div>
-
-                    <div class="summary-sub">
-                        Monthly basic salary
-                    </div>
-                </div>
-
-                <div class="summary-card yellow">
-                    <div class="summary-top">
-                        <span>Gross Payroll</span>
-                        <span class="summary-icon">
-                            <i class="fas fa-calculator"></i>
-                        </span>
-                    </div>
-
-                    <div class="summary-value">
-                        <?php echo payroll_money($total_basic + $total_allowances); ?>
-                    </div>
-
-                    <div class="summary-sub">
-                        Basic + allowances
-                    </div>
-                </div>
-
-                <div class="summary-card red">
-                    <div class="summary-top">
-                        <span>Net Payroll</span>
-                        <span class="summary-icon">
-                            <i class="fas fa-wallet"></i>
-                        </span>
-                    </div>
-
-                    <div class="summary-value">
-                        <?php echo payroll_money($total_net); ?>
-                    </div>
-
-                    <div class="summary-sub">
-                        After deductions
-                    </div>
-                </div>
-
-            </div>
-
-            <!-- Filters -->
-            <form
-                class="filter-panel"
-                method="get"
-                action="payroll.php"
-            >
-
-                <div class="filter-row">
-
-                    <div class="search-wrap">
-                        <i class="fas fa-magnifying-glass"></i>
-
-                        <input
-                            class="field"
-                            type="search"
-                            name="search"
-                            value="<?php echo payroll_esc($search); ?>"
-                            placeholder="Search staff name, employee number or email..."
-                        >
-                    </div>
-
-                    <select
-                        class="field"
-                        name="month"
-                        aria-label="Payroll month"
-                    >
-                        <?php foreach ($months as $month_number => $month_name): ?>
-                            <option
-                                value="<?php echo $month_number; ?>"
-                                <?php echo $month_number === $selected_month ? 'selected' : ''; ?>
-                            >
-                                <?php echo payroll_esc($month_name); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-
-                    <select
-                        class="field"
-                        name="year"
-                        aria-label="Payroll year"
-                    >
-                        <?php foreach ($year_options as $year): ?>
-                            <option
-                                value="<?php echo $year; ?>"
-                                <?php echo $year === $selected_year ? 'selected' : ''; ?>
-                            >
-                                <?php echo $year; ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-
-                    <select
-                        class="field"
-                        name="branch_id"
-                        aria-label="Branch"
-                    >
-                        <option value="0">All Branches</option>
-
-                        <?php foreach ($branches as $branch): ?>
-                            <option
-                                value="<?php echo (int)$branch['id']; ?>"
-                                <?php echo $branch_filter === (int)$branch['id'] ? 'selected' : ''; ?>
-                            >
-                                <?php echo payroll_esc($branch['branch_name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-
-                </div>
-
-                <div class="filter-note">
-                    <span>
-                        Payroll period:
-                        <strong>
-                            <?php echo payroll_esc($period_label); ?>
-                        </strong>
-                    </span>
-
-                    <span>
-                        <?php echo number_format($staff_count); ?> staff loaded
-                    </span>
-                </div>
-
-            </form>
-
-            <!-- Payroll register -->
-            <section class="payroll-panel">
-
-                <div class="panel-head">
-                    <div class="panel-title">
-                        <b>Payroll Register</b>
-                        <span>
-                            Staff salary register for <?php echo payroll_esc($period_label); ?>
-                        </span>
-                    </div>
-
-                    <div class="period-pill">
-                        <i class="fas fa-calendar"></i>
-                        <?php echo payroll_esc($period_label); ?>
-                    </div>
-                </div>
-
-                <?php if (!$staff_table): ?>
-
-                    <div class="empty-state">
-                        <i class="fas fa-database"></i>
-                        <b>Staff salary source not found</b>
-                        <span>
-                            No staff table with a basic salary field could be detected.
-                            The payroll page is ready, but the staff salary source must exist.
-                        </span>
-                    </div>
-
-                <?php elseif (!$payroll): ?>
-
-                    <div class="empty-state">
-                        <i class="fas fa-users-slash"></i>
-                        <b>No staff found</b>
-                        <span>
-                            There are no matching active staff records for the selected filters.
-                        </span>
-                    </div>
-
-                <?php else: ?>
-
-                    <div class="table-wrap">
-
-                        <table class="payroll-table">
-
-                            <thead>
-                                <tr>
-                                    <th>Employee</th>
-                                    <th>Role</th>
-                                    <th>Branch</th>
-                                    <th>Status</th>
-                                    <th class="money">Basic Salary</th>
-                                    <th class="money">Allowances</th>
-                                    <th class="money">Gross Pay</th>
-                                    <th class="money">Deductions</th>
-                                    <th class="money">Net Pay</th>
-                                    <th class="action-column">Action</th>
-                                </tr>
-                            </thead>
-
-                            <tbody>
-
-                            <?php foreach ($payroll as $employee): ?>
-
-                                <tr>
-
-                                    <td>
-                                        <div class="employee">
-
-                                            <div class="employee-avatar">
-                                                <?php
-                                                $initial = strtoupper(
-                                                    substr(
-                                                        trim($employee['staff_name']) ?: 'S',
-                                                        0,
-                                                        1
-                                                    )
-                                                );
-
-                                                echo payroll_esc($initial);
-                                                ?>
-                                            </div>
-
-                                            <div class="employee-name">
-
-                                                <b>
-                                                    <?php
-                                                    echo payroll_esc(
-                                                        $employee['staff_name']
-                                                    );
-                                                    ?>
-                                                </b>
-
-                                                <span>
-                                                    <?php
-                                                    if ($employee['employee_number'] !== '') {
-                                                        echo payroll_esc(
-                                                            $employee['employee_number']
-                                                        );
-                                                    } else {
-                                                        echo 'Staff ID #' .
-                                                            (int)$employee['staff_id'];
-                                                    }
-                                                    ?>
-                                                </span>
-
-                                            </div>
-
-                                        </div>
-                                    </td>
-
-                                    <td class="role">
-                                        <?php echo payroll_esc($employee['role']); ?>
-                                    </td>
-
-                                    <td class="branch-name">
-                                        <?php echo payroll_esc($employee['branch_name']); ?>
-                                    </td>
-
-                                    <td>
-                                        <span class="status">
-                                            <i class="fas fa-circle"></i>
-                                            Active
-                                        </span>
-                                    </td>
-
-                                    <td class="money money-basic">
-                                        <?php echo payroll_money($employee['basic']); ?>
-                                    </td>
-
-                                    <td class="money">
-                                        <?php echo payroll_money($employee['allowances']); ?>
-                                    </td>
-
-                                    <td class="money money-gross">
-                                        <?php echo payroll_money($employee['gross']); ?>
-                                    </td>
-
-                                    <td class="money">
-                                        <?php echo payroll_money($employee['deductions']); ?>
-                                    </td>
-
-                                    <td class="money money-net">
-                                        <?php echo payroll_money($employee['net']); ?>
-                                    </td>
-
-                                    <td class="action-column">
-
-                                        <button
-                                            type="button"
-                                            class="action-btn"
-                                            title="Payroll details"
-                                            data-name="<?php echo payroll_esc($employee['staff_name']); ?>"
-                                            data-basic="<?php echo payroll_esc(payroll_money($employee['basic'])); ?>"
-                                            data-gross="<?php echo payroll_esc(payroll_money($employee['gross'])); ?>"
-                                            data-net="<?php echo payroll_esc(payroll_money($employee['net'])); ?>"
-                                            onclick="showPayrollDetails(this)"
-                                        >
-                                            <i class="fas fa-arrow-right"></i>
-                                        </button>
-
-                                    </td>
-
-                                </tr>
-
-                            <?php endforeach; ?>
-
-                            </tbody>
-
-                            <tfoot>
-
-                                <tr class="table-total">
-
-                                    <td colspan="4">
-                                        TOTAL PAYROLL
-                                    </td>
-
-                                    <td class="money">
-                                        <?php echo payroll_money($total_basic); ?>
-                                    </td>
-
-                                    <td class="money">
-                                        <?php echo payroll_money($total_allowances); ?>
-                                    </td>
-
-                                    <td class="money">
-                                        <?php echo payroll_money($total_basic + $total_allowances); ?>
-                                    </td>
-
-                                    <td class="money">
-                                        <?php echo payroll_money($total_deductions); ?>
-                                    </td>
-
-                                    <td class="money">
-                                        <?php echo payroll_money($total_net); ?>
-                                    </td>
-
-                                    <td></td>
-
-                                </tr>
-
-                            </tfoot>
-
-                        </table>
-
-                    </div>
-
-                <?php endif; ?>
-
-            </section>
-
-            <div class="payroll-footer">
-                <span>
-                    Payroll period:
-                    <?php echo payroll_esc($period_start); ?>
-                    to
-                    <?php echo payroll_esc($period_end); ?>
-                </span>
-
-                <span>
-                    Phase 1 Â· Salary register
-                </span>
-            </div>
-
-        </section>
-
-    </main>
-
+<div>
+<h1>Payroll</h1>
+<p>
+Complete payroll, salary setup, statutory calculations and payment records for
+<?= payroll_complete_h($pharmacyName) ?>.
+</p>
 </div>
 
-<!-- Payroll details modal -->
-<div
-    id="payrollModal"
-    style="
-        display:none;
-        position:fixed;
-        inset:0;
-        background:rgba(15,23,42,.48);
-        z-index:5000;
-        align-items:center;
-        justify-content:center;
-        padding:20px;
-    "
+<div class="page-actions">
+
+<form method="post">
+<input type="hidden" name="action" value="prepare_payroll">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+<button class="btn primary" type="submit">
+<i class="fas fa-file-circle-plus"></i>
+Prepare Payroll
+</button>
+</form>
+
+<form method="post">
+<input type="hidden" name="action" value="recalculate">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+<button
+    class="btn"
+    type="submit"
+    onclick="return confirm('Recalculate all editable payroll records for <?= payroll_complete_h($periodLabel) ?>?');"
 >
-    <div
-        style="
-            width:min(440px,100%);
-            background:#fff;
-            border-radius:14px;
-            border:1px solid #dfe4e9;
-            box-shadow:0 20px 60px rgba(0,0,0,.18);
-            overflow:hidden;
-        "
-    >
+<i class="fas fa-calculator"></i>
+Recalculate
+</button>
+</form>
 
-        <div
-            style="
-                padding:17px 18px;
-                border-bottom:1px solid #e5e9ed;
-                display:flex;
-                justify-content:space-between;
-                align-items:center;
-                gap:10px;
-            "
-        >
-            <div>
-                <strong
-                    id="modalEmployeeName"
-                    style="display:block;font-size:14px;color:#202831"
-                ></strong>
+<button class="btn" type="button" onclick="window.print()">
+<i class="fas fa-print"></i>
+Print
+</button>
 
-                <span
-                    style="display:block;margin-top:4px;font-size:10px;color:#788593"
-                >
-                    Payroll details
-                </span>
-            </div>
-
-            <button
-                type="button"
-                onclick="closePayrollDetails()"
-                style="
-                    width:32px;
-                    height:32px;
-                    border:1px solid #dfe4e9;
-                    border-radius:7px;
-                    background:#fff;
-                    color:#6f7d8a;
-                    cursor:pointer;
-                "
-            >
-                <i class="fas fa-xmark"></i>
-            </button>
-        </div>
-
-        <div style="padding:18px">
-
-            <div
-                style="
-                    display:grid;
-                    grid-template-columns:1fr 1fr;
-                    gap:9px;
-                "
-            >
-
-                <div style="padding:13px;background:#f7f9fb;border-radius:9px">
-                    <span style="display:block;font-size:9px;color:#7b8793">Basic Salary</span>
-                    <strong id="modalBasic" style="display:block;margin-top:5px;font-size:15px;color:#202831"></strong>
-                </div>
-
-                <div style="padding:13px;background:#f7f9fb;border-radius:9px">
-                    <span style="display:block;font-size:9px;color:#7b8793">Gross Pay</span>
-                    <strong id="modalGross" style="display:block;margin-top:5px;font-size:15px;color:#246bfe"></strong>
-                </div>
-
-                <div style="padding:13px;background:#e8f7f0;border-radius:9px;grid-column:1/-1">
-                    <span style="display:block;font-size:9px;color:#5f796e">Net Pay</span>
-                    <strong id="modalNet" style="display:block;margin-top:5px;font-size:19px;color:#159a68"></strong>
-                </div>
-
-            </div>
-
-            <p
-                style="
-                    margin:15px 0 0;
-                    font-size:10px;
-                    line-height:1.6;
-                    color:#7a8793;
-                "
-            >
-                Phase 1 uses the existing staff basic salary as the payroll
-                starting value. Allowances, statutory deductions, loans,
-                advances, attendance and payslip processing will be added
-                as the next payroll modules are implemented.
-            </p>
-
-        </div>
-
-    </div>
 </div>
+</div>
+
+<?php if ($success !== ''): ?>
+<div class="notice success">
+<i class="fas fa-circle-check"></i>
+<?= payroll_complete_h($success) ?>
+</div>
+<?php endif; ?>
+
+<?php if ($error !== ''): ?>
+<div class="notice error">
+<i class="fas fa-circle-exclamation"></i>
+<?= payroll_complete_h($error) ?>
+</div>
+<?php endif; ?>
+
+<nav class="payroll-tabs">
+
+<?php
+$tabs = [
+    'payroll' => ['fa-file-invoice-dollar','Payroll'],
+    'salary' => ['fa-money-bill-wave','Salary Setup'],
+    'statutory' => ['fa-landmark','Statutory'],
+    'remittance' => ['fa-money-check-dollar','Remittance'],
+    'history' => ['fa-clock-rotate-left','History'],
+    'ytd' => ['fa-chart-line','YTD'],
+];
+?>
+
+<?php foreach ($tabs as $key => $tab): ?>
+<a
+    class="payroll-tab <?= $view === $key ? 'active' : '' ?>"
+    href="?view=<?= payroll_complete_h($key) ?>&month=<?= $selectedMonth ?>&year=<?= $selectedYear ?>"
+>
+<i class="fas <?= payroll_complete_h($tab[0]) ?>"></i>
+<?= payroll_complete_h($tab[1]) ?>
+</a>
+<?php endforeach; ?>
+
+</nav>
+
+<?php if ($view === 'salary'): ?>
+
+<section class="panel salary-panel">
+
+<div class="panel-head">
+<div class="panel-title">
+<b>Salary Setup</b>
+<span>Set and maintain each employee's master monthly basic salary.</span>
+</div>
+<span class="period-pill">
+<i class="fas fa-lock"></i>
+Payroll controlled
+</span>
+</div>
+
+<div class="salary-note">
+    <strong>Salary ownership:</strong>
+    Staff Management creates staff accounts only. Monthly salary is maintained here
+    and stored as the employee's master salary. When you click <strong>Prepare Payroll</strong>,
+    this value becomes the starting Basic Salary for the selected payroll period.
+    Approved, paid and locked payroll records remain protected.
+</div>
+
+<div class="table-wrap">
+
+<table class="salary-table">
+
+<thead>
+<tr>
+<th>Employee</th>
+<th>Role</th>
+<th>Branch</th>
+<th class="money">Current Basic Salary</th>
+<th class="salary-actions">Set Monthly Salary</th>
+</tr>
+</thead>
+
+<tbody>
+
+<?php if (!$staffRows): ?>
+
+<tr>
+<td colspan="5" class="empty">
+<i class="fas fa-users-slash" style="font-size:30px;margin-bottom:10px"></i>
+<div><strong>No staff members found.</strong></div>
+<div style="margin-top:5px;font-size:10px">
+Register the staff account in Staff Management first.
+</div>
+</td>
+</tr>
+
+<?php else: ?>
+
+<?php foreach ($staffRows as $staff): ?>
+
+<?php
+$salaryStaffName = (string)($staff['staff_name'] ?? 'Staff');
+$salaryInitials = '';
+
+foreach (
+    preg_split('/\s+/', trim($salaryStaffName)) ?: []
+    as $part
+) {
+    if ($part !== '') {
+        $salaryInitials .= strtoupper($part[0]);
+    }
+    if (strlen($salaryInitials) >= 2) break;
+}
+
+$salaryInitials = $salaryInitials ?: 'ST';
+?>
+
+<tr>
+
+<td>
+<div class="employee">
+
+<div class="avatar">
+<?= payroll_complete_h($salaryInitials) ?>
+</div>
+
+<div class="employee-name">
+<b><?= payroll_complete_h($salaryStaffName) ?></b>
+<span>
+#<?= !empty($staff['employee_number'])
+    ? payroll_complete_h($staff['employee_number'])
+    : (int)$staff['staff_id'] ?>
+</span>
+</div>
+
+</div>
+</td>
+
+<td><?= payroll_complete_h($staff['staff_role'] ?? 'Staff') ?></td>
+
+<td>
+<?= payroll_complete_h(
+    $branchNames[(int)($staff['branch_id'] ?? 0)] ?? 'Main Branch'
+) ?>
+</td>
+
+<td class="money salary-master">
+<?= payroll_complete_money((float)($staff['basic_salary'] ?? 0)) ?>
+</td>
+
+<td class="salary-actions">
+
+<form method="post" class="salary-form">
+
+<input type="hidden" name="action" value="set_salary">
+<input type="hidden" name="staff_id" value="<?= (int)$staff['staff_id'] ?>">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+
+<input
+    class="salary-input"
+    type="number"
+    name="salary"
+    min="0"
+    step="0.01"
+    value="<?= payroll_complete_h((float)($staff['basic_salary'] ?? 0)) ?>"
+    aria-label="Monthly salary for <?= payroll_complete_h($salaryStaffName) ?>"
+    required
+>
+
+<button class="btn small green" type="submit">
+<i class="fas fa-save"></i>
+Save
+</button>
+
+</form>
+
+</td>
+
+</tr>
+
+<?php endforeach; ?>
+
+<?php endif; ?>
+
+</tbody>
+
+</table>
+
+</div>
+
+</section>
+
+<section class="filter-panel">
+
+<form method="get">
+
+<input type="hidden" name="view" value="salary">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+
+<div class="filter-row">
+
+<div class="search-wrap">
+<i class="fas fa-search"></i>
+<input
+    class="field"
+    name="search"
+    value="<?= payroll_complete_h($search) ?>"
+    placeholder="Search employee, email or employee number..."
+>
+</div>
+
+<select class="field" name="branch_id">
+<option value="0">All branches</option>
+
+<?php foreach ($branches as $branch): ?>
+
+<option
+    value="<?= (int)$branch['id'] ?>"
+    <?= $branchFilter === (int)$branch['id'] ? 'selected' : '' ?>
+>
+<?= payroll_complete_h($branch['branch_name']) ?>
+</option>
+
+<?php endforeach; ?>
+
+</select>
+
+<div></div>
+
+<button class="btn primary" type="submit">
+<i class="fas fa-filter"></i>
+Apply
+</button>
+
+</div>
+
+<div class="filter-note">
+<span>
+<?= count($staffRows) ?> staff available for salary setup
+</span>
+
+<span>
+Master salary only
+</span>
+</div>
+
+</form>
+
+</section>
+
+<?php elseif ($view === 'payroll'): ?>
+
+<section class="summary-grid">
+
+<div class="summary-card">
+<div class="summary-top">
+<span>Staff on Payroll</span>
+<span class="summary-icon"><i class="fas fa-users"></i></span>
+</div>
+<div class="summary-value"><?= count($payrollRows) ?></div>
+<div class="summary-sub"><?= payroll_complete_h($periodLabel) ?></div>
+</div>
+
+<div class="summary-card">
+<div class="summary-top">
+<span>Gross Payroll</span>
+<span class="summary-icon"><i class="fas fa-coins"></i></span>
+</div>
+<div class="summary-value"><?= payroll_complete_money($totals['gross']) ?></div>
+<div class="summary-sub">Total gross earnings</div>
+</div>
+
+<div class="summary-card yellow">
+<div class="summary-top">
+<span>Deductions</span>
+<span class="summary-icon"><i class="fas fa-minus-circle"></i></span>
+</div>
+<div class="summary-value"><?= payroll_complete_money($totals['deductions']) ?></div>
+<div class="summary-sub">PAYE + NAPSA + NHIMA + other</div>
+</div>
+
+<div class="summary-card green">
+<div class="summary-top">
+<span>Net Payroll</span>
+<span class="summary-icon"><i class="fas fa-wallet"></i></span>
+</div>
+<div class="summary-value"><?= payroll_complete_money($totals['net']) ?></div>
+<div class="summary-sub">Employee take-home</div>
+</div>
+
+</section>
+
+<section class="filter-panel">
+
+<form method="get">
+
+<input type="hidden" name="view" value="payroll">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+
+<div class="filter-row">
+
+<div class="search-wrap">
+<i class="fas fa-search"></i>
+<input
+    class="field"
+    name="search"
+    value="<?= payroll_complete_h($search) ?>"
+    placeholder="Search employee, email or employee number..."
+>
+</div>
+
+<select class="field" name="branch_id">
+<option value="0">All branches</option>
+<?php foreach ($branches as $branch): ?>
+<option
+    value="<?= (int)$branch['id'] ?>"
+    <?= $branchFilter === (int)$branch['id'] ? 'selected' : '' ?>
+>
+<?= payroll_complete_h($branch['branch_name']) ?>
+</option>
+<?php endforeach; ?>
+</select>
+
+<select class="field" name="month">
+<?php for ($m=1;$m<=12;$m++): ?>
+<option
+    value="<?= $m ?>"
+    <?= $m === $selectedMonth ? 'selected' : '' ?>
+>
+<?= payroll_complete_h(date('F',mktime(0,0,0,$m,1,$selectedYear))) ?>
+</option>
+<?php endfor; ?>
+</select>
+
+<button class="btn primary" type="submit">
+<i class="fas fa-filter"></i>
+Apply
+</button>
+
+</div>
+
+<div class="filter-note">
+<span>
+Payroll period:
+<strong><?= payroll_complete_h($periodLabel) ?></strong>
+</span>
+<span>
+Status:
+<strong><?= payroll_complete_h(strtoupper($periodStatus)) ?></strong>
+</span>
+</div>
+
+</form>
+</section>
+
+<section class="panel">
+
+<div class="panel-head">
+<div class="panel-title">
+<b>Monthly Payroll Register</b>
+<span>Edit earnings/deductions, calculate statutory amounts, approve and pay.</span>
+</div>
+<span class="period-pill"><?= payroll_complete_h($periodLabel) ?></span>
+</div>
+
+<div class="table-wrap">
+
+<table>
+
+<thead>
+<tr>
+<th>Employee</th>
+<th>Role</th>
+<th>Status</th>
+<th class="money">Basic</th>
+<th class="money">Gross</th>
+<th class="money">PAYE</th>
+<th class="money">NAPSA</th>
+<th class="money">NHIMA</th>
+<th class="money">Deductions</th>
+<th class="money">Net Pay</th>
+<th>Action</th>
+</tr>
+</thead>
+
+<tbody>
+
+<?php if (!$payrollRows): ?>
+
+<tr>
+<td colspan="11" class="empty">
+<i class="fas fa-file-invoice-dollar" style="font-size:30px;margin-bottom:10px"></i>
+<div>
+<strong>No payroll has been prepared for <?= payroll_complete_h($periodLabel) ?>.</strong>
+</div>
+<div style="margin-top:5px;font-size:10px">
+Click <strong>Prepare Payroll</strong> to create records from active staff.
+</div>
+</td>
+</tr>
+
+<?php else: ?>
+
+<?php foreach ($payrollRows as $row): ?>
+
+<tr>
+
+<td>
+<div class="employee">
+
+<div class="avatar">
+<?php
+$initials = '';
+foreach (
+    preg_split('/\s+/', trim((string)$row['staff_name'])) ?: []
+    as $part
+) {
+    if ($part !== '') {
+        $initials .= strtoupper($part[0]);
+    }
+    if (strlen($initials) >= 2) break;
+}
+echo payroll_complete_h($initials ?: 'ST');
+?>
+</div>
+
+<div class="employee-name">
+<b><?= payroll_complete_h($row['staff_name']) ?></b>
+<span>
+#<?= $row['employee_number'] !== ''
+    ? payroll_complete_h($row['employee_number'])
+    : (int)$row['staff_id'] ?>
+</span>
+</div>
+
+</div>
+</td>
+
+<td><?= payroll_complete_h($row['staff_role']) ?></td>
+
+<td>
+<span class="status <?= payroll_complete_h($row['status']) ?>">
+<?= payroll_complete_h($row['status']) ?>
+</span>
+</td>
+
+<td class="money"><?= payroll_complete_money($row['basic_salary']) ?></td>
+<td class="money"><?= payroll_complete_money($row['gross_salary']) ?></td>
+<td class="money"><?= payroll_complete_money($row['paye']) ?></td>
+<td class="money"><?= payroll_complete_money($row['napsa']) ?></td>
+<td class="money"><?= payroll_complete_money($row['nhima']) ?></td>
+<td class="money"><?= payroll_complete_money($row['total_deductions']) ?></td>
+<td class="money net"><?= payroll_complete_money($row['net_salary']) ?></td>
+
+<td>
+<div class="action-stack">
+
+<?php if (!in_array(
+    $row['status'],
+    ['approved','paid','locked'],
+    true
+)): ?>
+
+<button
+    class="btn small"
+    type="button"
+    onclick="toggleEdit(<?= (int)$row['id'] ?>)"
+>
+<i class="fas fa-pen"></i>
+</button>
+
+<?php endif; ?>
+
+<a
+    class="btn small"
+    href="?view=payroll&month=<?= $selectedMonth ?>&year=<?= $selectedYear ?>&payslip=<?= (int)$row['staff_id'] ?>&print=1"
+    target="_blank"
+    title="Payslip"
+>
+<i class="fas fa-receipt"></i>
+</a>
+
+</div>
+</td>
+
+</tr>
+
+<?php if (!in_array(
+    $row['status'],
+    ['approved','paid','locked'],
+    true
+)): ?>
+
+<tr id="edit-<?= (int)$row['id'] ?>" style="display:none">
+
+<td colspan="11" style="padding:0">
+
+<form method="post" class="row-form">
+
+<input type="hidden" name="action" value="save_row">
+<input type="hidden" name="record_id" value="<?= (int)$row['id'] ?>">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+
+<label>
+Basic
+<input
+    type="number"
+    step="0.01"
+    min="0"
+    name="basic_salary"
+    value="<?= payroll_complete_h($row['basic_salary']) ?>"
+>
+</label>
+
+<label>
+Allowances
+<input
+    type="number"
+    step="0.01"
+    min="0"
+    name="allowances"
+    value="<?= payroll_complete_h($row['allowances']) ?>"
+>
+</label>
+
+<label>
+Bonus
+<input
+    type="number"
+    step="0.01"
+    min="0"
+    name="bonus"
+    value="<?= payroll_complete_h($row['bonus']) ?>"
+>
+</label>
+
+<label>
+Overtime
+<input
+    type="number"
+    step="0.01"
+    min="0"
+    name="overtime"
+    value="<?= payroll_complete_h($row['overtime']) ?>"
+>
+</label>
+
+<label>
+Other Earnings
+<input
+    type="number"
+    step="0.01"
+    min="0"
+    name="other_earnings"
+    value="<?= payroll_complete_h($row['other_earnings']) ?>"
+>
+</label>
+
+<label>
+Loan
+<input
+    type="number"
+    step="0.01"
+    min="0"
+    name="loan_deduction"
+    value="<?= payroll_complete_h($row['loan_deduction']) ?>"
+>
+</label>
+
+<label>
+Advance
+<input
+    type="number"
+    step="0.01"
+    min="0"
+    name="salary_advance"
+    value="<?= payroll_complete_h($row['salary_advance']) ?>"
+>
+</label>
+
+<label>
+Other Deduction
+<input
+    type="number"
+    step="0.01"
+    min="0"
+    name="other_deductions"
+    value="<?= payroll_complete_h($row['other_deductions']) ?>"
+>
+</label>
+
+<button class="btn small green" type="submit">
+<i class="fas fa-check"></i>
+Save
+</button>
+
+</form>
+
+</td>
+</tr>
+
+<?php endif; ?>
+
+<?php endforeach; ?>
+
+<?php endif; ?>
+
+</tbody>
+</table>
+</div>
+
+<div class="footer-total">
+<span><?= count($payrollRows) ?> employee(s)</span>
+<span>
+Employer cost:
+<strong><?= payroll_complete_money($employerCost) ?></strong>
+</span>
+</div>
+
+</section>
+
+<?php if ($payrollRows): ?>
+
+<section class="panel">
+
+<div class="panel-head">
+
+<div class="panel-title">
+<b>Payroll Workflow</b>
+<span>Controlled payroll sequence.</span>
+</div>
+
+<div class="action-stack">
+
+<?php if ($periodStatus === 'calculated'): ?>
+
+<form method="post">
+<input type="hidden" name="action" value="approve">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+<button
+    class="btn yellow"
+    type="submit"
+    onclick="return confirm('Approve payroll for <?= payroll_complete_h($periodLabel) ?>?');"
+>
+<i class="fas fa-stamp"></i>
+Approve
+</button>
+</form>
+
+<?php elseif ($periodStatus === 'approved'): ?>
+
+<form method="post">
+<input type="hidden" name="action" value="mark_paid">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+<button
+    class="btn green"
+    type="submit"
+    onclick="return confirm('Mark payroll as PAID?');"
+>
+<i class="fas fa-money-bill-transfer"></i>
+Mark Paid
+</button>
+</form>
+
+<form method="post">
+<input type="hidden" name="action" value="reopen">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+<button class="btn yellow" type="submit">Reopen</button>
+</form>
+
+<?php elseif ($periodStatus === 'paid'): ?>
+
+<form method="post">
+<input type="hidden" name="action" value="lock">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+<button
+    class="btn"
+    type="submit"
+    onclick="return confirm('Lock this paid payroll? Locked payroll cannot be edited.');"
+>
+<i class="fas fa-lock"></i>
+Lock Payroll
+</button>
+</form>
+
+<?php else: ?>
+
+<span class="status <?= payroll_complete_h($periodStatus) ?>">
+<?= payroll_complete_h($periodStatus) ?>
+</span>
+
+<?php endif; ?>
+
+</div>
+</div>
+
+<div class="stat-grid">
+
+<div class="stat-card">
+<span>Current Status</span>
+<strong><?= payroll_complete_h(ucfirst($periodStatus)) ?></strong>
+</div>
+
+<div class="stat-card">
+<span>PAYE</span>
+<strong><?= payroll_complete_money($totals['paye']) ?></strong>
+</div>
+
+<div class="stat-card">
+<span>Employee NAPSA</span>
+<strong><?= payroll_complete_money($totals['napsa']) ?></strong>
+</div>
+
+<div class="stat-card">
+<span>Employee NHIMA</span>
+<strong><?= payroll_complete_money($totals['nhima']) ?></strong>
+</div>
+
+<div class="stat-card">
+<span>Employer Cost</span>
+<strong><?= payroll_complete_money($employerCost) ?></strong>
+</div>
+
+</div>
+</section>
+
+<?php endif; ?>
+
+<?php elseif ($view === 'statutory'): ?>
+
+<section class="summary-grid">
+
+<div class="summary-card">
+<div class="summary-top"><span>PAYE</span><span class="summary-icon"><i class="fas fa-landmark"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($totals['paye']) ?></div>
+<div class="summary-sub">Employee tax liability</div>
+</div>
+
+<div class="summary-card">
+<div class="summary-top"><span>NAPSA Employee</span><span class="summary-icon"><i class="fas fa-person"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($totals['napsa']) ?></div>
+<div class="summary-sub">Employee contribution</div>
+</div>
+
+<div class="summary-card">
+<div class="summary-top"><span>NAPSA Employer</span><span class="summary-icon"><i class="fas fa-building"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($totals['employer_napsa']) ?></div>
+<div class="summary-sub">Employer contribution</div>
+</div>
+
+<div class="summary-card green">
+<div class="summary-top"><span>NHIMA Total</span><span class="summary-icon"><i class="fas fa-heart-pulse"></i></span></div>
+<div class="summary-value">
+<?= payroll_complete_money($totals['nhima'] + $totals['employer_nhima']) ?>
+</div>
+<div class="summary-sub">Employee + employer</div>
+</div>
+
+</section>
+
+<div class="notice info">
+<strong>Statutory engine:</strong>
+PAYE is progressive; NAPSA is 5% employee and 5% employer subject
+to the applicable ceiling; NHIMA is 1% employee and 1% employer
+of basic salary.
+</div>
+
+<section class="panel">
+
+<div class="panel-head">
+<div class="panel-title">
+<b>Statutory Payroll Register</b>
+<span><?= payroll_complete_h($periodLabel) ?></span>
+</div>
+
+<form method="post">
+<input type="hidden" name="action" value="recalculate">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+<button class="btn primary" type="submit">
+<i class="fas fa-calculator"></i>
+Recalculate
+</button>
+</form>
+</div>
+
+<div class="table-wrap">
+
+<table>
+<thead>
+<tr>
+<th>Employee</th>
+<th class="money">Gross</th>
+<th class="money">PAYE</th>
+<th class="money">NAPSA Employee</th>
+<th class="money">NHIMA Employee</th>
+<th class="money">NAPSA Employer</th>
+<th class="money">NHIMA Employer</th>
+<th class="money">Net</th>
+</tr>
+</thead>
+
+<tbody>
+
+<?php if (!$payrollRows): ?>
+
+<tr><td colspan="8" class="empty">Prepare payroll first.</td></tr>
+
+<?php else: ?>
+
+<?php foreach ($payrollRows as $row): ?>
+
+<tr>
+
+<td>
+<strong><?= payroll_complete_h($row['staff_name']) ?></strong>
+<div style="font-size:9px;color:var(--muted)">
+<?= payroll_complete_h($row['staff_role']) ?>
+</div>
+</td>
+
+<td class="money"><?= payroll_complete_money($row['gross_salary']) ?></td>
+<td class="money"><?= payroll_complete_money($row['paye']) ?></td>
+<td class="money"><?= payroll_complete_money($row['napsa']) ?></td>
+<td class="money"><?= payroll_complete_money($row['nhima']) ?></td>
+<td class="money"><?= payroll_complete_money($row['employer_napsa']) ?></td>
+<td class="money"><?= payroll_complete_money($row['employer_nhima']) ?></td>
+<td class="money net"><?= payroll_complete_money($row['net_salary']) ?></td>
+
+</tr>
+
+<?php endforeach; ?>
+
+<?php endif; ?>
+
+</tbody>
+</table>
+
+</div>
+</section>
+
+<?php elseif ($view === 'remittance'): ?>
+
+<section class="summary-grid">
+
+<div class="summary-card">
+<div class="summary-top"><span>Total Liability</span><span class="summary-icon"><i class="fas fa-scale-balanced"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($totalLiability) ?></div>
+<div class="summary-sub"><?= payroll_complete_h($periodLabel) ?></div>
+</div>
+
+<div class="summary-card green">
+<div class="summary-top"><span>Paid</span><span class="summary-icon"><i class="fas fa-circle-check"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($totalPaid) ?></div>
+<div class="summary-sub">Recorded as paid</div>
+</div>
+
+<div class="summary-card red">
+<div class="summary-top"><span>Outstanding</span><span class="summary-icon"><i class="fas fa-clock"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($totalOutstanding) ?></div>
+<div class="summary-sub">Pending / submitted</div>
+</div>
+
+<div class="summary-card yellow">
+<div class="summary-top"><span>Due Date</span><span class="summary-icon"><i class="fas fa-calendar-day"></i></span></div>
+<div class="summary-value" style="font-size:18px">
+<?= payroll_complete_h($dueDate->format('d M Y')) ?>
+</div>
+<div class="summary-sub">10th of following month</div>
+</div>
+
+</section>
+
+<section class="panel">
+
+<div class="panel-head">
+
+<div class="panel-title">
+<b>Statutory Remittance Register</b>
+<span>Track filing, payment and reference numbers.</span>
+</div>
+
+<span class="period-pill"><?= payroll_complete_h($periodLabel) ?></span>
+
+</div>
+
+<div class="table-wrap">
+
+<table>
+
+<thead>
+<tr>
+<th>Statutory</th>
+<th class="money">Employee</th>
+<th class="money">Employer</th>
+<th class="money">Liability</th>
+<th>Due</th>
+<th>Status</th>
+<th>Reference</th>
+<th>Action</th>
+</tr>
+</thead>
+
+<tbody>
+
+<?php foreach ($remittances as $remit): ?>
+
+<tr>
+
+<td>
+<strong><?= payroll_complete_h($remit['statutory_type']) ?></strong>
+<div style="font-size:9px;color:var(--muted)">
+<?= $remit['statutory_type'] === 'PAYE' ? 'ZRA' : payroll_complete_h($remit['statutory_type']) ?>
+</div>
+</td>
+
+<td class="money"><?= payroll_complete_money((float)$remit['employee_amount']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$remit['employer_amount']) ?></td>
+<td class="money"><strong><?= payroll_complete_money((float)$remit['liability_amount']) ?></strong></td>
+<td><?= payroll_complete_h(date('d M Y',strtotime($remit['due_date']))) ?></td>
+
+<td>
+<span class="status <?= payroll_complete_h($remit['display_status']) ?>">
+<?= payroll_complete_h($remit['display_status']) ?>
+</span>
+</td>
+
+<td>
+<?= payroll_complete_h(
+    $remit['payment_reference']
+    ?: $remit['return_reference']
+    ?: 'â€”'
+) ?>
+</td>
+
+<td>
+<button
+    class="btn small"
+    type="button"
+    onclick="toggleRemittance(<?= (int)$remit['id'] ?>)"
+>
+<i class="fas fa-pen"></i>
+Update
+</button>
+</td>
+
+</tr>
+
+<tr id="remit-<?= (int)$remit['id'] ?>" style="display:none">
+
+<td colspan="8" style="padding:0">
+
+<form method="post" class="remit-form">
+
+<input type="hidden" name="action" value="save_remittance">
+<input type="hidden" name="remittance_id" value="<?= (int)$remit['id'] ?>">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+
+<div class="form-grid">
+
+<div class="form-field">
+<label>Status</label>
+<select name="return_status">
+<?php foreach (['pending','submitted','paid','overdue'] as $status): ?>
+<option
+    value="<?= payroll_complete_h($status) ?>"
+    <?= $remit['return_status'] === $status ? 'selected' : '' ?>
+>
+<?= payroll_complete_h(ucfirst($status)) ?>
+</option>
+<?php endforeach; ?>
+</select>
+</div>
+
+<div class="form-field">
+<label>Payment Date</label>
+<input
+    type="date"
+    name="payment_date"
+    value="<?= payroll_complete_h($remit['payment_date'] ?? '') ?>"
+>
+</div>
+
+<div class="form-field">
+<label>Payment Reference</label>
+<input
+    name="payment_reference"
+    value="<?= payroll_complete_h($remit['payment_reference'] ?? '') ?>"
+    placeholder="Bank / portal reference"
+>
+</div>
+
+<div class="form-field">
+<label>Return Reference</label>
+<input
+    name="return_reference"
+    value="<?= payroll_complete_h($remit['return_reference'] ?? '') ?>"
+    placeholder="Filing reference"
+>
+</div>
+
+<div class="form-field full">
+<label>Notes</label>
+<textarea name="notes" placeholder="Filing/payment notes..."><?= payroll_complete_h($remit['notes'] ?? '') ?></textarea>
+</div>
+
+</div>
+
+<div class="action-stack" style="justify-content:flex-end;margin-top:10px">
+
+<button class="btn green" type="submit">
+<i class="fas fa-save"></i>
+Save
+</button>
+
+<button
+    class="btn"
+    type="button"
+    onclick="toggleRemittance(<?= (int)$remit['id'] ?>)"
+>
+Cancel
+</button>
+
+</div>
+
+</form>
+
+</td>
+</tr>
+
+<?php endforeach; ?>
+
+</tbody>
+
+</table>
+</div>
+
+<div class="footer-total">
+<span><?= count($remittances) ?> statutory record(s)</span>
+<span>
+Outstanding:
+<strong style="color:var(--red)">
+<?= payroll_complete_money($totalOutstanding) ?>
+</strong>
+</span>
+</div>
+
+</section>
+
+<?php elseif ($view === 'history'): ?>
+
+<section class="panel">
+
+<div class="panel-head">
+<div class="panel-title">
+<b>Payroll History</b>
+<span>Monthly payroll totals.</span>
+</div>
+</div>
+
+<div class="table-wrap">
+
+<table>
+
+<thead>
+<tr>
+<th>Period</th>
+<th>Employees</th>
+<th class="money">Gross</th>
+<th class="money">PAYE</th>
+<th class="money">NAPSA</th>
+<th class="money">NHIMA</th>
+<th class="money">Deductions</th>
+<th class="money">Net</th>
+<th>Open</th>
+</tr>
+</thead>
+
+<tbody>
+
+<?php if (!$history): ?>
+
+<tr><td colspan="9" class="empty">No payroll history found.</td></tr>
+
+<?php else: ?>
+
+<?php foreach ($history as $item): ?>
+
+<?php
+$historyDate = $item['payroll_period'] . '-01';
+$hm = (int)date('n',strtotime($historyDate));
+$hy = (int)date('Y',strtotime($historyDate));
+?>
+
+<tr>
+
+<td><strong><?= payroll_complete_h(date('F Y',strtotime($historyDate))) ?></strong></td>
+<td><?= (int)$item['staff_count'] ?></td>
+<td class="money"><?= payroll_complete_money((float)$item['gross']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$item['paye']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$item['napsa']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$item['nhima']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$item['deductions']) ?></td>
+<td class="money net"><?= payroll_complete_money((float)$item['net']) ?></td>
+
+<td>
+<a
+    class="btn small"
+    href="?view=payroll&month=<?= $hm ?>&year=<?= $hy ?>"
+>
+Open
+</a>
+</td>
+
+</tr>
+
+<?php endforeach; ?>
+
+<?php endif; ?>
+
+</tbody>
+</table>
+</div>
+
+</section>
+
+<?php elseif ($view === 'ytd'): ?>
+
+<?php
+$ytdTotals = [
+    'basic'=>0.0,
+    'gross'=>0.0,
+    'paye'=>0.0,
+    'napsa'=>0.0,
+    'nhima'=>0.0,
+    'deductions'=>0.0,
+    'net'=>0.0
+];
+
+foreach ($ytdRows as $yr) {
+    foreach ($ytdTotals as $key => $_) {
+        $ytdTotals[$key] += (float)($yr[$key] ?? 0);
+    }
+}
+?>
+
+<section class="summary-grid">
+
+<div class="summary-card">
+<div class="summary-top"><span>YTD Gross</span><span class="summary-icon"><i class="fas fa-coins"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($ytdTotals['gross']) ?></div>
+<div class="summary-sub"><?= $selectedYear ?></div>
+</div>
+
+<div class="summary-card yellow">
+<div class="summary-top"><span>YTD PAYE</span><span class="summary-icon"><i class="fas fa-landmark"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($ytdTotals['paye']) ?></div>
+<div class="summary-sub">PAYE accumulated</div>
+</div>
+
+<div class="summary-card">
+<div class="summary-top"><span>YTD NAPSA</span><span class="summary-icon"><i class="fas fa-piggy-bank"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($ytdTotals['napsa']) ?></div>
+<div class="summary-sub">Employee contribution</div>
+</div>
+
+<div class="summary-card green">
+<div class="summary-top"><span>YTD Net</span><span class="summary-icon"><i class="fas fa-wallet"></i></span></div>
+<div class="summary-value"><?= payroll_complete_money($ytdTotals['net']) ?></div>
+<div class="summary-sub">Employee take-home</div>
+</div>
+
+</section>
+
+<section class="panel">
+
+<div class="panel-head">
+<div class="panel-title">
+<b>Employee Year-to-Date Register</b>
+<span>January through <?= payroll_complete_h($periodLabel) ?>, <?= $selectedYear ?>.</span>
+</div>
+</div>
+
+<div class="table-wrap">
+
+<table>
+
+<thead>
+<tr>
+<th>Employee</th>
+<th>Role</th>
+<th class="money">Basic YTD</th>
+<th class="money">Gross YTD</th>
+<th class="money">PAYE YTD</th>
+<th class="money">NAPSA YTD</th>
+<th class="money">NHIMA YTD</th>
+<th class="money">Deductions YTD</th>
+<th class="money">Net YTD</th>
+</tr>
+</thead>
+
+<tbody>
+
+<?php if (!$ytdRows): ?>
+
+<tr><td colspan="9" class="empty">No YTD payroll records found for <?= $selectedYear ?>.</td></tr>
+
+<?php else: ?>
+
+<?php foreach ($ytdRows as $yr): ?>
+
+<tr>
+
+<td>
+<strong><?= payroll_complete_h($yr['staff_name']) ?></strong>
+<div style="font-size:9px;color:var(--muted)">
+#<?= (int)$yr['staff_id'] ?>
+</div>
+</td>
+
+<td><?= payroll_complete_h($yr['role']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$yr['basic']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$yr['gross']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$yr['paye']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$yr['napsa']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$yr['nhima']) ?></td>
+<td class="money"><?= payroll_complete_money((float)$yr['deductions']) ?></td>
+<td class="money net"><?= payroll_complete_money((float)$yr['net']) ?></td>
+
+</tr>
+
+<?php endforeach; ?>
+
+<?php endif; ?>
+
+</tbody>
+</table>
+</div>
+
+</section>
+
+<?php endif; ?>
+
+<?php
+/*
+|--------------------------------------------------------------------------
+| Inline printable payslip.
+|
+| It is deliberately part of this same payroll action file.
+|--------------------------------------------------------------------------
+*/
+
+if ($payslip !== null && isset($_GET['print']) && $_GET['print'] === '1'):
+?>
 
 <script>
-function showPayrollDetails(button) {
-    const modal = document.getElementById('payrollModal');
+(function(){
+    const body = document.body;
+    const main = document.querySelector('.app');
+    if (main) {
+        main.style.display = 'none';
+    }
 
-    document.getElementById('modalEmployeeName').textContent =
-        button.dataset.name || 'Staff';
+    const sheet = document.createElement('section');
+    sheet.className = 'payslip-sheet';
+    sheet.style.display = 'block';
 
-    document.getElementById('modalBasic').textContent =
-        button.dataset.basic || 'K0.00';
+    sheet.innerHTML = `
+        <div class="company">
+            <h2><?= payroll_complete_h($pharmacyName) ?></h2>
+            <p>Employee Payslip</p>
+        </div>
 
-    document.getElementById('modalGross').textContent =
-        button.dataset.gross || 'K0.00';
+        <div class="ps-heading">
+            <div>
+                <h2><?= payroll_complete_h($payslip['staff_name']) ?></h2>
+                <div class="muted"><?= payroll_complete_h($periodLabel) ?></div>
+            </div>
 
-    document.getElementById('modalNet').textContent =
-        button.dataset.net || 'K0.00';
+            <div style="text-align:right">
+                <strong><?= payroll_complete_h(strtoupper($payslip['status'])) ?></strong><br>
+                <span class="muted">
+                    Employee #<?= (int)$payslip['staff_id'] ?>
+                </span>
+            </div>
+        </div>
 
-    modal.style.display = 'flex';
+        <div class="ps-employee">
+            <div><span>Role</span><strong><?= payroll_complete_h($payslip['staff_role']) ?></strong></div>
+            <div><span>Branch</span><strong><?= payroll_complete_h($payslip['branch_name']) ?></strong></div>
+            <div><span>Basic Salary</span><strong><?= payroll_complete_money($payslip['basic_salary']) ?></strong></div>
+            <div><span>Period</span><strong><?= payroll_complete_h($periodLabel) ?></strong></div>
+        </div>
+
+        <div class="ps-section">
+            <h3>Earnings</h3>
+            <div class="ps-line"><span>Basic Salary</span><strong><?= payroll_complete_money($payslip['basic_salary']) ?></strong></div>
+            <div class="ps-line"><span>Allowances</span><strong><?= payroll_complete_money($payslip['allowances']) ?></strong></div>
+            <div class="ps-line"><span>Bonus</span><strong><?= payroll_complete_money($payslip['bonus']) ?></strong></div>
+            <div class="ps-line"><span>Overtime</span><strong><?= payroll_complete_money($payslip['overtime']) ?></strong></div>
+            <div class="ps-line"><span>Other Earnings</span><strong><?= payroll_complete_money($payslip['other_earnings']) ?></strong></div>
+            <div class="ps-line ps-total"><span>Gross Salary</span><strong><?= payroll_complete_money($payslip['gross_salary']) ?></strong></div>
+        </div>
+
+        <div class="ps-section">
+            <h3>Deductions</h3>
+            <div class="ps-line"><span>PAYE</span><strong><?= payroll_complete_money($payslip['paye']) ?></strong></div>
+            <div class="ps-line"><span>NAPSA</span><strong><?= payroll_complete_money($payslip['napsa']) ?></strong></div>
+            <div class="ps-line"><span>NHIMA</span><strong><?= payroll_complete_money($payslip['nhima']) ?></strong></div>
+            <div class="ps-line"><span>Loan</span><strong><?= payroll_complete_money($payslip['loan_deduction']) ?></strong></div>
+            <div class="ps-line"><span>Salary Advance</span><strong><?= payroll_complete_money($payslip['salary_advance']) ?></strong></div>
+            <div class="ps-line"><span>Other Deductions</span><strong><?= payroll_complete_money($payslip['other_deductions']) ?></strong></div>
+            <div class="ps-line ps-total"><span>Total Deductions</span><strong><?= payroll_complete_money($payslip['total_deductions']) ?></strong></div>
+        </div>
+
+        <div class="ps-net">
+            <span>NET PAY</span>
+            <span><?= payroll_complete_money($payslip['net_salary']) ?></span>
+        </div>
+
+        <p style="text-align:center;margin-top:25px;color:#71808f;font-size:10px">
+            Generated by EchoTech POS Â· <?= payroll_complete_h(date('d M Y H:i')) ?>
+        </p>
+    `;
+
+    body.appendChild(sheet);
+
+    window.addEventListener('load', function(){
+        setTimeout(function(){
+            window.print();
+        }, 200);
+    });
+})();
+</script>
+
+<?php endif; ?>
+
+<script>
+function toggleEdit(id){
+    const row = document.getElementById('edit-' + id);
+    if(!row) return;
+    row.style.display =
+        row.style.display === 'none' || row.style.display === ''
+            ? 'table-row'
+            : 'none';
 }
 
-function closePayrollDetails() {
-    const modal = document.getElementById('payrollModal');
-
-    if (modal) {
-        modal.style.display = 'none';
-    }
+function toggleRemittance(id){
+    const row = document.getElementById('remit-' + id);
+    if(!row) return;
+    row.style.display =
+        row.style.display === 'none' || row.style.display === ''
+            ? 'table-row'
+            : 'none';
 }
-
-document.getElementById('payrollModal')?.addEventListener('click', function (event) {
-    if (event.target === this) {
-        closePayrollDetails();
-    }
-});
-
-document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape') {
-        closePayrollDetails();
-    }
-});
 </script>
 
 </body>
