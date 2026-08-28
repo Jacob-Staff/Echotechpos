@@ -47,19 +47,24 @@ if (file_exists("../includes/auth.php")) {
 }
 
 /*
- * Dashboard links stay visible in their original positions.
- * If page access is OFF, the link becomes dormant only; the tile/list item
- * is not hidden or visually redesigned. Direct URL access is enforced by auth.php.
- */
-function echotech_dashboard_href(string $route, string $page): string
-{
-    $safeRoute = htmlspecialchars($route, ENT_QUOTES, 'UTF-8');
+|--------------------------------------------------------------------------
+| Dashboard access helper
+|--------------------------------------------------------------------------
+| Keeps every dashboard item visible in its original position.
+| When page access is disabled, the item remains visible but becomes
+| dormant. Direct URL authorization remains the responsibility of auth.php.
+*/
+if (!function_exists('echotech_dashboard_href')) {
+    function echotech_dashboard_href(string $route, string $page): string
+    {
+        $safeRoute = htmlspecialchars($route, ENT_QUOTES, 'UTF-8');
 
-    if (function_exists('has_page_access') && !has_page_access($page)) {
-        return 'href="' . $safeRoute . '" aria-disabled="true" tabindex="-1" onclick="return false;"';
+        if (function_exists('has_page_access') && !has_page_access($page)) {
+            return 'href="' . $safeRoute . '" aria-disabled="true" tabindex="-1" onclick="return false;"';
+        }
+
+        return 'href="' . $safeRoute . '"';
     }
-
-    return 'href="' . $safeRoute . '"';
 }
 
 /*
@@ -276,13 +281,13 @@ $pending_orders_count = $po_res
     ? (int) (mysqli_fetch_assoc($po_res)['total'] ?? 0)
     : 0;
 
- /*
- |--------------------------------------------------------------------------
- | ONLINE ORDERS
- |--------------------------------------------------------------------------
- | Pending + Processing customer orders for this pharmacy/branch.
- |--------------------------------------------------------------------------
- */
+/*
+|--------------------------------------------------------------------------
+| ONLINE ORDERS
+|--------------------------------------------------------------------------
+| Pending + Processing customer orders for this pharmacy/branch.
+|--------------------------------------------------------------------------
+*/
 $online_orders_res = safe_query(
     $conn,
     "
@@ -297,8 +302,6 @@ $online_orders_res = safe_query(
 $online_orders_count = $online_orders_res
     ? (int) (mysqli_fetch_assoc($online_orders_res)['total'] ?? 0)
     : 0;
-
-
 
 /*
 |--------------------------------------------------------------------------
@@ -351,7 +354,7 @@ require_once "../includes/head.php";
                 <div class="quick-actions-nav">
 
                     <a
-                        <?= dashboard_link_attrs("sell_now.php", "Sale now"); ?>
+                        <?= echotech_dashboard_href("sell_now.php", "Sale now"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-cash-multiple me-1"></i>
@@ -359,7 +362,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        <?= dashboard_link_attrs("lay_by_sell.php", "Lay by sale"); ?>
+                        <?= echotech_dashboard_href("lay_by_sell.php", "Lay by sale"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-credit-card-plus me-1"></i>
@@ -367,7 +370,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        <?= dashboard_link_attrs("expenses.php", "Expenses"); ?>
+                        <?= echotech_dashboard_href("expenses.php", "Expenses"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-chart-bar me-1"></i>
@@ -375,7 +378,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        <?= dashboard_link_attrs("sales_report.php", "Sales report"); ?>
+                        <?= echotech_dashboard_href("sales_report.php", "Sales report"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-chart-line me-1"></i>
@@ -383,7 +386,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        <?= dashboard_link_attrs("sales_trend.php", "Sales trend"); ?>
+                        <?= echotech_dashboard_href("sales_trend.php", "Sales trend"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-trending-up me-1"></i>
@@ -391,10 +394,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        <?= dashboard_link_attrs(
-                            "add_patients.php?invoice=" . urlencode($invoice_number),
-                            "Add patient"
-                        ); ?>
+                        <?= echotech_dashboard_href("add_patients.php?invoice=" . urlencode($invoice_number), "Add patient"); ?>
                         class="btn btn-purple btn-sm px-2 py-1 rounded-2 shadow-sm"
                     >
                         <i class="fas fa-plus me-1"></i>
@@ -679,13 +679,11 @@ require_once "../includes/head.php";
              Pending + Processing incoming customer orders
         ================================================== -->
         <div class="online-orders-shortcut-wrap">
-
             <a
-                <?= dashboard_link_attrs("online_orders.php", "Online orders"); ?>
+                <?= echotech_dashboard_href("online_orders.php", "Online orders"); ?>
                 class="online-orders-shortcut"
                 aria-label="Open Online Orders"
             >
-
                 <span class="online-orders-icon">
                     <i class="mdi mdi-cart-arrow-down"></i>
                 </span>
@@ -711,9 +709,7 @@ require_once "../includes/head.php";
                 <span class="online-orders-arrow">
                     <i class="mdi mdi-chevron-right"></i>
                 </span>
-
             </a>
-
         </div>
 
     </div>
@@ -732,19 +728,15 @@ if (file_exists("../includes/footer.php")) {
 
 
 <style>
-<style>
-.quick-actions-nav {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 2px;
-}
-
-.quick-actions-nav a[aria-disabled="true"] {
+.quick-actions-nav a[aria-disabled="true"],
+.card-dash[aria-disabled="true"],
+.list-group-item[aria-disabled="true"],
+.online-orders-shortcut[aria-disabled="true"] {
     pointer-events: none !important;
+    cursor: default !important;
 }
 
+/* Online Orders quick link */
 .online-orders-shortcut-wrap {
     display: flex;
     justify-content: center;
@@ -834,24 +826,19 @@ if (file_exists("../includes/footer.php")) {
     font-size: 19px;
 }
 
-@media (max-width: 768px) {
-    .quick-actions-nav {
-        justify-content: flex-start;
-        width: 100%;
-    }
-}
-
 @media (max-width: 575.98px) {
     .online-orders-shortcut-wrap {
         margin-top: 16px;
         padding-left: 8px;
         padding-right: 8px;
     }
+
     .online-orders-shortcut {
         width: 100%;
     }
 }
 </style>
+
 
 <!-- ============================================================
      JAVASCRIPT
@@ -924,12 +911,13 @@ $(document).ready(function () {
 
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Poll every 30 seconds
-    |--------------------------------------------------------------------------
-    */
 
+
+    /* ============================================================
+       ONLINE ORDERS LIVE BADGE
+       Checks the current branch every 3 seconds.
+       No page refresh is required.
+       ============================================================ */
     function pollOnlineOrdersBadge() {
 
         $.ajax({
@@ -956,25 +944,46 @@ $(document).ready(function () {
                 if (count > 0) {
 
                     if (!badge.length) {
-                        badge = $('<span class="online-orders-badge" id="badge-online-orders"></span>');
+                        badge = $(
+                            '<span class="online-orders-badge" id="badge-online-orders"></span>'
+                        );
+
                         shortcut.append(badge);
                     }
 
                     badge.text(count);
 
-                } else if (badge.length) {
-                    badge.remove();
+                } else {
+
+                    if (badge.length) {
+                        badge.remove();
+                    }
                 }
+            },
+
+            error: function (xhr) {
+                console.warn(
+                    'Online Orders live check failed:',
+                    xhr.status
+                );
             }
         });
     }
 
+    // Run immediately when the dashboard opens.
     pollOnlineOrdersBadge();
 
+    // Keep listening while the dashboard remains open.
     setInterval(
         pollOnlineOrdersBadge,
         3000
     );
+
+    /*
+    |--------------------------------------------------------------------------
+    | Poll every 30 seconds
+    |--------------------------------------------------------------------------
+    */
 
     setInterval(
         pollDashboardAlerts,
