@@ -211,43 +211,24 @@ function require_login(): void
     }
 
     /*
-     * ============================================================
-     * AUTOMATIC PAGE ACCESS ENFORCEMENT
-     * ============================================================
-     * ONLY the exact POS dashboard route files listed in
-     * echotech_page_routes() are protected here.
-     *
-     * This deliberately does NOT affect:
-     *   logout.php
-     *   login_inc.php
-     *   action/*.php
-     *   API endpoints
-     *   includes
-     *   AJAX handlers
-     *   files not registered as POS pages
+     * Protect ONLY registered Dashboard/POS page routes.
+     * This never applies to logout.php, login_inc.php, action files,
+     * APIs, includes, AJAX endpoints, or other PHP files.
      */
-    $currentPageFile = basename((string)($_SERVER['PHP_SELF'] ?? ''));
+    $currentFile = basename((string)($_SERVER['PHP_SELF'] ?? ''));
+    $matchedPage = null;
 
-    $pageRoutes = echotech_page_routes();
-    $pageName = null;
-
-    foreach ($pageRoutes as $configuredPageName => $routeFile) {
-        if ($routeFile === $currentPageFile) {
-            $pageName = $configuredPageName;
+    foreach (echotech_page_routes() as $pageName => $routeFile) {
+        if ($routeFile === $currentFile) {
+            $matchedPage = $pageName;
             break;
         }
     }
 
-    /*
-     * Only an exact route match can reach this check.
-     * Nothing outside echotech_page_routes() is touched.
-     */
-    if ($pageName !== null && current_role() !== 'Admin') {
-        if (!has_page_access($pageName)) {
+    if ($matchedPage !== null && current_role() !== 'Admin') {
+        if (!has_page_access($matchedPage)) {
             http_response_code(403);
-            render_denied_message(
-                'Your role does not have access to this page.'
-            );
+            render_denied_message('Your role does not have access to this page.');
         }
     }
 }
@@ -370,12 +351,6 @@ function has_page_access(string $page): bool
 {
     global $conn;
 
-    /*
-     * IMPORTANT:
-     * This function is a pure permission lookup.
-     * It must NOT call require_login(), because require_login()
-     * uses this function to enforce the current dashboard page.
-     */
     if (!is_logged_in()) return false;
 
     if (current_role() === 'Admin') return true;
@@ -405,9 +380,9 @@ function has_page_access(string $page): bool
         $stmt->close();
 
         /*
-         * Missing permission records are ON by default. This makes
-         * newly added POS pages usable immediately. An explicit row with
-         * can_access=0 is always respected.
+         * Missing permission records are allowed by default. This makes
+         * newly added POS pages usable immediately; the staff screen will
+         * create the explicit row when it is opened.
          */
         return $row === null ? true : (int)$row['can_access'] === 1;
     } catch (Throwable $e) {
@@ -420,10 +395,6 @@ function has_page_function_access(string $page): bool
 {
     global $conn;
 
-    /*
-     * Pure permission lookup; authentication is handled by the
-     * caller (require_page_function / page action).
-     */
     if (!is_logged_in()) return false;
 
     if (current_role() === 'Admin') return true;
