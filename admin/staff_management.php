@@ -1,113 +1,795 @@
 <?php
+/**
+ * EchoTech POS - Staff Management
+ * Accounts + roles + page access + page functions + freeze controls.
+ */
 declare(strict_types=1);
-session_start();
-require_once '../includes/conn.php';
-require_once '../includes/auth.php';
+
+if (session_status() === PHP_SESSION_NONE) session_start();
+
+require_once __DIR__ . '/../includes/conn.php';
+require_once __DIR__ . '/../includes/auth.php';
+
 require_admin();
+require_pharmacy();
 
-$pharmacy_id=current_pharmacy(); $current_user_id=current_user_id();
-if(!$pharmacy_id) exit('Pharmacy session is not available.');
+$pharmacyId = current_pharmacy();
+$currentUserId = current_user_id();
 
-$roles=echotech_staff_roles();
-$pages=echotech_pages();
-$icons=['Human Resource'=>'fa-people-roof','Pharmacist'=>'fa-prescription-bottle-medical','Manager'=>'fa-user-tie','Assistant Manager'=>'fa-user-gear','PharmTech'=>'fa-pills','Clinical Officer'=>'fa-stethoscope','Registered Nurse'=>'fa-user-nurse','Cashier'=>'fa-cash-register','General'=>'fa-user','Security'=>'fa-shield-halved'];
-$pageIcons=['Sale now'=>'fa-cart-shopping','Today transaction'=>'fa-receipt','Out of stock'=>'fa-box-open','Expired products'=>'fa-calendar-xmark','Customer'=>'fa-users','Online manager'=>'fa-globe','Pharmacy stock'=>'fa-boxes-stacked','Purchases orders'=>'fa-file-invoice','Supplier'=>'fa-truck','Add Product'=>'fa-circle-plus','Stock exchange'=>'fa-right-left','Shift log'=>'fa-clock-rotate-left','Purchases order list'=>'fa-list-check','Restock'=>'fa-arrows-rotate','Online orders'=>'fa-bag-shopping','Sales report'=>'fa-chart-line','Lay by sale'=>'fa-hand-holding-dollar','Expenses sales trend'=>'fa-chart-area','Add patient'=>'fa-user-plus','Settings'=>'fa-gear'];
-
-$conn->query("CREATE TABLE IF NOT EXISTS role_page_permissions (id INT UNSIGNED NOT NULL AUTO_INCREMENT, pharmacy_id INT NOT NULL, role VARCHAR(100) NOT NULL, page_name VARCHAR(150) NOT NULL, can_access TINYINT(1) NOT NULL DEFAULT 0, can_action TINYINT(1) NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY(id), UNIQUE KEY uq_role_page(pharmacy_id,role,page_name), KEY idx_pharmacy(pharmacy_id), KEY idx_role(role)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-$col=$conn->query("SELECT COUNT(*) c FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='is_frozen'");
-if((int)($col->fetch_assoc()['c']??0)===0) $conn->query("ALTER TABLE users ADD COLUMN is_frozen TINYINT(1) NOT NULL DEFAULT 0");
-if(empty($_SESSION['staff_csrf'])) $_SESSION['staff_csrf']=bin2hex(random_bytes(32));
-$csrf=$_SESSION['staff_csrf'];
-function h($v):string{return htmlspecialchars((string)$v,ENT_QUOTES,'UTF-8');}
-function csrf():void{if(empty($_POST['csrf_token'])||!hash_equals($_SESSION['staff_csrf']??'',$_POST['csrf_token'])){http_response_code(419);exit('Invalid security token.');}}
-function back(string $q=''):void{header('Location: staff_management.php'.($q?'?'.$q:''));exit;}
-
-/* Seed the new matrix without changing legacy role_permissions. */
-foreach($roles as $r) foreach($pages as $p){$s=$conn->prepare("INSERT IGNORE INTO role_page_permissions(pharmacy_id,role,page_name) VALUES(?,?,?)");$s->bind_param('iss',$pharmacy_id,$r,$p);$s->execute();$s->close();}
-
-if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['perm'])){
-    csrf(); $r=trim($_POST['role']??'');$p=trim($_POST['page']??'');$kind=$_POST['perm'];
-    if(!in_array($r,$roles,true)||!in_array($p,$pages,true)||!in_array($kind,['access','function'],true)) back('error=permission');
-    if($kind==='access'){
-        $s=$conn->prepare("SELECT can_access FROM role_page_permissions WHERE pharmacy_id=? AND role=? AND page_name=? LIMIT 1");$s->bind_param('iss',$pharmacy_id,$r,$p);$s->execute();$row=$s->get_result()->fetch_assoc();$s->close();$v=((int)($row['can_access']??0))?0:1;
-        if($v){$s=$conn->prepare("UPDATE role_page_permissions SET can_access=1 WHERE pharmacy_id=? AND role=? AND page_name=?");}
-        else{$s=$conn->prepare("UPDATE role_page_permissions SET can_access=0,can_action=0 WHERE pharmacy_id=? AND role=? AND page_name=?");}
-        $s->bind_param('iss',$pharmacy_id,$r,$p);$s->execute();$s->close();
-    }else{
-        $s=$conn->prepare("SELECT can_access,can_action FROM role_page_permissions WHERE pharmacy_id=? AND role=? AND page_name=? LIMIT 1");$s->bind_param('iss',$pharmacy_id,$r,$p);$s->execute();$row=$s->get_result()->fetch_assoc();$s->close();
-        if((int)($row['can_access']??0)!==1) back('error=function_requires_access');
-        $v=((int)($row['can_action']??0))?0:1;$s=$conn->prepare("UPDATE role_page_permissions SET can_action=? WHERE pharmacy_id=? AND role=? AND page_name=?");$s->bind_param('iiss',$v,$pharmacy_id,$r,$p);$s->execute();$s->close();
-    }
-    back('permission_updated=1');
+if (!$pharmacyId || !$currentUserId) {
+    http_response_code(403);
+    exit('Invalid staff session.');
 }
 
-if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action']??'')==='add'){
-    csrf();$username=trim($_POST['username']??'');$full=trim($_POST['full_name']??'');$email=trim($_POST['email']??'');$role=trim($_POST['role']??'General');$branch=(int)($_POST['branch_id']??0);$salary=(float)($_POST['salary']??0);$password=$_POST['password']??'';
-    if(!in_array($role,$roles,true))$role='General';
-    if($username===''||$full===''||$email===''||$password===''||$branch<=0)back('error=missing');
-    $s=$conn->prepare("SELECT id FROM branches WHERE id=? AND pharmacy_id=? LIMIT 1");$s->bind_param('ii',$branch,$pharmacy_id);$s->execute();$ok=$s->get_result()->num_rows>0;$s->close();if(!$ok)back('error=branch');
-    $s=$conn->prepare("SELECT id FROM users WHERE username=? AND pharmacy_id=? LIMIT 1");$s->bind_param('si',$username,$pharmacy_id);$s->execute();$dup=$s->get_result()->num_rows>0;$s->close();if($dup)back('error=username');
-    $pic='default_avatar.png';
-    if(!empty($_FILES['profile_pic']['name'])&&($_FILES['profile_pic']['error']??4)===0){$info=@getimagesize($_FILES['profile_pic']['tmp_name']);$map=['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','image/gif'=>'gif'];if($info&&isset($map[$info['mime']])){$dir='../uploads/staff/';if(!is_dir($dir))mkdir($dir,0777,true);$n=time().'_'.bin2hex(random_bytes(5)).'.'.$map[$info['mime']];if(move_uploaded_file($_FILES['profile_pic']['tmp_name'],$dir.$n))$pic=$n;}}
-    $hash=password_hash($password,PASSWORD_DEFAULT);
-    $s=$conn->prepare("INSERT INTO users(pharmacy_id,username,full_name,email,password,role,branch_id,salary_amount,profile_pic,status,is_frozen) VALUES(?,?,?,?,?,?,?,?,?,'Active',0)");$s->bind_param('isssssids',$pharmacy_id,$username,$full,$email,$hash,$role,$branch,$salary,$pic);if($s->execute()){ $s->close();back('success=1');}$s->close();back('error=save');
+$roles = echotech_staff_roles();
+$pages = echotech_pages();
+$routes = echotech_page_routes();
+
+$roleIcons = [
+    'Human Resource'=>'fa-people-roof','Pharmacist'=>'fa-prescription-bottle-medical',
+    'Manager'=>'fa-user-tie','Assistant Manager'=>'fa-user-gear','PharmTech'=>'fa-pills',
+    'Clinical Officer'=>'fa-stethoscope','Registered Nurse'=>'fa-user-nurse',
+    'Cashier'=>'fa-cash-register','General'=>'fa-user','Security'=>'fa-shield-halved'
+];
+
+$pageIcons = [
+    'Sale now'=>'fa-cart-shopping','Today transaction'=>'fa-receipt',
+    'Out of stock'=>'fa-box-open','Expired products'=>'fa-calendar-xmark',
+    'Customer'=>'fa-users','Online manager'=>'fa-globe','Pharmacy stock'=>'fa-boxes-stacked',
+    'Purchases orders'=>'fa-file-invoice','Supplier'=>'fa-truck','Add Product'=>'fa-circle-plus',
+    'Stock exchange'=>'fa-right-left','Shift log'=>'fa-clock-rotate-left',
+    'Purchases order list'=>'fa-list-check','Restock'=>'fa-arrows-rotate',
+    'Online orders'=>'fa-bag-shopping','Sales report'=>'fa-chart-line',
+    'Lay by sale'=>'fa-hand-holding-dollar','Expenses sales trend'=>'fa-chart-area',
+    'Add patient'=>'fa-user-plus','Settings'=>'fa-gear'
+];
+
+/* ------------------------- Database setup ------------------------- */
+
+$conn->query("CREATE TABLE IF NOT EXISTS role_page_permissions (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pharmacy_id INT NOT NULL,
+    role VARCHAR(100) NOT NULL,
+    page_name VARCHAR(150) NOT NULL,
+    can_access TINYINT(1) NOT NULL DEFAULT 1,
+    can_action TINYINT(1) NOT NULL DEFAULT 1,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY(id),
+    UNIQUE KEY uq_role_page(pharmacy_id,role,page_name),
+    KEY idx_pharmacy(pharmacy_id),
+    KEY idx_role(role)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+function ensure_column(mysqli $conn, string $table, string $column, string $definition): void
+{
+    $t = $conn->real_escape_string($table);
+    $c = $conn->real_escape_string($column);
+    $r = $conn->query(
+        "SELECT COUNT(*) AS n FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='{$t}' AND COLUMN_NAME='{$c}'"
+    );
+    if ($r && (int)$r->fetch_assoc()['n'] === 0) {
+        $conn->query("ALTER TABLE `{$t}` ADD COLUMN `{$c}` {$definition}");
+    }
 }
 
-if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['staff_action'])){
-    csrf();
-    $action=trim($_POST['staff_action']);
-    $id=(int)($_POST['user_id']??0);
-    if($id<=0 || $id===$current_user_id) back('error=invalid_staff_action');
-    if($action==='freeze' || $action==='unfreeze'){
-        $value=$action==='freeze'?1:0;
-        $s=$conn->prepare("UPDATE users SET is_frozen=? WHERE id=? AND pharmacy_id=?");
-        if(!$s) back('error=security_action');
-        $s->bind_param('iii',$value,$id,$pharmacy_id); $ok=$s->execute(); $s->close();
-        back($ok?'freeze_updated=1':'error=security_action');
-    }
-    if($action==='online' || $action==='offline'){
-        $value=$action==='online'?1:0;
-        $s=$conn->prepare("UPDATE users SET is_online_visible=? WHERE id=? AND pharmacy_id=?");
-        if(!$s) back('error=security_action');
-        $s->bind_param('iii',$value,$id,$pharmacy_id); $ok=$s->execute(); $s->close();
-        back($ok?'online_updated=1':'error=security_action');
-    }
-    if($action==='delete'){
-        $s=$conn->prepare("DELETE FROM users WHERE id=? AND pharmacy_id=? AND id<>?");
-        if(!$s) back('error=delete');
-        $s->bind_param('iii',$id,$pharmacy_id,$current_user_id); $ok=$s->execute(); $changed=$s->affected_rows; $s->close();
-        back(($ok && $changed>0)?'deleted=1':'error=delete');
-    }
-    back('error=invalid_staff_action');
+ensure_column($conn, 'users', 'is_frozen', 'TINYINT(1) NOT NULL DEFAULT 0');
+ensure_column($conn, 'users', 'is_online_visible', 'TINYINT(1) NOT NULL DEFAULT 1');
+
+/* ------------------------- CSRF ------------------------- */
+
+if (empty($_SESSION['staff_csrf'])) {
+    $_SESSION['staff_csrf'] = bin2hex(random_bytes(32));
+}
+$csrf = $_SESSION['staff_csrf'];
+
+function staff_csrf_ok(): bool
+{
+    return !empty($_POST['csrf_token'])
+        && hash_equals($_SESSION['staff_csrf'] ?? '', (string)$_POST['csrf_token']);
 }
 
-$branches=[];$s=$conn->prepare("SELECT id,branch_name FROM branches WHERE pharmacy_id=? ORDER BY branch_name");$s->bind_param('i',$pharmacy_id);$s->execute();$rs=$s->get_result();while($r=$rs->fetch_assoc())$branches[]=$r;$s->close();
-$staff=[];$s=$conn->prepare("SELECT u.id,u.username,u.full_name,u.email,u.role,u.branch_id,u.salary_amount,u.profile_pic,u.status,COALESCE(u.is_online_visible,0) is_online_visible,COALESCE(u.is_frozen,0) is_frozen,b.branch_name FROM users u LEFT JOIN branches b ON b.id=u.branch_id AND b.pharmacy_id=u.pharmacy_id WHERE u.pharmacy_id=? ORDER BY u.is_frozen DESC,u.full_name,u.username");$s->bind_param('i',$pharmacy_id);$s->execute();$rs=$s->get_result();while($r=$rs->fetch_assoc())$staff[]=$r;$s->close();
-$perms=[];$s=$conn->prepare("SELECT role,page_name,can_access,can_action FROM role_page_permissions WHERE pharmacy_id=?");$s->bind_param('i',$pharmacy_id);$s->execute();$rs=$s->get_result();while($r=$rs->fetch_assoc())$perms[$r['role']][$r['page_name']]=['access'=>(int)$r['can_access'],'action'=>(int)$r['can_action']];$s->close();
-$total=count($staff);$active=$frozen=$online=0;$roleCounts=[];foreach($staff as $u){if(strcasecmp((string)$u['status'],'Active')===0)$active++;if((int)$u['is_frozen'])$frozen++;if((int)$u['is_online_visible'])$online++;$rr=$u['role']?:'General';$roleCounts[$rr]=($roleCounts[$rr]??0)+1;}$activePct=$total?round($active/$total*100):0;
-$user=current_user();$roleNow=current_role();
-$flash='';$err=false;if(isset($_GET['success']))$flash='Staff account created successfully.';elseif(isset($_GET['freeze_updated']))$flash='Staff account freeze status updated.';elseif(isset($_GET['online_updated']))$flash='Online visibility updated.';elseif(isset($_GET['deleted']))$flash='Staff account deleted.';elseif(isset($_GET['permission_updated']))$flash='Page permission updated successfully.';elseif(isset($_GET['error'])){$err=true;$m=['missing'=>'Complete all required staff fields.','branch'=>'The selected branch is invalid for this pharmacy.','username'=>'That username already exists.','save'=>'The staff account could not be created.','permission'=>'Invalid permission request.','function_requires_access'=>'Enable Access before enabling Functions.','invalid_staff_action'=>'Invalid staff action.','security_action'=>'The security action could not be completed.','delete'=>'The staff account could not be deleted.'];$flash=$m[$_GET['error']]??'Action could not be completed.';}
+function staff_redirect(string $message = '', string $type = 'success'): never
+{
+    $q = [];
+    if ($message !== '') {
+        $q[$type] = $message;
+    }
+    header('Location: staff_management.php' . ($q ? '?'.http_build_query($q) : ''));
+    exit;
+}
+
+function staff_fail(string $message): never
+{
+    staff_redirect($message, 'error');
+}
+
+/* ------------------------- Seed missing permissions ONCE ------------------------- */
+/*
+ * Existing choices are never overwritten. New page/role combinations start
+ * with Access=YES and Functions=YES, exactly as requested.
+ */
+$values = [];
+foreach ($roles as $r) {
+    foreach ($pages as $p) {
+        $values[] = "(
+            ".(int)$pharmacyId.",
+            '".$conn->real_escape_string($r)."',
+            '".$conn->real_escape_string($p)."',
+            1,1
+        )";
+    }
+}
+if ($values) {
+    $conn->query(
+        "INSERT IGNORE INTO role_page_permissions
+         (pharmacy_id,role,page_name,can_access,can_action)
+         VALUES ".implode(',', $values)
+    );
+}
+
+/* ------------------------- Actions ------------------------- */
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    if (!staff_csrf_ok()) {
+        http_response_code(419);
+        exit('Security token expired. Please reload the page.');
+    }
+
+    $postAction = (string)($_POST['form_action'] ?? '');
+
+    /* Permission: one cell */
+    if ($postAction === 'permission') {
+        $role = trim((string)($_POST['role'] ?? ''));
+        $page = trim((string)($_POST['page'] ?? ''));
+        $kind = trim((string)($_POST['kind'] ?? ''));
+
+        if (!in_array($role, $roles, true) || !in_array($page, $pages, true)
+            || !in_array($kind, ['access','function'], true)) {
+            staff_fail('Invalid permission request.');
+        }
+
+        $field = $kind === 'access' ? 'can_access' : 'can_action';
+
+        $stmt = $conn->prepare(
+            "SELECT can_access,can_action
+             FROM role_page_permissions
+             WHERE pharmacy_id=? AND role=? AND page_name=? LIMIT 1"
+        );
+        $stmt->bind_param('iss', $pharmacyId, $role, $page);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$row) {
+            staff_fail('Permission record could not be found.');
+        }
+
+        if ($kind === 'function' && (int)$row['can_access'] !== 1) {
+            staff_fail('Enable page Access before enabling Functions.');
+        }
+
+        $newValue = ((int)$row[$field] === 1) ? 0 : 1;
+
+        if ($kind === 'access') {
+            $stmt = $conn->prepare(
+                "UPDATE role_page_permissions
+                 SET can_access=?, can_action=IF(?=0,0,can_action)
+                 WHERE pharmacy_id=? AND role=? AND page_name=?"
+            );
+            $stmt->bind_param('iiiss', $newValue, $newValue, $pharmacyId, $role, $page);
+        } else {
+            $stmt = $conn->prepare(
+                "UPDATE role_page_permissions SET can_action=?
+                 WHERE pharmacy_id=? AND role=? AND page_name=?"
+            );
+            $stmt->bind_param('iiss', $newValue, $pharmacyId, $role, $page);
+        }
+
+        $ok = $stmt->execute();
+        $stmt->close();
+
+        $ok ? staff_redirect('Permission updated.') : staff_fail('Permission update failed.');
+    }
+
+    /* Quick matrix controls */
+    if ($postAction === 'matrix_bulk') {
+        $role = trim((string)($_POST['role'] ?? ''));
+        $mode = trim((string)($_POST['mode'] ?? ''));
+
+        if (!in_array($role, $roles, true)
+            || !in_array($mode, ['all','none','access_only'], true)) {
+            staff_fail('Invalid matrix action.');
+        }
+
+        if ($mode === 'all') {
+            $stmt = $conn->prepare(
+                "UPDATE role_page_permissions
+                 SET can_access=1,can_action=1
+                 WHERE pharmacy_id=? AND role=?"
+            );
+            $stmt->bind_param('is', $pharmacyId, $role);
+        } elseif ($mode === 'access_only') {
+            $stmt = $conn->prepare(
+                "UPDATE role_page_permissions
+                 SET can_access=1
+                 WHERE pharmacy_id=? AND role=?"
+            );
+            $stmt->bind_param('is', $pharmacyId, $role);
+        } else {
+            $stmt = $conn->prepare(
+                "UPDATE role_page_permissions
+                 SET can_access=0,can_action=0
+                 WHERE pharmacy_id=? AND role=?"
+            );
+            $stmt->bind_param('is', $pharmacyId, $role);
+        }
+
+        $ok = $stmt->execute();
+        $stmt->close();
+        $ok ? staff_redirect('Role permissions updated.') : staff_fail('Matrix update failed.');
+    }
+
+    /* Add staff */
+    if ($postAction === 'add_staff') {
+        $username = trim((string)($_POST['username'] ?? ''));
+        $fullName = trim((string)($_POST['full_name'] ?? ''));
+        $email = trim((string)($_POST['email'] ?? ''));
+        $role = trim((string)($_POST['role'] ?? 'General'));
+        $branchId = (int)($_POST['branch_id'] ?? 0);
+        $salary = (float)($_POST['salary'] ?? 0);
+        $password = (string)($_POST['password'] ?? '');
+
+        if (!in_array($role, $roles, true)) $role = 'General';
+
+        if ($username === '' || $fullName === '' || $email === ''
+            || $password === '' || $branchId <= 0) {
+            staff_fail('Complete all required staff fields.');
+        }
+
+        $stmt = $conn->prepare(
+            "SELECT id FROM branches WHERE id=? AND pharmacy_id=? LIMIT 1"
+        );
+        $stmt->bind_param('ii', $branchId, $pharmacyId);
+        $stmt->execute();
+        $branchOk = $stmt->get_result()->num_rows > 0;
+        $stmt->close();
+
+        if (!$branchOk) staff_fail('The selected branch is invalid.');
+
+        $stmt = $conn->prepare(
+            "SELECT id FROM users WHERE username=? AND pharmacy_id=? LIMIT 1"
+        );
+        $stmt->bind_param('si', $username, $pharmacyId);
+        $stmt->execute();
+        $duplicate = $stmt->get_result()->num_rows > 0;
+        $stmt->close();
+
+        if ($duplicate) staff_fail('That username already exists.');
+
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+        $profilePic = 'default_avatar.png';
+
+        if (!empty($_FILES['profile_pic']['name'])
+            && (int)($_FILES['profile_pic']['error'] ?? 4) === UPLOAD_ERR_OK) {
+
+            $tmp = $_FILES['profile_pic']['tmp_name'];
+            $info = @getimagesize($tmp);
+            $mimeMap = [
+                'image/jpeg'=>'jpg',
+                'image/png'=>'png',
+                'image/webp'=>'webp',
+                'image/gif'=>'gif'
+            ];
+
+            if ($info && isset($mimeMap[$info['mime']])) {
+                $dir = __DIR__.'/../uploads/staff/';
+                if (!is_dir($dir)) @mkdir($dir, 0755, true);
+
+                $filename = date('YmdHis').'_'.bin2hex(random_bytes(5))
+                    .'.'.$mimeMap[$info['mime']];
+
+                if (@move_uploaded_file($tmp, $dir.$filename)) {
+                    $profilePic = $filename;
+                }
+            }
+        }
+
+        $stmt = $conn->prepare(
+            "INSERT INTO users
+             (pharmacy_id,username,full_name,email,password,role,branch_id,
+              salary_amount,profile_pic,status,is_frozen,is_online_visible)
+             VALUES (?,?,?,?,?,?,?,?,?,'Active',0,1)"
+        );
+        $stmt->bind_param(
+            'isssssids',
+            $pharmacyId,$username,$fullName,$email,$passwordHash,$role,
+            $branchId,$salary,$profilePic
+        );
+
+        $ok = $stmt->execute();
+        $stmt->close();
+
+        $ok ? staff_redirect('Staff account created successfully.')
+            : staff_fail('The staff account could not be created.');
+    }
+
+    /* Staff security/visibility actions */
+    if ($postAction === 'staff_action') {
+        $targetId = (int)($_POST['user_id'] ?? 0);
+        $action = trim((string)($_POST['staff_action'] ?? ''));
+
+        if ($targetId <= 0 || $targetId === $currentUserId) {
+            staff_fail('This action cannot be performed on that account.');
+        }
+
+        if (!in_array($action, ['freeze','unfreeze','online','offline','delete'], true)) {
+            staff_fail('Invalid staff action.');
+        }
+
+        if ($action === 'freeze' || $action === 'unfreeze') {
+            $value = $action === 'freeze' ? 1 : 0;
+            $stmt = $conn->prepare(
+                "UPDATE users SET is_frozen=?
+                 WHERE id=? AND pharmacy_id=? AND id<>?"
+            );
+            $stmt->bind_param('iiii',$value,$targetId,$pharmacyId,$currentUserId);
+            $ok = $stmt->execute() && $stmt->affected_rows >= 0;
+            $stmt->close();
+            $ok ? staff_redirect($value ? 'Account frozen.' : 'Account unfrozen.')
+                : staff_fail('Freeze action failed.');
+        }
+
+        if ($action === 'online' || $action === 'offline') {
+            $value = $action === 'online' ? 1 : 0;
+            $stmt = $conn->prepare(
+                "UPDATE users SET is_online_visible=?
+                 WHERE id=? AND pharmacy_id=? AND id<>?"
+            );
+            $stmt->bind_param('iiii',$value,$targetId,$pharmacyId,$currentUserId);
+            $ok = $stmt->execute();
+            $stmt->close();
+            $ok ? staff_redirect($value ? 'Staff marked online.' : 'Staff hidden online.')
+                : staff_fail('Online visibility update failed.');
+        }
+
+        if ($action === 'delete') {
+            $stmt = $conn->prepare(
+                "DELETE FROM users
+                 WHERE id=? AND pharmacy_id=? AND id<>?"
+            );
+            $stmt->bind_param('iii',$targetId,$pharmacyId,$currentUserId);
+            $stmt->execute();
+            $changed = $stmt->affected_rows;
+            $stmt->close();
+
+            $changed > 0 ? staff_redirect('Staff account deleted.')
+                : staff_fail('Staff account could not be deleted.');
+        }
+    }
+}
+
+/* ------------------------- Read data ------------------------- */
+
+$branches = [];
+$stmt = $conn->prepare(
+    "SELECT id,branch_name FROM branches
+     WHERE pharmacy_id=? ORDER BY branch_name"
+);
+$stmt->bind_param('i',$pharmacyId);
+$stmt->execute();
+$r = $stmt->get_result();
+while ($row = $r->fetch_assoc()) $branches[] = $row;
+$stmt->close();
+
+$staff = [];
+$stmt = $conn->prepare(
+    "SELECT u.id,u.username,u.full_name,u.email,u.role,u.branch_id,
+            u.salary_amount,u.profile_pic,u.status,
+            COALESCE(u.is_online_visible,1) AS is_online_visible,
+            COALESCE(u.is_frozen,0) AS is_frozen,
+            b.branch_name
+     FROM users u
+     LEFT JOIN branches b
+       ON b.id=u.branch_id AND b.pharmacy_id=u.pharmacy_id
+     WHERE u.pharmacy_id=?
+     ORDER BY u.is_frozen DESC,u.full_name,u.username"
+);
+$stmt->bind_param('i',$pharmacyId);
+$stmt->execute();
+$r = $stmt->get_result();
+while ($row = $r->fetch_assoc()) $staff[] = $row;
+$stmt->close();
+
+$perms = [];
+$stmt = $conn->prepare(
+    "SELECT role,page_name,can_access,can_action
+     FROM role_page_permissions WHERE pharmacy_id=?"
+);
+$stmt->bind_param('i',$pharmacyId);
+$stmt->execute();
+$r = $stmt->get_result();
+while ($row = $r->fetch_assoc()) {
+    $perms[$row['role']][$row['page_name']] = [
+        'access'=>(int)$row['can_access'],
+        'action'=>(int)$row['can_action']
+    ];
+}
+$stmt->close();
+
+$total = count($staff);
+$active = $frozen = $online = 0;
+foreach ($staff as $u) {
+    if (strcasecmp((string)$u['status'],'Active') === 0) $active++;
+    if ((int)$u['is_frozen'] === 1) $frozen++;
+    if ((int)$u['is_online_visible'] === 1) $online++;
+}
+
+function eh(mixed $v): string
+{
+    return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+}
+
+function jsq(mixed $v): string
+{
+    return htmlspecialchars(
+        json_encode((string)$v, JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT),
+        ENT_QUOTES,
+        'UTF-8'
+    );
+}
+
+$notice = $_GET['success'] ?? '';
+$error = $_GET['error'] ?? '';
 ?>
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Staff Management | EchoTech POS</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Staff Management | EchoTech POS</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 <style>
-:root{--c:#202831;--c2:#2b3540;--bg:#f4f6f8;--w:#fff;--t:#1d252d;--m:#6d7782;--b:#dfe4e9;--blue:#246bfe;--bs:#eaf1ff;--green:#159a68;--gs:#e8f7f0;--red:#d94d61;--rs:#fff0f2;--yellow:#e7a72e;--ys:#fff6df;--side:250px}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:14px Inter,Arial,sans-serif}.sidebar{position:fixed;inset:0 auto 0 0;width:var(--side);background:var(--c);padding:17px 14px 72px;z-index:1000}.brand{display:flex;gap:11px;align-items:center;color:#fff;padding:4px 9px 18px;text-decoration:none}.brand-mark{width:38px;height:38px;border-radius:10px;background:var(--blue);display:grid;place-items:center}.brand strong{display:block;font-size:15px}.brand small{display:block;color:#aeb8c2;font-size:9px;text-transform:uppercase;letter-spacing:1px}.side-user{display:flex;gap:9px;align-items:center;background:#18212a;border:1px solid #35414d;border-radius:9px;padding:10px;margin:0 7px 14px}.avatar{width:33px;height:33px;border-radius:50%;background:#3b4857;color:#fff;display:grid;place-items:center;font-size:11px;font-weight:800}.side-user b{display:block;color:#fff;font-size:11px}.side-user span{color:#9ba7b3;font-size:9px}.cap{color:#8e9aa6;padding:12px 11px 7px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px}.nav{display:flex;flex-direction:column;gap:3px}.nav a{min-height:42px;border-radius:8px;display:flex;align-items:center;gap:11px;padding:0 12px;color:#bdc6cf;font-size:13px;font-weight:600;text-decoration:none}.nav a i{width:18px;text-align:center;color:#8996a3}.nav a:hover,.nav a.active{background:#344253;color:#fff}.nav a.active{box-shadow:inset 3px 0 var(--blue)}.logout{position:absolute;left:14px;right:14px;bottom:13px;color:#f17a8b!important}.main{margin-left:var(--side);min-height:100vh}.top{height:64px;position:sticky;top:0;z-index:900;background:#fff;border-bottom:1px solid var(--b);display:flex;align-items:center;justify-content:space-between;padding:0 28px}.top-left,.top-right{display:flex;align-items:center;gap:9px}.mobile{display:none}.top-title b{display:block;font-size:13px}.top-title span{font-size:10px;color:var(--m)}.search{width:220px;height:37px;border:1px solid var(--b);border-radius:8px;padding:0 12px;font-size:12px}.icon,.branch{height:37px;border:1px solid var(--b);border-radius:8px;background:#fff;color:#65717d;display:grid;place-items:center}.icon{width:37px}.branch{padding:0 11px;display:flex;gap:7px;font-size:11px}.branch i{color:var(--blue)}.content{max-width:1700px;margin:auto;padding:26px 28px 45px}.head{display:flex;justify-content:space-between;align-items:flex-end;gap:15px;margin-bottom:17px}.eyebrow{color:var(--blue);font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.1px}.head h1{margin:5px 0 0;font-size:27px;color:var(--c)}.head p{margin:6px 0 0;color:var(--m);font-size:12px}.actions{display:flex;gap:8px}.btnx{height:39px;padding:0 14px;border:1px solid var(--b);border-radius:8px;background:#fff;color:#52606c;font-size:12px;font-weight:700}.btnx.primary{background:var(--blue);border-color:var(--blue);color:#fff}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:14px}.cardx,.panel{background:#fff;border:1px solid var(--b);border-radius:12px;box-shadow:0 4px 18px rgba(31,40,49,.06)}.cardx{padding:16px;min-height:116px}.ct{display:flex;justify-content:space-between}.label{font-size:10px;font-weight:800;color:#74808b;text-transform:uppercase;letter-spacing:.8px}.ci{width:34px;height:34px;border-radius:8px;background:var(--bs);color:var(--blue);display:grid;place-items:center}.cardx.green .ci{background:var(--gs);color:var(--green)}.cardx.red .ci{background:var(--rs);color:var(--red)}.val{font-size:25px;font-weight:800;color:var(--c);margin-top:10px}.sub{font-size:10px;color:var(--m);margin-top:5px}.panel-head{min-height:59px;padding:0 17px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--b)}.phl{display:flex;align-items:center;gap:10px}.phi{width:33px;height:33px;border-radius:8px;background:var(--bs);color:var(--blue);display:grid;place-items:center}.panel h2{font-size:14px;margin:0;font-weight:800}.panel-head p{font-size:10px;color:var(--m);margin:3px 0 0}.count{background:#eef1f4;color:#66727d;border-radius:12px;padding:4px 8px;font-size:9px;font-weight:800}.tools{padding:14px 17px;background:#fbfcfd;border-bottom:1px solid var(--b);display:grid;grid-template-columns:minmax(220px,1.5fr) 190px 190px auto;gap:8px}.field,.tool{height:39px;border:1px solid var(--b);border-radius:8px;background:#fff;padding:0 11px;font-size:12px;color:#56626e}.staffwrap,.permwrap{overflow:auto}.staff{width:100%;border-collapse:collapse;min-width:1080px}.staff th{background:#f7f9fb;color:#6b7681;font-size:9px;text-transform:uppercase;letter-spacing:.5px;padding:12px;border-bottom:1px solid var(--b);white-space:nowrap}.staff td{padding:12px;border-bottom:1px solid #edf0f3;font-size:11px;vertical-align:middle}.member{display:flex;gap:10px;align-items:center;min-width:230px}.pic{width:42px;height:42px;border-radius:10px;object-fit:cover;border:1px solid #dbe1e6}.mn{font-size:12px;font-weight:800;color:var(--c)}.me{font-size:9px;color:#8a949e;margin-top:3px}.pill{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:5px 8px;font-size:9px;font-weight:800;white-space:nowrap}.role{background:#eef2f7;color:#596674}.ok{background:var(--gs);color:var(--green)}.off{background:#f1f3f5;color:#7d8790}.frozen{background:var(--rs);color:var(--red)}.clear{background:var(--gs);color:var(--green)}.rowactions{display:flex;gap:5px;justify-content:center;align-items:center}.inline-action{display:inline-flex;margin:0;padding:0}.act{height:31px;border:1px solid var(--b);border-radius:7px;background:#fff;color:#687580;padding:0 8px;font-size:9px;font-weight:800}.act:hover{color:var(--blue)}.act.freeze:hover{color:var(--red);background:var(--rs)}.act.unfreeze:hover{color:var(--green);background:var(--gs)}.act.delete:hover{color:var(--red);background:var(--rs)}.rolesbox{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:14px}.side{padding:15px}.roleitem{display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid #edf0f3}.roleitem:last-child{border-bottom:0}.ri{width:31px;height:31px;border-radius:8px;background:#f1f4f7;color:#65727f;display:grid;place-items:center}.rcopy{flex:1}.rcopy b{display:block;font-size:10px}.rcopy span{font-size:8px;color:var(--m)}.rnum{font-weight:800;font-size:11px}.permission{margin-top:14px;overflow:hidden}.legend{padding:10px 17px;border-bottom:1px solid var(--b);display:flex;gap:14px;font-size:9px;color:#71808c}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}.blue{background:var(--blue)}.green{background:var(--green)}.gray{background:#aab2ba}.psearch{padding:12px 17px;border-bottom:1px solid var(--b);display:flex;gap:8px}.psearch .field{max-width:300px}.matrix{width:100%;min-width:1350px;border-collapse:collapse}.matrix th,.matrix td{border-bottom:1px solid #edf0f3;padding:9px;text-align:center;font-size:9px}.matrix th{background:#f7f9fb;color:#697581;text-transform:uppercase;font-size:8px;position:sticky;top:0;z-index:2}.matrix th:first-child,.matrix td:first-child{position:sticky;left:0;background:#fff;text-align:left;z-index:3}.matrix th:first-child{background:#f7f9fb}.pagecell{display:flex;align-items:center;gap:8px;min-width:210px}.pi{width:29px;height:29px;border-radius:7px;background:var(--bs);color:var(--blue);display:grid;place-items:center}.pagecell b{display:block;font-size:10px;color:var(--c)}.pagecell span{font-size:8px;color:var(--m)}.pbtn{width:78px;height:28px;border-radius:15px;border:1px solid #dce2e7;background:#f3f5f7;color:#7a848e;font-size:7px;font-weight:900}.pbtn.access{background:var(--bs);border-color:#b8d3ff;color:var(--blue)}.pbtn.func{background:var(--gs);border-color:#bde5d2;color:var(--green)}.pbtn:disabled{opacity:.5;cursor:not-allowed}.modal-content{border:0;border-radius:15px;overflow:hidden}.modal-header{background:var(--c);color:#fff;border:0}.form-label{font-size:10px;font-weight:800;color:#56626d}.form-control,.form-select{height:40px;border-radius:8px;font-size:12px}.confirm{text-align:center;padding:25px}.confirm .ci{margin:0 auto 12px;width:55px;height:55px;background:var(--rs);color:var(--red)}.confirm h5{font-size:17px;font-weight:800}.confirm p{font-size:11px;color:var(--m);line-height:1.6}.toast{position:fixed;right:20px;top:82px;z-index:2000;min-width:290px;background:#fff;border:1px solid var(--b);box-shadow:0 12px 35px rgba(31,40,49,.14);padding:13px;border-radius:10px}.toast b{font-size:11px}.toast span{display:block;font-size:9px;color:var(--m);margin-top:3px}@media(max-width:1100px){.cards{grid-template-columns:repeat(2,1fr)}.rolesbox{grid-template-columns:1fr}}@media(max-width:950px){:root{--side:0px}.sidebar{transform:translateX(-100%);transition:.2s;width:250px}.sidebar.open{transform:none}.mobile{display:grid;width:36px;height:36px;place-items:center;border:1px solid var(--b);border-radius:8px;background:#fff}.search{display:none}.top{padding:0 16px}.content{padding:20px 16px}.tools{grid-template-columns:1fr 1fr}}@media(max-width:600px){.cards{grid-template-columns:1fr}.tools{grid-template-columns:1fr}.head{flex-direction:column;align-items:flex-start}.actions{width:100%}.actions .btnx{flex:1}.top-branch{display:none}.head h1{font-size:23px}}
-</style></head><body>
-<aside class="sidebar" id="sidebar"><a class="brand" href="admin_dashboard.php"><span class="brand-mark"><i class="fa-solid fa-capsules"></i></span><span><strong>ECHOTECH POS</strong><small>Administration</small></span></a><div class="side-user"><div class="avatar"><?php echo h(strtoupper(substr($user,0,1)));?></div><div><b><?php echo h($user);?></b><span><?php echo h($roleNow?:'Admin');?></span></div></div><div class="cap">Workspace</div><nav class="nav"><a href="admin_dashboard.php"><i class="fa-solid fa-chart-pie"></i>Dashboard</a><a class="active" href="staff_management.php"><i class="fa-solid fa-user-shield"></i>Staff Management</a><a href="customers.php"><i class="fa-solid fa-users"></i>Customers</a><a href="sales_report.php"><i class="fa-solid fa-chart-line"></i>Sales Reports</a><a href="pharmacy_stock.php"><i class="fa-solid fa-boxes-stacked"></i>Inventory</a><a href="online_orders.php"><i class="fa-solid fa-bag-shopping"></i>Online Orders</a></nav><div class="cap">Administration</div><nav class="nav"><a href="suppliers.php"><i class="fa-solid fa-truck"></i>Suppliers</a><a href="expenses.php"><i class="fa-solid fa-wallet"></i>Expenses</a></nav><a class="nav logout" href="../logout.php"><i class="fa-solid fa-right-from-bracket"></i>Logout</a></aside>
-<main class="main"><header class="top"><div class="top-left"><button class="mobile" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button><div class="top-title"><b>Staff & Access Control</b><span>Manage accounts, security and POS page permissions</span></div></div><div class="top-right"><input id="globalSearch" class="search" placeholder="Search staff..."><div class="branch"><i class="fa-solid fa-building"></i><?php echo count($branches);?> branch<?php echo count($branches)==1?'':'es';?></div><button class="icon"><i class="fa-regular fa-bell"></i></button><a class="icon" href="admin_dashboard.php"><i class="fa-solid fa-house"></i></a></div></header>
-<section class="content"><div class="head"><div><div class="eyebrow">Administration</div><h1>Staff Management</h1><p>Manage staff accounts, roles, security and access to every POS page.</p></div><div class="actions"><button class="btnx" onclick="window.print()"><i class="fa-solid fa-print me-1"></i>Print</button><button class="btnx primary" data-bs-toggle="modal" data-bs-target="#add"><i class="fa-solid fa-user-plus me-1"></i>Register Staff</button></div></div>
-<div class="cards"><div class="cardx"><div class="ct"><span class="label">Total Staff</span><span class="ci"><i class="fa-solid fa-users"></i></span></div><div class="val"><?php echo $total;?></div><div class="sub">Staff accounts in this pharmacy</div></div><div class="cardx green"><div class="ct"><span class="label">Active Staff</span><span class="ci"><i class="fa-solid fa-user-check"></i></span></div><div class="val"><?php echo $active;?></div><div class="sub"><?php echo $activePct;?>% currently active</div></div><div class="cardx"><div class="ct"><span class="label">Online Visibility</span><span class="ci"><i class="fa-solid fa-eye"></i></span></div><div class="val"><?php echo $online;?></div><div class="sub">Staff marked visible online</div></div><div class="cardx red"><div class="ct"><span class="label">Frozen Accounts</span><span class="ci"><i class="fa-solid fa-snowflake"></i></span></div><div class="val"><?php echo $frozen;?></div><div class="sub">Accounts currently frozen</div></div></div>
-<section class="panel"><div class="panel-head"><div class="phl"><div class="phi"><i class="fa-solid fa-id-card"></i></div><div><h2>Staff Directory</h2><p>Search and manage every staff account.</p></div></div><span class="count" id="count"><?php echo $total;?> Records</span></div><div class="tools"><input id="search" class="field" placeholder="Search name, username or email..."><select id="roleFilter" class="field"><option value="">All Roles</option><?php foreach($roles as $r):?><option value="<?php echo h(strtolower($r));?>"><?php echo h($r);?></option><?php endforeach;?></select><select id="branchFilter" class="field"><option value="">All Branches</option><?php foreach($branches as $b):?><option value="<?php echo (int)$b['id'];?>"><?php echo h($b['branch_name']);?></option><?php endforeach;?></select><button class="tool" onclick="resetFilters()">Reset</button></div><div class="staffwrap"><table class="staff"><thead><tr><th>Staff Member</th><th>Role</th><th>Branch</th><th>Status</th><th>Online</th><th>Security</th><th>Salary</th><th>Actions</th></tr></thead><tbody><?php foreach($staff as $u):$id=(int)$u['id'];$name=trim($u['full_name']?:$u['username']);$fr=(int)$u['is_frozen']===1;$on=(int)$u['is_online_visible']===1;$ac=strcasecmp((string)$u['status'],'Active')===0;$pic='../uploads/staff/'.rawurlencode($u['profile_pic']?:'default_avatar.png');?><tr class="staffrow" data-search="<?php echo h(strtolower($name.' '.$u['username'].' '.$u['email']));?>" data-role="<?php echo h(strtolower($u['role']?:'General'));?>" data-branch="<?php echo (int)$u['branch_id'];?>"><td><div class="member"><img class="pic" src="<?php echo h($pic);?>"><div><div class="mn"><?php echo h($name);?></div><div class="me">@<?php echo h($u['username']);?><?php echo $u['email']?' Â· '.h($u['email']):'';?></div></div></div></td><td><span class="pill role"><i class="fa-solid <?php echo h($icons[$u['role']]??'fa-user');?>"></i><?php echo h($u['role']?:'General');?></span></td><td><?php echo h($u['branch_name']?:'Unassigned');?></td><td><span class="pill <?php echo $ac?'ok':'off';?>"><?php echo $ac?'Active':'Inactive';?></span></td><td><span class="pill <?php echo $on?'ok':'off';?>"><?php echo $on?'Live':'Off';?></span></td><td><span class="pill <?php echo $fr?'frozen':'clear';?>"><?php echo $fr?'Frozen':'Clear';?></span></td><td><b>K<?php echo number_format((float)$u['salary_amount'],2);?></b></td><td><div class="rowactions"><?php if($id!==$current_user_id):?><form method="post" class="inline-action"><input type="hidden" name="csrf_token" value="<?php echo h($csrf);?>"><input type="hidden" name="staff_action" value="<?php echo $fr?'unfreeze':'freeze';?>"><input type="hidden" name="user_id" value="<?php echo $id;?>"><button type="submit" class="act <?php echo $fr?'unfreeze':'freeze';?>"><?php echo $fr?'Unfreeze':'Freeze';?></button></form><form method="post" class="inline-action"><input type="hidden" name="csrf_token" value="<?php echo h($csrf);?>"><input type="hidden" name="staff_action" value="<?php echo $on?'offline':'online';?>"><input type="hidden" name="user_id" value="<?php echo $id;?>"><button type="submit" class="act"><?php echo $on?'Offline':'Online';?></button></form><form method="post" class="inline-action delete-form"><input type="hidden" name="csrf_token" value="<?php echo h($csrf);?>"><input type="hidden" name="staff_action" value="delete"><input type="hidden" name="user_id" value="<?php echo $id;?>"><button type="submit" class="act delete" title="Delete staff account"><i class="fa-solid fa-trash"></i></button></form><?php else:?><span class="act" style="opacity:.45"><i class="fa-solid fa-lock"></i></span><?php endif;?></div></td></tr><?php endforeach;?></tbody></table></div></section>
-<div class="rolesbox"><section class="panel side"><div class="side-title"><b>Team Composition</b></div><?php foreach($roles as $r):?><div class="roleitem"><div class="ri"><i class="fa-solid <?php echo h($icons[$r]);?>"></i></div><div class="rcopy"><b><?php echo h($r);?></b><span>Staff accounts</span></div><div class="rnum"><?php echo (int)($roleCounts[$r]??0);?></div></div><?php endforeach;?></section><section class="panel side"><div class="side-title"><b>Security Overview</b></div><div style="padding:14px;background:#fff0f2;border:1px solid #f2d1d7;border-radius:9px;margin-bottom:10px"><small>FROZEN ACCOUNTS</small><div style="font-size:25px;font-weight:800;color:var(--red)"><?php echo $frozen;?></div><span style="font-size:9px;color:#b16a75">Frozen accounts cannot continue authenticated use.</span></div><div style="padding:14px;background:#e8f7f0;border:1px solid #c8e9d9;border-radius:9px"><small>ONLINE VISIBILITY</small><div style="font-size:25px;font-weight:800;color:var(--green)"><?php echo $online;?></div><span style="font-size:9px;color:#4c8f78">Staff marked visible online.</span></div></section></div>
-<section class="permission panel"><div class="panel-head"><div class="phl"><div class="phi"><i class="fa-solid fa-shield-halved"></i></div><div><h2>Page Access & Functions</h2><p>For each page, control who may open it and who may perform functions.</p></div></div><span class="count"><?php echo count($pages);?> Pages</span></div><div class="legend"><span><i class="dot blue"></i>Access</span><span><i class="dot green"></i>Functions</span><span><i class="dot gray"></i>Functions disabled until Access is enabled</span><span style="margin-left:auto">Admin has unrestricted access.</span></div><div class="psearch"><input id="pageSearch" class="field" placeholder="Search POS page..."></div><div class="permwrap"><table class="matrix"><thead><tr><th>POS Page</th><?php foreach($roles as $r):?><th><?php echo h($r);?></th><?php endforeach;?></tr></thead><tbody><?php foreach($pages as $p):?><tr class="pagerow" data-page="<?php echo h(strtolower($p));?>"><td><div class="pagecell"><div class="pi"><i class="fa-solid <?php echo h($pageIcons[$p]);?>"></i></div><div><b><?php echo h($p);?></b><span>Access + Functions</span></div></div></td><?php foreach($roles as $r):$v=$perms[$r][$p]??['access'=>0,'action'=>0];$a=$v['access']===1;$f=$v['action']===1;?><td><div style="display:flex;flex-direction:column;align-items:center;gap:4px"><form method="post"><input type="hidden" name="csrf_token" value="<?php echo h($csrf);?>"><input type="hidden" name="role" value="<?php echo h($r);?>"><input type="hidden" name="page" value="<?php echo h($p);?>"><button name="perm" value="access" class="pbtn <?php echo $a?'access':'';?>"><?php echo $a?'âœ“ ACCESS':'ðŸ”’ DENIED';?></button></form><form method="post"><input type="hidden" name="csrf_token" value="<?php echo h($csrf);?>"><input type="hidden" name="role" value="<?php echo h($r);?>"><input type="hidden" name="page" value="<?php echo h($p);?>"><button name="perm" value="function" class="pbtn <?php echo $f?'func':'';?>" <?php echo !$a?'disabled':'';?>><?php echo $f?'âš¡ FUNCTIONS':'NO FUNCTIONS';?></button></form></div></td><?php endforeach;?></tr><?php endforeach;?></tbody></table></div></section></section></main>
+:root{
+ --c:#202831;--c2:#29343f;--bg:#f4f6f8;--white:#fff;--text:#1e2933;
+ --muted:#71808d;--border:#dfe5ea;--blue:#246bfe;--green:#159a68;
+ --red:#d94d61;--yellow:#e3a329;--shadow:0 5px 20px rgba(31,40,49,.07);
+ --side:250px
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Inter,Arial,sans-serif}
+.sidebar{position:fixed;inset:0 auto 0 0;width:var(--side);background:var(--c);color:#fff;
+ padding:18px 14px;display:flex;flex-direction:column;z-index:1000}
+.brand{display:flex;gap:10px;align-items:center;color:#fff;text-decoration:none;margin-bottom:20px}
+.brandmark{width:38px;height:38px;border-radius:10px;background:#fff;color:var(--c);
+ display:grid;place-items:center;font-size:17px}
+.brand b{display:block;font-size:14px}.brand small{color:#9aa7b3;font-size:11px}
+.side-user{display:flex;gap:10px;align-items:center;background:#151d25;border-radius:10px;padding:10px;margin-bottom:17px}
+.avatar{width:34px;height:34px;border-radius:50%;background:#344250;display:grid;place-items:center;font-weight:800}
+.side-user b{display:block;font-size:12px}.side-user span{display:block;color:#9aa7b3;font-size:10px}
+.cap{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#71808d;margin:8px 9px}
+.nav a{display:flex;align-items:center;gap:10px;color:#aeb9c3;text-decoration:none;padding:9px 10px;border-radius:7px;font-size:12px}
+.nav a:hover,.nav a.active{background:#303c48;color:#fff}
+.nav i{width:18px;text-align:center}
+.logout{margin-top:auto!important;color:#ffb2bd!important}
+.main{margin-left:var(--side);min-height:100vh}
+.top{height:64px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;
+ justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:900}
+.top-title b{display:block;font-size:14px}.top-title span{font-size:11px;color:var(--muted)}
+.top-right{display:flex;align-items:center;gap:9px}
+.search{width:190px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;outline:none}
+.branch{font-size:11px;color:var(--muted);padding:7px 10px;border:1px solid var(--border);border-radius:8px}
+.content{padding:24px;max-width:1600px;margin:auto}
+.head{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:18px}
+.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--blue);font-weight:800}
+h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--muted);font-size:12px}
+.actions{display:flex;gap:8px}.btnx{border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700}
+.btnx.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.cardx{background:#fff;border:1px solid var(--border);border-radius:12px;padding:15px;box-shadow:var(--shadow)}
+.label{font-size:10px;color:var(--muted);font-weight:700}.val{font-size:24px;font-weight:800;margin-top:5px}
+.ct{display:flex;justify-content:space-between}.ci{width:30px;height:30px;border-radius:8px;background:#eef3f8;display:grid;place-items:center;color:#5c7184}
+.panel{background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:18px}
+.panel-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.panel-head h2{font-size:14px;margin:0}.panel-head p{margin:2px 0 0;color:var(--muted);font-size:10px}
+.filters{display:flex;gap:8px;padding:12px;border-bottom:1px solid var(--border)}
+.filters input,.filters select{font-size:11px;border:1px solid var(--border);border-radius:7px;padding:8px 9px;outline:none}
+.filters input{flex:1}.table-wrap{overflow:auto}.table{margin:0;font-size:11px;min-width:950px}
+.table th{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#75818c;background:#fafbfc;white-space:nowrap}
+.table td,.table th{padding:10px 9px;vertical-align:middle;border-color:#edf0f2}
+.staff-name{font-weight:800}.muted{font-size:10px;color:var(--muted)}
+.badge-role{display:inline-flex;padding:4px 7px;border-radius:999px;background:#edf2f7;color:#526171;font-size:9px;font-weight:800}
+.badge-green{background:#e7f7ef;color:#137b55}.badge-red{background:#fff0f2;color:#b53b50}
+.btn-smx{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 7px;font-size:10px;font-weight:700}
+.btn-smx:hover{background:#f4f6f8}.danger{color:var(--red)}.success{color:var(--green)}
+.permission-panel{overflow:hidden}
+.matrix-tools{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.matrix-scroll{overflow:auto;max-height:650px}
+.matrix{border-collapse:separate;border-spacing:0;min-width:1180px;width:100%;font-size:10px}
+.matrix th,.matrix td{border-right:1px solid #edf0f2;border-bottom:1px solid #edf0f2;padding:7px 6px;text-align:center;background:#fff}
+.matrix thead th{position:sticky;top:0;z-index:4;background:#f8fafb;color:#64717d;font-size:9px}
+.matrix .page-col{position:sticky;left:0;z-index:5;text-align:left;min-width:210px;background:#fff}
+.matrix thead .page-col{z-index:7;background:#f8fafb}
+.role-head{min-width:95px}.role-name{display:block;font-size:9px;font-weight:800}
+.cell-btn{width:30px;height:26px;border:1px solid #dbe2e7;border-radius:6px;background:#fff;color:#9aa5ae;cursor:pointer}
+.cell-btn.on{background:#e7f7ef;border-color:#b9e7d2;color:#12835a}
+.cell-btn.fn{background:#eaf1ff;border-color:#bfd2ff;color:#246bfe}
+.cell-btn:disabled{opacity:.45;cursor:not-allowed}
+.cell-label{display:block;font-size:7px;margin-top:2px;color:#7a8791}
+.modal-content{border:0;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.toastx{position:fixed;right:20px;bottom:20px;background:#202831;color:#fff;padding:12px 15px;border-radius:10px;
+ box-shadow:0 12px 30px rgba(0,0,0,.18);z-index:3000;font-size:12px}
+.toastx.err{background:#a83349}
+@media(max-width:1000px){.sidebar{transform:translateX(-100%);transition:.2s}.sidebar.open{transform:none}.main{margin-left:0}.cards{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:650px){.content{padding:14px}.top{padding:0 14px}.search,.branch{display:none}.head{align-items:flex-start;flex-direction:column}.cards{grid-template-columns:1fr 1fr}.actions{width:100%}.actions>*{flex:1}}
+</style>
+</head>
+<body>
 
-<div class="modal fade" id="add" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content"><form method="post" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="<?php echo h($csrf);?>"><input type="hidden" name="action" value="add"><div class="modal-header"><div><div class="modal-title">Register Staff Member</div><div style="font-size:9px;color:#aeb8c2">Create account, assign role and branch.</div></div><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row g-3"><div class="col-md-6"><label class="form-label">Username / Login</label><input name="username" class="form-control" required></div><div class="col-md-6"><label class="form-label">Full Name</label><input name="full_name" class="form-control" required></div><div class="col-md-6"><label class="form-label">Email</label><input type="email" name="email" class="form-control" required></div><div class="col-md-6"><label class="form-label">Password</label><input type="password" name="password" class="form-control" required></div><div class="col-md-6"><label class="form-label">Role</label><select name="role" class="form-select"><?php foreach($roles as $r):?><option><?php echo h($r);?></option><?php endforeach;?></select></div><div class="col-md-6"><label class="form-label">Monthly Salary</label><input type="number" step="0.01" min="0" name="salary" class="form-control" required></div><div class="col-12"><label class="form-label">Branch</label><select name="branch_id" class="form-select" required><option value="">Select branch...</option><?php foreach($branches as $b):?><option value="<?php echo (int)$b['id'];?>"><?php echo h($b['branch_name']);?></option><?php endforeach;?></select></div><div class="col-12"><label class="form-label">Profile Image</label><input type="file" name="profile_pic" class="form-control" accept="image/jpeg,image/png,image/webp,image/gif"></div></div></div><div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary">Create Account</button></div></form></div></div></div>
+<aside class="sidebar" id="sidebar">
+    <a class="brand" href="admin_dashboard.php">
+        <span class="brandmark"><i class="fa-solid fa-capsules"></i></span>
+        <span><b>ECHOTECH POS</b><small>Administration</small></span>
+    </a>
+    <div class="side-user">
+        <div class="avatar"><?=eh(strtoupper(substr(current_user(),0,1)))?></div>
+        <div><b><?=eh(current_user())?></b><span><?=eh(current_role() ?? 'Staff')?></span></div>
+    </div>
+    <div class="cap">Workspace</div>
+    <nav class="nav">
+        <a href="dashboard.php"><i class="fa-solid fa-chart-pie"></i>Dashboard</a>
+        <a class="active" href="staff_management.php"><i class="fa-solid fa-user-shield"></i>Staff Management</a>
+        <a href="customers.php"><i class="fa-solid fa-users"></i>Customers</a>
+        <a href="sales_report.php"><i class="fa-solid fa-chart-line"></i>Sales Reports</a>
+        <a href="pharmacy_stock.php"><i class="fa-solid fa-boxes-stacked"></i>Pharmacy Stock</a>
+        <a href="online_orders.php"><i class="fa-solid fa-bag-shopping"></i>Online Orders</a>
+    </nav>
+    <div class="cap">Administration</div>
+    <nav class="nav">
+        <a href="suppliers.php"><i class="fa-solid fa-truck"></i>Suppliers</a>
+        <a href="expenses.php"><i class="fa-solid fa-wallet"></i>Expenses</a>
+    </nav>
+    <nav class="nav"><a class="logout" href="../logout.php"><i class="fa-solid fa-right-from-bracket"></i>Logout</a></nav>
+</aside>
 
-<div class="modal fade" id="confirm" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="confirm"><div class="ci" id="confirmIcon"><i class="fa-solid fa-snowflake"></i></div><h5 id="confirmTitle">Confirm</h5><p id="confirmText"></p><div class="d-flex justify-content-center gap-2"><button class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><a id="confirmLink" class="btn btn-danger">Continue</a></div></div></div></div></div>
-<?php if($flash):?><div class="toast" id="toast"><b><?php echo $err?'Action not completed':'Staff Management';?></b><span><?php echo h($flash);?></span></div><?php endif;?>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script><script>
-function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open')}
-function filterStaff(){let q=document.getElementById('search').value.toLowerCase().trim(),r=document.getElementById('roleFilter').value,b=document.getElementById('branchFilter').value,n=0;document.querySelectorAll('.staffrow').forEach(x=>{let ok=(!q||x.dataset.search.includes(q))&&(!r||x.dataset.role===r)&&(!b||x.dataset.branch===b);x.style.display=ok?'':'none';if(ok)n++});document.getElementById('count').textContent=n+' Record'+(n===1?'':'s')}
-function resetFilters(){document.getElementById('search').value='';document.getElementById('roleFilter').value='';document.getElementById('branchFilter').value='';filterStaff()}
-function filterPages(){let q=document.getElementById('pageSearch').value.toLowerCase().trim();document.querySelectorAll('.pagerow').forEach(x=>x.style.display=!q||x.dataset.page.includes(q)?'':'none')}
-document.getElementById('search')?.addEventListener('input',filterStaff);document.getElementById('roleFilter')?.addEventListener('change',filterStaff);document.getElementById('branchFilter')?.addEventListener('change',filterStaff);document.getElementById('globalSearch')?.addEventListener('input',e=>{document.getElementById('search').value=e.target.value;filterStaff()});document.getElementById('pageSearch')?.addEventListener('input',filterPages);document.querySelectorAll('.delete-form').forEach(function(f){f.addEventListener('submit',function(e){if(!window.confirm('Delete this staff account permanently? This cannot be undone.'))e.preventDefault();});});setTimeout(()=>document.getElementById('toast')?.remove(),4500);
-</script></body></html>
+<main class="main">
+<header class="top">
+    <div class="top-title">
+        <b>Staff & Access Control</b>
+        <span>Accounts, roles, page access and functions</span>
+    </div>
+    <div class="top-right">
+        <input id="globalSearch" class="search" placeholder="Search staff...">
+        <div class="branch"><i class="fa-solid fa-building me-1"></i><?=count($branches)?> branch<?=count($branches)===1?'':'es'?></div>
+        <button class="btn-smx" type="button" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
+    </div>
+</header>
+
+<section class="content">
+<div class="head">
+    <div>
+        <div class="eyebrow">Administration</div>
+        <h1>Staff Management</h1>
+        <p>Every POS page is available by default. You can restrict access or functions at any time.</p>
+    </div>
+    <div class="actions">
+        <button class="btnx" type="button" onclick="window.print()"><i class="fa-solid fa-print me-1"></i>Print</button>
+        <button class="btnx primary" type="button" data-bs-toggle="modal" data-bs-target="#addStaff">
+            <i class="fa-solid fa-user-plus me-1"></i>Register Staff
+        </button>
+    </div>
+</div>
+
+<div class="cards">
+    <div class="cardx"><div class="ct"><span class="label">Total Staff</span><span class="ci"><i class="fa-solid fa-users"></i></span></div><div class="val"><?=$total?></div></div>
+    <div class="cardx"><div class="ct"><span class="label">Active</span><span class="ci"><i class="fa-solid fa-user-check"></i></span></div><div class="val"><?=$active?></div></div>
+    <div class="cardx"><div class="ct"><span class="label">Frozen</span><span class="ci"><i class="fa-solid fa-snowflake"></i></span></div><div class="val"><?=$frozen?></div></div>
+    <div class="cardx"><div class="ct"><span class="label">Online Visibility</span><span class="ci"><i class="fa-solid fa-globe"></i></span></div><div class="val"><?=$online?></div></div>
+</div>
+
+<section class="panel">
+<div class="panel-head">
+    <div><h2>Staff Directory</h2><p>Manage accounts without leaving this page.</p></div>
+    <span class="muted" id="staffCount"><?=count($staff)?> Records</span>
+</div>
+<div class="filters">
+    <input id="staffSearch" placeholder="Search name, username, email or role...">
+    <select id="roleFilter"><option value="">All roles</option><?php foreach($roles as $r):?><option><?=eh($r)?></option><?php endforeach;?></select>
+    <select id="branchFilter"><option value="">All branches</option><?php foreach($branches as $b):?><option value="<?=eh($b['id'])?>"><?=eh($b['branch_name'])?></option><?php endforeach;?></select>
+</div>
+<div class="table-wrap">
+<table class="table" id="staffTable">
+<thead><tr><th>Staff</th><th>Role</th><th>Branch</th><th>Status</th><th>Online</th><th>Security</th><th class="text-end">Actions</th></tr></thead>
+<tbody>
+<?php foreach($staff as $u): 
+ $search=strtolower(($u['full_name']??'').' '.($u['username']??'').' '.($u['email']??'').' '.($u['role']??''));
+?>
+<tr class="staffrow" data-search="<?=eh($search)?>" data-role="<?=eh($u['role'])?>" data-branch="<?=eh($u['branch_id'])?>">
+<td><div class="staff-name"><?=eh($u['full_name'] ?: $u['username'])?></div><div class="muted"><?=eh($u['username'])?> Â· <?=eh($u['email'])?></div></td>
+<td><span class="badge-role"><?=eh($u['role'] ?: 'General')?></span></td>
+<td><?=eh($u['branch_name'] ?: 'Unassigned')?></td>
+<td><?php if(strcasecmp((string)$u['status'],'Active')===0):?><span class="badge-role badge-green">Active</span><?php else:?><span class="badge-role badge-red"><?=eh($u['status'])?></span><?php endif;?></td>
+<td><?=((int)$u['is_online_visible']===1)?'<span class="success fw-bold">Visible</span>':'<span class="muted">Hidden</span>'?></td>
+<td><?=((int)$u['is_frozen']===1)?'<span class="badge-role badge-red">Frozen</span>':'<span class="badge-role badge-green">Active</span>'?></td>
+<td class="text-end">
+<?php if((int)$u['id'] !== $currentUserId): ?>
+<form method="post" class="d-inline staff-action-form" data-confirm="<?=((int)$u['is_frozen']===1?'Unfreeze':'Freeze').' '.eh($u['full_name'] ?: $u['username']).'?'?>">
+<input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
+<input type="hidden" name="form_action" value="staff_action">
+<input type="hidden" name="staff_action" value="<?=((int)$u['is_frozen']===1?'unfreeze':'freeze')?>">
+<input type="hidden" name="user_id" value="<?=((int)$u['id'])?>">
+<button class="btn-smx" type="submit" title="<?=((int)$u['is_frozen']===1?'Unfreeze':'Freeze')?>"><i class="fa-solid <?=((int)$u['is_frozen']===1?'fa-unlock':'fa-snowflake')?>"></i></button>
+</form>
+<form method="post" class="d-inline staff-action-form" data-confirm="<?=((int)$u['is_online_visible']===1?'Hide':'Show').' online visibility for '.eh($u['full_name'] ?: $u['username']).'?'?>">
+<input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
+<input type="hidden" name="form_action" value="staff_action">
+<input type="hidden" name="staff_action" value="<?=((int)$u['is_online_visible']===1?'offline':'online')?>">
+<input type="hidden" name="user_id" value="<?=((int)$u['id'])?>">
+<button class="btn-smx" type="submit"><i class="fa-solid fa-globe"></i></button>
+</form>
+<form method="post" class="d-inline staff-action-form" data-danger="1" data-confirm="Permanently delete <?=eh($u['full_name'] ?: $u['username'])?>? This cannot be undone.">
+<input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
+<input type="hidden" name="form_action" value="staff_action">
+<input type="hidden" name="staff_action" value="delete">
+<input type="hidden" name="user_id" value="<?=((int)$u['id'])?>">
+<button class="btn-smx danger" type="submit"><i class="fa-solid fa-trash"></i></button>
+</form>
+<?php else: ?><span class="muted">Current account</span><?php endif;?>
+</td></tr>
+<?php endforeach;?>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="panel permission-panel">
+<div class="panel-head">
+    <div><h2>Page Access & Functions</h2><p>Access opens the page. Functions allow actions inside the page. All are ON by default.</p></div>
+    <div class="matrix-tools">
+        <button type="button" class="btn-smx" onclick="bulkRole('all')">All Functions</button>
+        <button type="button" class="btn-smx" onclick="bulkRole('access_only')">Access Only</button>
+        <button type="button" class="btn-smx danger" onclick="bulkRole('none')">Disable Role</button>
+    </div>
+</div>
+<div class="filters">
+    <input id="pageSearch" placeholder="Search a POS page...">
+    <select id="matrixRole"><option value="">Choose role for bulk actions...</option><?php foreach($roles as $r):?><option><?=eh($r)?></option><?php endforeach;?></select>
+</div>
+<div class="matrix-scroll">
+<table class="matrix" id="matrix">
+<thead><tr><th class="page-col">POS Page</th><?php foreach($roles as $r):?><th class="role-head"><span class="role-name"><?=eh($r)?></span><small>Access / Function</small></th><?php endforeach;?></tr></thead>
+<tbody>
+<?php foreach($pages as $p): $icon=$pageIcons[$p]??'fa-file';?>
+<tr class="pagerow" data-page="<?=eh(strtolower($p))?>">
+<td class="page-col"><i class="fa-solid <?=$icon?> me-2 text-secondary"></i><strong><?=eh($p)?></strong><div class="muted"><?=eh($routes[$p]??'')?></div></td>
+<?php foreach($roles as $r):
+    $v=$perms[$r][$p]??['access'=>1,'action'=>1];
+    $access=(int)$v['access']; $action=(int)$v['action'];
+?>
+<td>
+<form method="post" class="d-inline permission-form">
+<input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
+<input type="hidden" name="form_action" value="permission">
+<input type="hidden" name="role" value="<?=eh($r)?>">
+<input type="hidden" name="page" value="<?=eh($p)?>">
+<input type="hidden" name="kind" value="access">
+<button type="submit" class="cell-btn <?=$access?'on':''?>" title="Toggle Access"><i class="fa-solid fa-eye"></i></button>
+</form>
+<form method="post" class="d-inline permission-form">
+<input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
+<input type="hidden" name="form_action" value="permission">
+<input type="hidden" name="role" value="<?=eh($r)?>">
+<input type="hidden" name="page" value="<?=eh($p)?>">
+<input type="hidden" name="kind" value="function">
+<button type="submit" class="cell-btn <?=$action?'fn':''?>" <?=$access?'':'disabled'?> title="Toggle Functions"><i class="fa-solid fa-bolt"></i></button>
+</form>
+</td>
+<?php endforeach;?>
+</tr>
+<?php endforeach;?>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+</main>
+
+<div class="modal fade" id="addStaff" tabindex="-1">
+<div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">
+<form method="post" enctype="multipart/form-data">
+<input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
+<input type="hidden" name="form_action" value="add_staff">
+<div class="modal-header"><h5 class="modal-title">Register Staff</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+<div class="modal-body"><div class="row g-3">
+<div class="col-md-6"><label class="form-label small fw-bold">Full Name</label><input name="full_name" class="form-control" required></div>
+<div class="col-md-6"><label class="form-label small fw-bold">Username</label><input name="username" class="form-control" required></div>
+<div class="col-md-6"><label class="form-label small fw-bold">Email</label><input name="email" type="email" class="form-control" required></div>
+<div class="col-md-6"><label class="form-label small fw-bold">Password</label><input name="password" type="password" class="form-control" required minlength="6"></div>
+<div class="col-md-6"><label class="form-label small fw-bold">Role</label><select name="role" class="form-select" required><?php foreach($roles as $r):?><option><?=eh($r)?></option><?php endforeach;?></select></div>
+<div class="col-md-6"><label class="form-label small fw-bold">Branch</label><select name="branch_id" class="form-select" required><option value="">Select branch</option><?php foreach($branches as $b):?><option value="<?=$b['id']?>"><?=eh($b['branch_name'])?></option><?php endforeach;?></select></div>
+<div class="col-md-6"><label class="form-label small fw-bold">Monthly Salary</label><input name="salary" type="number" min="0" step="0.01" class="form-control" value="0"></div>
+<div class="col-md-6"><label class="form-label small fw-bold">Profile Image</label><input name="profile_pic" type="file" accept="image/jpeg,image/png,image/webp,image/gif" class="form-control"></div>
+</div></div>
+<div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary">Create Account</button></div>
+</form></div></div></div>
+
+<?php if($notice || $error): ?>
+<div class="toastx <?=$error?'err':''?>" id="notice"><strong><?=$error?'Action failed':'Success'?></strong><div><?=eh($notice ?: $error)?></div></div>
+<?php endif;?>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function(){
+'use strict';
+
+window.toggleSidebar=function(){
+ document.getElementById('sidebar')?.classList.toggle('open');
+};
+
+const search=document.getElementById('staffSearch');
+const global=document.getElementById('globalSearch');
+const role=document.getElementById('roleFilter');
+const branch=document.getElementById('branchFilter');
+const count=document.getElementById('staffCount');
+
+function filterStaff(){
+ const q=(search?.value||'').toLowerCase().trim();
+ const r=role?.value||'';
+ const b=branch?.value||'';
+ let n=0;
+ document.querySelectorAll('.staffrow').forEach(row=>{
+   const ok=(!q||row.dataset.search.includes(q))&&(!r||row.dataset.role===r)&&(!b||row.dataset.branch===b);
+   row.style.display=ok?'':'none'; if(ok)n++;
+ });
+ if(count) count.textContent=n+' Record'+(n===1?'':'s');
+}
+search?.addEventListener('input',filterStaff);
+role?.addEventListener('change',filterStaff);
+branch?.addEventListener('change',filterStaff);
+global?.addEventListener('input',()=>{if(search){search.value=global.value;filterStaff();}});
+
+document.getElementById('pageSearch')?.addEventListener('input',function(){
+ const q=this.value.toLowerCase().trim();
+ document.querySelectorAll('.pagerow').forEach(row=>{
+   row.style.display=!q||row.dataset.page.includes(q)?'':'none';
+ });
+});
+
+document.querySelectorAll('.staff-action-form').forEach(form=>{
+ form.addEventListener('submit',function(e){
+   const msg=this.dataset.confirm||'Confirm this action?';
+   if(!window.confirm(msg)) e.preventDefault();
+ });
+});
+
+document.querySelectorAll('.permission-form').forEach(form=>{
+ form.addEventListener('submit',function(){
+   const btn=this.querySelector('button[type="submit"]');
+   if(btn){btn.disabled=true;btn.style.opacity='.6';}
+ });
+});
+
+window.bulkRole=function(mode){
+ const role=document.getElementById('matrixRole')?.value;
+ if(!role){alert('Choose a role first.');return;}
+ const labels={all:'enable Access and Functions for',access_only:'enable Access for',none:'disable Access and Functions for'};
+ if(!confirm('Confirm: '+labels[mode]+' '+role+' on all POS pages?')) return;
+ const f=document.createElement('form');
+ f.method='post';
+ f.innerHTML=`<input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
+ <input type="hidden" name="form_action" value="matrix_bulk">
+ <input type="hidden" name="role" value="">
+ <input type="hidden" name="mode" value="">`;
+ f.querySelector('[name="role"]').value=role;
+ f.querySelector('[name="mode"]').value=mode;
+ document.body.appendChild(f);f.submit();
+};
+
+setTimeout(()=>document.getElementById('notice')?.remove(),4500);
+})();
+</script>
+</body>
+</html>
