@@ -171,21 +171,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             staff_fail('Enable page Access before enabling Functions.');
         }
 
-        $newValue = ((int)$row[$field] === 1) ? 0 : 1;
+        /*
+         * IMPORTANT:
+         * Access and Function are deliberately independent switches.
+         *
+         * Access OFF  => page cannot be opened and Function is forced OFF.
+         * Access ON   => page may be opened.
+         * Function OFF => page may be viewed, but write/action operations
+         *                 must be rejected by the target PHP/AJAX handler.
+         * Function ON  => actions are allowed.
+         */
+        $currentValue = (int)$row[$field];
+        $newValue = $currentValue === 1 ? 0 : 1;
 
         if ($kind === 'access') {
+            /*
+             * Turning Access OFF must immediately revoke Functions as well.
+             * Turning Access ON never silently enables Functions.
+             */
             $stmt = $conn->prepare(
                 "UPDATE role_page_permissions
-                 SET can_access=?, can_action=IF(?=0,0,can_action)
+                 SET can_access=?,
+                     can_action=CASE WHEN ?=0 THEN 0 ELSE can_action END,
+                     updated_at=CURRENT_TIMESTAMP
                  WHERE pharmacy_id=? AND role=? AND page_name=?"
             );
-            $stmt->bind_param('iiiss', $newValue, $newValue, $pharmacyId, $role, $page);
+
+            if (!$stmt) {
+                staff_fail('Permission update could not be prepared.');
+            }
+
+            $stmt->bind_param(
+                'iiiss',
+                $newValue,
+                $newValue,
+                $pharmacyId,
+                $role,
+                $page
+            );
         } else {
+            /*
+             * Function can only be changed while Access is ON.
+             * This is also checked above so a forged POST cannot enable it
+             * while the page itself is disabled.
+             */
             $stmt = $conn->prepare(
-                "UPDATE role_page_permissions SET can_action=?
-                 WHERE pharmacy_id=? AND role=? AND page_name=?"
+                "UPDATE role_page_permissions
+                 SET can_action=?, updated_at=CURRENT_TIMESTAMP
+                 WHERE pharmacy_id=? AND role=? AND page_name=? AND can_access=1"
             );
-            $stmt->bind_param('iiss', $newValue, $pharmacyId, $role, $page);
+
+            if (!$stmt) {
+                staff_fail('Function permission update could not be prepared.');
+            }
+
+            $stmt->bind_param(
+                'iiss',
+                $newValue,
+                $pharmacyId,
+                $role,
+                $page
+            );
         }
 
         $ok = $stmt->execute();
@@ -647,7 +693,13 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 
 <section class="panel permission-panel">
 <div class="panel-head">
-    <div><h2>Page Access & Functions</h2><p>Access opens the page. Functions allow actions inside the page. All are ON by default.</p></div>
+    <div>
+        <h2>Page Access & Functions</h2>
+        <p>
+            Access controls whether the page can be opened.
+            Functions control whether the staff member can perform actions inside that page.
+        </p>
+    </div>
     <div class="matrix-tools">
         <button type="button" class="btn-smx" onclick="bulkRole('all')">All Functions</button>
         <button type="button" class="btn-smx" onclick="bulkRole('access_only')">Access Only</button>
@@ -676,7 +728,12 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <input type="hidden" name="role" value="<?=eh($r)?>">
 <input type="hidden" name="page" value="<?=eh($p)?>">
 <input type="hidden" name="kind" value="access">
-<button type="submit" class="cell-btn <?=$access?'on':''?>" title="Toggle Access"><i class="fa-solid fa-eye"></i></button>
+<button type="submit"
+        class="cell-btn <?=$access?'on':''?>"
+        title="<?=$access?'Disable page access':'Enable page access'?>"
+        aria-label="<?=$access?'Disable page access':'Enable page access'?>">
+    <i class="fa-solid fa-eye"></i>
+</button>
 </form>
 <form method="post" class="d-inline permission-form">
 <input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
@@ -684,7 +741,13 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <input type="hidden" name="role" value="<?=eh($r)?>">
 <input type="hidden" name="page" value="<?=eh($p)?>">
 <input type="hidden" name="kind" value="function">
-<button type="submit" class="cell-btn <?=$action?'fn':''?>" <?=$access?'':'disabled'?> title="Toggle Functions"><i class="fa-solid fa-bolt"></i></button>
+<button type="submit"
+        class="cell-btn <?=$action?'fn':''?>"
+        <?=$access?'':'disabled'?>
+        title="<?=$access?($action?'Disable functions':'Enable functions'):'Enable Access first'?>"
+        aria-label="<?=$access?($action?'Disable functions':'Enable functions'):'Enable Access first'?>">
+    <i class="fa-solid fa-bolt"></i>
+</button>
 </form>
 </td>
 <?php endforeach;?>
