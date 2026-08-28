@@ -214,16 +214,17 @@ function require_login(): void
      * ============================================================
      * AUTOMATIC PAGE ACCESS ENFORCEMENT
      * ============================================================
-     * Every dashboard page already calls require_login(). We use
-     * that existing call as the single enforcement point so the
-     * staff member cannot bypass Staff Management by typing the
-     * PHP filename directly into the browser.
+     * ONLY the exact POS dashboard route files listed in
+     * echotech_page_routes() are protected here.
      *
-     * IMPORTANT:
-     * - Login/auth endpoints are not in echotech_page_routes().
-     * - Unknown/action PHP files are not blocked here.
-     * - Admin keeps full access.
-     * - Missing permission rows remain ON by default.
+     * This deliberately does NOT affect:
+     *   logout.php
+     *   login_inc.php
+     *   action/*.php
+     *   API endpoints
+     *   includes
+     *   AJAX handlers
+     *   files not registered as POS pages
      */
     $currentPageFile = basename((string)($_SERVER['PHP_SELF'] ?? ''));
 
@@ -237,6 +238,10 @@ function require_login(): void
         }
     }
 
+    /*
+     * Only an exact route match can reach this check.
+     * Nothing outside echotech_page_routes() is touched.
+     */
     if ($pageName !== null && current_role() !== 'Admin') {
         if (!has_page_access($pageName)) {
             http_response_code(403);
@@ -365,7 +370,13 @@ function has_page_access(string $page): bool
 {
     global $conn;
 
-    require_login();
+    /*
+     * IMPORTANT:
+     * This function is a pure permission lookup.
+     * It must NOT call require_login(), because require_login()
+     * uses this function to enforce the current dashboard page.
+     */
+    if (!is_logged_in()) return false;
 
     if (current_role() === 'Admin') return true;
     if (!in_array($page, echotech_pages(), true)) return false;
@@ -409,7 +420,11 @@ function has_page_function_access(string $page): bool
 {
     global $conn;
 
-    require_login();
+    /*
+     * Pure permission lookup; authentication is handled by the
+     * caller (require_page_function / page action).
+     */
+    if (!is_logged_in()) return false;
 
     if (current_role() === 'Admin') return true;
     if (!in_array($page, echotech_pages(), true)) return false;
