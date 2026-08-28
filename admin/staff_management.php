@@ -335,8 +335,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = trim((string)($_POST['email'] ?? ''));
         $role = trim((string)($_POST['role'] ?? 'General'));
         $branchId = (int)($_POST['branch_id'] ?? 0);
-        $salary = (float)($_POST['salary'] ?? 0);
-        $password = (string)($_POST['password'] ?? '');
+                $password = (string)($_POST['password'] ?? '');
 
         if (!in_array($role, $roles, true)) $role = 'General';
 
@@ -397,12 +396,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             "INSERT INTO users
              (pharmacy_id,username,full_name,email,password,role,branch_id,
               salary_amount,profile_pic,status,is_frozen,is_online_visible)
-             VALUES (?,?,?,?,?,?,?,?,?,'Active',0,1)"
+             VALUES (?,?,?,?,?,?,?,0,?,'Active',0,1)"
         );
         $stmt->bind_param(
-            'isssssids',
+            'issssis',
             $pharmacyId,$username,$fullName,$email,$passwordHash,$role,
-            $branchId,$salary,$profilePic
+            $branchId,$profilePic
         );
 
         $ok = $stmt->execute();
@@ -638,6 +637,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
     <nav class="nav">
         <a href="admin_dashboard.php"><i class="fa-solid fa-chart-pie"></i>Dashboard</a>
         <a class="active" href="staff_management.php"><i class="fa-solid fa-user-shield"></i>Staff Management</a>
+        <a href="payroll.php"><i class="fa-solid fa-file-invoice-dollar"></i>Payroll</a>
         <a href="customers.php"><i class="fa-solid fa-users"></i>Customers</a>
         <a href="sales_report.php"><i class="fa-solid fa-chart-line"></i>Sales Reports</a>
         <a href="pharmacy_stock.php"><i class="fa-solid fa-boxes-stacked"></i>Pharmacy Stock</a>
@@ -704,7 +704,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
  $search=strtolower(($u['full_name']??'').' '.($u['username']??'').' '.($u['email']??'').' '.($u['role']??''));
 ?>
 <tr class="staffrow" data-search="<?=eh($search)?>" data-role="<?=eh($u['role'])?>" data-branch="<?=eh($u['branch_id'])?>">
-<td><div class="staff-name"><?=eh($u['full_name'] ?: $u['username'])?></div><div class="muted"><?=eh($u['username'])?> Â· <?=eh($u['email'])?></div></td>
+<td><div class="staff-name"><?=eh($u['full_name'] ?: $u['username'])?></div><div class="muted"><?=eh($u['username'])?> Ã‚Â· <?=eh($u['email'])?></div></td>
 <td><span class="badge-role"><?=eh($u['role'] ?: 'General')?></span></td>
 <td><?=eh($u['branch_name'] ?: 'Unassigned')?></td>
 <td><?php if(strcasecmp((string)$u['status'],'Active')===0):?><span class="badge-role badge-green">Active</span><?php else:?><span class="badge-role badge-red"><?=eh($u['status'])?></span><?php endif;?></td>
@@ -809,6 +809,13 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <div class="col-md-6"><label class="form-label small fw-bold">Branch</label><select name="branch_id" class="form-select" required><option value="">Select branch</option><?php foreach($branches as $b):?><option value="<?=$b['id']?>"><?=eh($b['branch_name'])?></option><?php endforeach;?></select></div>
 <div class="col-md-6"><label class="form-label small fw-bold">Monthly Salary</label><input name="salary" type="number" min="0" step="0.01" class="form-control" value="0"></div>
 <div class="col-md-6"><label class="form-label small fw-bold">Profile Image</label><input name="profile_pic" type="file" accept="image/jpeg,image/png,image/webp,image/gif" class="form-control"></div>
+<div class="col-12">
+    <div class="alert alert-light border mb-0 small">
+        <i class="fa-solid fa-circle-info text-primary me-1"></i>
+        Staff salary is managed exclusively from <strong>Payroll â†’ Salary Setup</strong>.
+        New staff accounts start with a salary of <strong>K0.00</strong> until Payroll sets the salary.
+    </div>
+</div>
 </div></div>
 <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary">Create Account</button></div>
 </form></div></div></div>
