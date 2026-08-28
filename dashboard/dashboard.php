@@ -47,6 +47,18 @@ if (file_exists("../includes/auth.php")) {
 }
 
 /*
+ * Dashboard links remain visible exactly as designed.
+ * Access OFF only disables navigation; no visual styling is changed.
+ */
+function echotech_dashboard_href(string $route, string $page): string
+{
+    if (function_exists('has_page_access') && !has_page_access($page)) {
+        return 'href="' . htmlspecialchars($route, ENT_QUOTES, 'UTF-8') . '" aria-disabled="true" onclick="return false;"';
+    }
+    return 'href="' . htmlspecialchars($route, ENT_QUOTES, 'UTF-8') . '"';
+}
+
+/*
 |--------------------------------------------------------------------------
 | Pharmacy / Branch Context
 |--------------------------------------------------------------------------
@@ -333,7 +345,7 @@ require_once "../includes/head.php";
                 <div class="quick-actions-nav">
 
                     <a
-                        href="sell_now.php"
+                        <?= echotech_dashboard_href("sell_now.php", "Sale now"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-cash-multiple me-1"></i>
@@ -341,7 +353,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        href="lay_by_sell.php"
+                        <?= echotech_dashboard_href("lay_by_sell.php", "Lay by sale"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-credit-card-plus me-1"></i>
@@ -349,7 +361,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        href="expenses.php"
+                        <?= echotech_dashboard_href("expenses.php", "Expenses sales trend"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-chart-bar me-1"></i>
@@ -357,7 +369,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        href="sales_report.php"
+                        <?= echotech_dashboard_href("sales_report.php", "Sales report"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-chart-line me-1"></i>
@@ -365,7 +377,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        href="sales_trend.php"
+                        <?= echotech_dashboard_href("sales_trend.php", "Expenses sales trend"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-trending-up me-1"></i>
@@ -421,7 +433,7 @@ require_once "../includes/head.php";
                         <!-- TODAY'S TRANSACTIONS -->
 
                         <a
-                            href="today_transactions.php"
+                            <?= echotech_dashboard_href("today_transactions.php", "Today transaction"); ?>
                             class="card card-dash bg-tile-tx"
                         >
                             <span class="card-title">
@@ -442,7 +454,7 @@ require_once "../includes/head.php";
                         <!-- OUT OF STOCK -->
 
                         <a
-                            href="out_of_stock.php"
+                            <?= echotech_dashboard_href("out_of_stock.php", "Out of stock"); ?>
                             class="card card-dash bg-tile-outstock"
                         >
                             <span class="card-title">
@@ -463,7 +475,7 @@ require_once "../includes/head.php";
                         <!-- EXPIRED -->
 
                         <a
-                            href="expired_products.php"
+                            <?= echotech_dashboard_href("expired_products.php", "Expired products"); ?>
                             class="card card-dash bg-tile-expired"
                         >
                             <span class="card-title">
@@ -484,7 +496,7 @@ require_once "../includes/head.php";
                         <!-- CUSTOMER -->
 
                         <a
-                            href="customers.php"
+                            <?= echotech_dashboard_href("customers.php", "Customer"); ?>
                             class="card card-dash bg-tile-customer"
                         >
                             <span class="card-title">
@@ -500,7 +512,7 @@ require_once "../includes/head.php";
                         <!-- ONLINE PRESCRIPTION -->
 
                         <a
-                            href="online_manager.php"
+                            <?= echotech_dashboard_href("online_manager.php", "Online manager"); ?>
                             class="card card-dash bg-tile-online"
                         >
                             <span class="card-title">
@@ -624,7 +636,7 @@ require_once "../includes/head.php";
                             <!-- PENDING ORDERS -->
 
                             <a
-                                href="purchase_orders_list.php"
+                                <?= echotech_dashboard_href("purchase_orders_list.php", "Purchases order list"); ?>
                                 class="list-group-item d-flex justify-content-between align-items-center py-2 border-0"
                             >
 
@@ -659,7 +671,7 @@ require_once "../includes/head.php";
         ================================================== -->
         <div class="online-orders-shortcut-wrap">
             <a
-                href="online_orders.php"
+                <?= echotech_dashboard_href("online_orders.php", "Online orders"); ?>
                 class="online-orders-shortcut"
                 aria-label="Open Online Orders"
             >
