@@ -216,6 +216,7 @@ if (table_exists($conn,'store_items')) {
         );
     }
 }
+$admin_page_title = 'Executive Overview';
 ?>
 <!doctype html>
 <html lang="en">
@@ -271,7 +272,7 @@ a{text-decoration:none;color:inherit}
 
 .app{min-height:100vh;background:var(--bg)}
 
-.sidebar{
+.legacy-sidebar{
     position:fixed;left:0;top:0;bottom:0;width:var(--sidebar);
     background:var(--charcoal);
     border-right:1px solid #161d24;
@@ -348,7 +349,7 @@ a{text-decoration:none;color:inherit}
 }
 
 .main{margin-left:var(--sidebar);min-height:100vh}
-.topbar{
+.legacy-topbar{
     height:64px;border-bottom:1px solid var(--border);
     background:#fff;display:flex;align-items:center;
     justify-content:space-between;padding:0 28px;
@@ -572,79 +573,13 @@ a{text-decoration:none;color:inherit}
 
 <body>
 <div class="app">
+<?php require_once __DIR__ . '/actions/admin_aside.php'; ?>
 
-<aside class="sidebar" id="sidebar">
-    <a class="brand" href="admin_dashboard.php">
-        <span class="brand-mark"><i class="fas fa-capsules"></i></span>
-        <span>
-            <strong><?php echo htmlspecialchars($pharmacy_name); ?></strong>
-            <small>POS ADMIN CONTROL</small>
-        </span>
-    </a>
 
-    <div class="side-caption">Workspace</div>
-    <nav class="nav">
-        <a class="active" href="admin_dashboard.php"><i class="fas fa-chart-pie"></i>Dashboard</a>
-        <?php if ($user_role === 'Admin'): ?>
-        <a href="staff_management.php"><i class="fas fa-users"></i>Staff Management</a>
-        <a href="manage_setup.php"><i class="fas fa-sliders"></i>System Setup</a>
-        <?php endif; ?>
-        <a href="sales_report.php"><i class="fas fa-chart-line"></i>Sales Analytics</a>
-        <a href="today_transactions.php"><i class="fas fa-receipt"></i>Transactions <span class="nav-badge"><?php echo (int)$total_orders; ?></span></a>
-        <a href="online_orders.php"><i class="fas fa-bag-shopping"></i>Online Orders</a>
-        <a href="pharmacy_stock.php"><i class="fas fa-boxes-stacked"></i>Inventory</a>
-        <a href="suppliers.php"><i class="fas fa-truck"></i>Suppliers</a>
-        <a href="customers.php"><i class="fas fa-user-group"></i>Customers</a>
-    </nav>
-
-    <div class="separator"></div>
-    <div class="side-caption">Network</div>
-    <nav class="nav">
-        <a href="#"><i class="fas fa-store"></i>Branches <span class="nav-badge"><?php echo (int)$branch_count; ?></span></a>
-        <a href="#"><i class="fas fa-file-invoice-dollar"></i>Purchase Orders</a>
-        <a href="#"><i class="fas fa-shield-halved"></i>Audit & Security</a>
-        <a href="#"><i class="fas fa-gear"></i>Configuration</a>
-    </nav>
-
-    <div class="sidebar-mini">
-        <div class="mini-title">Network Health</div>
-        <div class="mini-line"><span>Database</span><b>Online</b></div>
-        <div class="mini-progress"><span style="width:92%"></span></div>
-        <div class="mini-line"><span>Active branches</span><b><?php echo (int)$branch_count; ?></b></div>
-        <div class="mini-progress"><span style="width:78%"></span></div>
-        <div class="mini-line"><span>Sales records</span><b><?php echo number_format((int)$total_orders); ?></b></div>
-        <div class="mini-progress"><span style="width:66%"></span></div>
-    </div>
-
-    <div class="side-user">
-        <div class="user">
-            <div class="avatar"><?php echo strtoupper(substr($user_display_name ?: 'A',0,1)); ?></div>
-            <div class="user-copy">
-                <b><?php echo htmlspecialchars($user_display_name); ?></b>
-                <span><?php echo htmlspecialchars($user_role); ?> Â· Administrator</span>
-            </div>
-            <i class="fas fa-ellipsis"></i>
-        </div>
-        <a class="nav-link" href="../logout.php" style="display:flex;align-items:center;gap:9px;color:#e66b83;font-size:8px;padding:8px 9px">
-            <i class="fas fa-right-from-bracket"></i>Sign out
-        </a>
-    </div>
-</aside>
 
 <main class="main">
-<header class="topbar">
-    <div class="top-left">
-        <button class="mobile-btn" id="mobileToggle"><i class="fas fa-bars"></i></button>
-        <div class="crumb"><b>Admin Control Center</b> &nbsp;/&nbsp; Executive Overview</div>
-    </div>
-    <div class="top-right">
-        <input class="search-mini" placeholder="Search dashboard..." type="search">
-        <div class="branch"><i class="fas fa-layer-group"></i><?php echo (int)$branch_count; ?> Active</div>
-        <button class="top-icon" title="Refresh" onclick="location.reload()"><i class="fas fa-rotate"></i></button>
-        <button class="top-icon" title="Notifications"><i class="far fa-bell"></i></button>
-        <button class="top-icon" title="Account"><i class="far fa-user"></i></button>
-    </div>
-</header>
+<?php require_once __DIR__ . '/actions/admin_header.php'; ?>
+
 
 <section class="content">
 
@@ -697,7 +632,7 @@ a{text-decoration:none;color:inherit}
         <section class="reference-panel">
             <div class="panel-top">
                 <b>Central POS Intelligence</b>
-                <span><?php echo date('d M Y'); ?> Â· Live database view</span>
+                <span><?php echo date('d M Y'); ?> Ã‚Â· Live database view</span>
             </div>
 
             <div class="hero">
@@ -993,14 +928,6 @@ if(sales){
         }
     });
 }
-
-document.getElementById('mobileToggle')?.addEventListener('click',()=>{
-    document.getElementById('sidebar')?.classList.toggle('open');
-});
-document.querySelectorAll('.sidebar a').forEach(a=>{
-    a.addEventListener('click',()=>{
-        if(window.innerWidth<=850)document.getElementById('sidebar')?.classList.remove('open');
-    });
 });
 </script>
 </body>
