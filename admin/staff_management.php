@@ -105,12 +105,24 @@ function staff_fail(string $message): never
     staff_redirect($message, 'error');
 }
 
-/* ------------------------- Seed missing permissions ONCE ------------------------- */
+/* ------------------------- Permission defaults ------------------------- */
 /*
- * Existing choices are never overwritten. New page/role combinations start
- * with Access=YES and Functions=YES, exactly as requested.
+ * Every role/page starts with Access ON.
+ *
+ * Missing records are inserted ON.
+ * Existing legacy OFF records are migrated ON exactly once per pharmacy.
+ * After that, administrator changes are preserved and are NOT overwritten
+ * every time this page loads.
  */
+$conn->query("CREATE TABLE IF NOT EXISTS role_page_permission_defaults (
+    pharmacy_id INT NOT NULL,
+    migrated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (pharmacy_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+/* Create missing role/page combinations with Access ON. */
 $values = [];
+
 foreach ($roles as $r) {
     foreach ($pages as $p) {
         $values[] = "(
@@ -121,12 +133,50 @@ foreach ($roles as $r) {
         )";
     }
 }
+
 if ($values) {
     $conn->query(
         "INSERT IGNORE INTO role_page_permissions
          (pharmacy_id,role,page_name,can_access,can_action)
          VALUES ".implode(',', $values)
     );
+}
+
+/* One-time migration of the current legacy OFF records to ON. */
+$checkMigration = $conn->prepare(
+    "SELECT pharmacy_id
+     FROM role_page_permission_defaults
+     WHERE pharmacy_id=?
+     LIMIT 1"
+);
+$checkMigration->bind_param('i', $pharmacyId);
+$checkMigration->execute();
+$migrated = $checkMigration->get_result()->num_rows > 0;
+$checkMigration->close();
+
+if (!$migrated) {
+    $stmt = $conn->prepare(
+        "UPDATE role_page_permissions
+         SET can_access=1
+         WHERE pharmacy_id=?"
+    );
+
+    if ($stmt) {
+        $stmt->bind_param('i', $pharmacyId);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    $stmt = $conn->prepare(
+        "INSERT IGNORE INTO role_page_permission_defaults (pharmacy_id)
+         VALUES (?)"
+    );
+
+    if ($stmt) {
+        $stmt->bind_param('i', $pharmacyId);
+        $stmt->execute();
+        $stmt->close();
+    }
 }
 
 /* ------------------------- Actions ------------------------- */
@@ -561,7 +611,7 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 .matrix thead .page-col{z-index:7;background:#f8fafb}
 .role-head{min-width:95px}.role-name{display:block;font-size:9px;font-weight:800}
 .cell-btn{width:30px;height:26px;border:1px solid #dbe2e7;border-radius:6px;background:#fff;color:#9aa5ae;cursor:pointer}
-.cell-btn.on{background:#e7f7ef;border-color:#b9e7d2;color:#12835a}
+.cell-btn.on{background:#e7f7ef;border-color:#b9e7d2;color:#12835a}.cell-btn:not(.on){color:#a5afb8}
 .cell-btn.fn{background:#eaf1ff;border-color:#bfd2ff;color:#246bfe}
 .cell-btn:disabled{opacity:.45;cursor:not-allowed}
 .cell-label{display:block;font-size:7px;margin-top:2px;color:#7a8791}
@@ -700,7 +750,7 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
         </p>
     </div>
     <div class="matrix-tools">
-        <span class="muted">Access is enabled by default for new role/page entries.</span>
+        <span class="muted">All roles start with page access ON. Admin can turn access OFF at any time.</span>
     </div>
 </div>
 <div class="filters">
@@ -729,7 +779,7 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
         class="cell-btn <?=$access?'on':''?>"
         title="<?=$access?'Disable page access':'Enable page access'?>"
         aria-label="<?=$access?'Disable page access':'Enable page access'?>">
-    <i class="fa-solid fa-eye"></i>
+    <i class="fa-solid <?=$access?'fa-circle-check':'fa-circle-xmark'?>"></i>
 </button>
 </form>
 
