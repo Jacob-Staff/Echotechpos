@@ -276,6 +276,29 @@ $pending_orders_count = $po_res
     ? (int) (mysqli_fetch_assoc($po_res)['total'] ?? 0)
     : 0;
 
+ /*
+ |--------------------------------------------------------------------------
+ | ONLINE ORDERS
+ |--------------------------------------------------------------------------
+ | Pending + Processing customer orders for this pharmacy/branch.
+ |--------------------------------------------------------------------------
+ */
+$online_orders_res = safe_query(
+    $conn,
+    "
+    SELECT COUNT(*) AS total
+    FROM clients_orders
+    WHERE pharmacy_id = {$pharmacy_id}
+      AND branch_id = {$branch_id}
+      AND status IN ('Pending', 'Processing')
+    "
+);
+
+$online_orders_count = $online_orders_res
+    ? (int) (mysqli_fetch_assoc($online_orders_res)['total'] ?? 0)
+    : 0;
+
+
 
 /*
 |--------------------------------------------------------------------------
@@ -322,6 +345,61 @@ require_once "../includes/head.php";
                     >
                         Home
                     </div>
+
+                </div>
+
+                <div class="quick-actions-nav">
+
+                    <a
+                        <?= dashboard_link_attrs("sell_now.php", "Sale now"); ?>
+                        class="text-dark text-decoration-none small fw-semibold me-2"
+                    >
+                        <i class="mdi mdi-cash-multiple me-1"></i>
+                        Sell Now
+                    </a>
+
+                    <a
+                        <?= dashboard_link_attrs("lay_by_sell.php", "Lay by sale"); ?>
+                        class="text-dark text-decoration-none small fw-semibold me-2"
+                    >
+                        <i class="mdi mdi-credit-card-plus me-1"></i>
+                        Lay-By Sell
+                    </a>
+
+                    <a
+                        <?= dashboard_link_attrs("expenses.php", "Expenses"); ?>
+                        class="text-dark text-decoration-none small fw-semibold me-2"
+                    >
+                        <i class="mdi mdi-chart-bar me-1"></i>
+                        Expenses
+                    </a>
+
+                    <a
+                        <?= dashboard_link_attrs("sales_report.php", "Sales report"); ?>
+                        class="text-dark text-decoration-none small fw-semibold me-2"
+                    >
+                        <i class="mdi mdi-chart-line me-1"></i>
+                        Sales Report
+                    </a>
+
+                    <a
+                        <?= dashboard_link_attrs("sales_trend.php", "Sales trend"); ?>
+                        class="text-dark text-decoration-none small fw-semibold me-2"
+                    >
+                        <i class="mdi mdi-trending-up me-1"></i>
+                        Sales Trend
+                    </a>
+
+                    <a
+                        <?= dashboard_link_attrs(
+                            "add_patients.php?invoice=" . urlencode($invoice_number),
+                            "Add patient"
+                        ); ?>
+                        class="btn btn-purple btn-sm px-2 py-1 rounded-2 shadow-sm"
+                    >
+                        <i class="fas fa-plus me-1"></i>
+                        Add Patient
+                    </a>
 
                 </div>
 
@@ -596,6 +674,48 @@ require_once "../includes/head.php";
 
         </div>
 
+        <!-- =================================================
+             ONLINE ORDERS QUICK LINK
+             Pending + Processing incoming customer orders
+        ================================================== -->
+        <div class="online-orders-shortcut-wrap">
+
+            <a
+                <?= dashboard_link_attrs("online_orders.php", "Online orders"); ?>
+                class="online-orders-shortcut"
+                aria-label="Open Online Orders"
+            >
+
+                <span class="online-orders-icon">
+                    <i class="mdi mdi-cart-arrow-down"></i>
+                </span>
+
+                <span class="online-orders-copy">
+                    <span class="online-orders-title">
+                        Online Orders
+                    </span>
+                    <span class="online-orders-subtitle">
+                        Incoming customer orders
+                    </span>
+                </span>
+
+                <?php if ($online_orders_count > 0): ?>
+                    <span
+                        class="online-orders-badge"
+                        id="badge-online-orders"
+                    >
+                        <?php echo $online_orders_count; ?>
+                    </span>
+                <?php endif; ?>
+
+                <span class="online-orders-arrow">
+                    <i class="mdi mdi-chevron-right"></i>
+                </span>
+
+            </a>
+
+        </div>
+
     </div>
 
 </div>
@@ -612,8 +732,126 @@ if (file_exists("../includes/footer.php")) {
 
 
 <style>
-</style>
+<style>
+.quick-actions-nav {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 2px;
+}
 
+.quick-actions-nav a[aria-disabled="true"] {
+    pointer-events: none !important;
+}
+
+.online-orders-shortcut-wrap {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    margin-top: 18px;
+    padding: 0 12px 6px;
+}
+
+.online-orders-shortcut {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: min(100%, 285px);
+    min-height: 54px;
+    padding: 8px 10px;
+    border: 1px solid #dce5ef;
+    border-radius: 14px;
+    background: #fff;
+    color: #26384a;
+    text-decoration: none;
+    box-shadow: 0 5px 16px rgba(30, 50, 70, .07);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.online-orders-shortcut:hover {
+    color: #26384a;
+    text-decoration: none;
+    transform: translateY(-2px);
+    border-color: #c9d6e4;
+    box-shadow: 0 9px 22px rgba(30, 50, 70, .11);
+}
+
+.online-orders-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    border-radius: 11px;
+    background: #eef5ff;
+    color: #2878e8;
+    font-size: 17px;
+}
+
+.online-orders-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.15;
+}
+
+.online-orders-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: #1f3348;
+}
+
+.online-orders-subtitle {
+    margin-top: 4px;
+    font-size: 10px;
+    color: #7a8795;
+}
+
+.online-orders-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 23px;
+    height: 23px;
+    padding: 0 7px;
+    margin-left: auto;
+    border-radius: 999px;
+    background: #ff4d67;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow: 0 2px 7px rgba(255, 77, 103, .24);
+}
+
+.online-orders-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #a1adba;
+    font-size: 19px;
+}
+
+@media (max-width: 768px) {
+    .quick-actions-nav {
+        justify-content: flex-start;
+        width: 100%;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .online-orders-shortcut-wrap {
+        margin-top: 16px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+    .online-orders-shortcut {
+        width: 100%;
+    }
+}
+</style>
 
 <!-- ============================================================
      JAVASCRIPT
@@ -691,6 +929,52 @@ $(document).ready(function () {
     | Poll every 30 seconds
     |--------------------------------------------------------------------------
     */
+
+    function pollOnlineOrdersBadge() {
+
+        $.ajax({
+            url: 'fetch_online_order_count.php?_=' + Date.now(),
+            type: 'GET',
+            dataType: 'json',
+            cache: false,
+
+            success: function (data) {
+
+                if (!data || data.status !== 'success') {
+                    return;
+                }
+
+                const count = parseInt(data.count || 0, 10);
+                const shortcut = $('.online-orders-shortcut');
+
+                if (!shortcut.length) {
+                    return;
+                }
+
+                let badge = $('#badge-online-orders');
+
+                if (count > 0) {
+
+                    if (!badge.length) {
+                        badge = $('<span class="online-orders-badge" id="badge-online-orders"></span>');
+                        shortcut.append(badge);
+                    }
+
+                    badge.text(count);
+
+                } else if (badge.length) {
+                    badge.remove();
+                }
+            }
+        });
+    }
+
+    pollOnlineOrdersBadge();
+
+    setInterval(
+        pollOnlineOrdersBadge,
+        3000
+    );
 
     setInterval(
         pollDashboardAlerts,
