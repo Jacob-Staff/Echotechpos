@@ -636,7 +636,7 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
     </div>
     <div class="cap">Workspace</div>
     <nav class="nav">
-        <a href="dashboard.php"><i class="fa-solid fa-chart-pie"></i>Dashboard</a>
+        <a href="admin_dashboard.php"><i class="fa-solid fa-chart-pie"></i>Dashboard</a>
         <a class="active" href="staff_management.php"><i class="fa-solid fa-user-shield"></i>Staff Management</a>
         <a href="customers.php"><i class="fa-solid fa-users"></i>Customers</a>
         <a href="sales_report.php"><i class="fa-solid fa-chart-line"></i>Sales Reports</a>
