@@ -209,6 +209,42 @@ function require_login(): void
         header('Location: /login_inc.php?error=account_frozen');
         exit;
     }
+
+    /*
+     * ============================================================
+     * AUTOMATIC PAGE ACCESS ENFORCEMENT
+     * ============================================================
+     * Every dashboard page already calls require_login(). We use
+     * that existing call as the single enforcement point so the
+     * staff member cannot bypass Staff Management by typing the
+     * PHP filename directly into the browser.
+     *
+     * IMPORTANT:
+     * - Login/auth endpoints are not in echotech_page_routes().
+     * - Unknown/action PHP files are not blocked here.
+     * - Admin keeps full access.
+     * - Missing permission rows remain ON by default.
+     */
+    $currentPageFile = basename((string)($_SERVER['PHP_SELF'] ?? ''));
+
+    $pageRoutes = echotech_page_routes();
+    $pageName = null;
+
+    foreach ($pageRoutes as $configuredPageName => $routeFile) {
+        if ($routeFile === $currentPageFile) {
+            $pageName = $configuredPageName;
+            break;
+        }
+    }
+
+    if ($pageName !== null && current_role() !== 'Admin') {
+        if (!has_page_access($pageName)) {
+            http_response_code(403);
+            render_denied_message(
+                'Your role does not have access to this page.'
+            );
+        }
+    }
 }
 
 function require_pharmacy(): void
@@ -358,9 +394,9 @@ function has_page_access(string $page): bool
         $stmt->close();
 
         /*
-         * Missing permission records are allowed by default. This makes
-         * newly added POS pages usable immediately; the staff screen will
-         * create the explicit row when it is opened.
+         * Missing permission records are ON by default. This makes
+         * newly added POS pages usable immediately. An explicit row with
+         * can_access=0 is always respected.
          */
         return $row === null ? true : (int)$row['can_access'] === 1;
     } catch (Throwable $e) {
