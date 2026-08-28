@@ -36,32 +36,14 @@ function is_active_menu($page_name, $current_page) {
 }
 
 /*
- * Permission-aware link state.
- * IMPORTANT: links NEVER disappear. When Access is OFF they remain
- * visible but become dormant/disabled. The actual page itself is
- * protected by auth.php.
+ * Access control ONLY changes whether the existing link can be clicked.
+ * The menu item itself remains visible and its original UI is untouched.
  */
-function sidebar_page_allowed(string $page_name): bool {
+function echotech_link_enabled($page_name) {
     if (function_exists('has_page_access')) {
         return has_page_access($page_name);
     }
     return true;
-}
-
-function sidebar_link_class(string $page_name): string {
-    return sidebar_page_allowed($page_name) ? '' : ' dormant';
-}
-
-function sidebar_link_href(string $page_name, string $href): string {
-    return sidebar_page_allowed($page_name) ? $href : '#';
-}
-
-function sidebar_link_attrs(string $page_name): string {
-    if (sidebar_page_allowed($page_name)) {
-        return '';
-    }
-
-    return ' aria-disabled="true" title="Access disabled for your role"';
 }
 ?>
 
@@ -88,32 +70,32 @@ function sidebar_link_attrs(string $page_name): string {
                     </a>
                 </li>
                 <li class="sidebar-item mb-1">
-                    <a class="sidebar-link<?= is_active_menu('pharmacy_stock.php', $current_page); ?><?= sidebar_link_class('Pharmacy stock'); ?>" href="<?= htmlspecialchars(sidebar_link_href('Pharmacy stock', 'pharmacy_stock.php'), ENT_QUOTES, 'UTF-8'); ?>"<?= sidebar_link_attrs('Pharmacy stock'); ?>>
+                    <a class="sidebar-link <?= is_active_menu('pharmacy_stock.php', $current_page); ?>" href="pharmacy_stock.php" data-echotech-access="Pharmacy stock">
                         <i class="mdi mdi-package-variant me-2"></i><span>Pharmacy Stock</span>
                     </a>
                 </li>
                 <li class="sidebar-item mb-1">
-                    <a class="sidebar-link<?= is_active_menu('purchase_orders_list.php', $current_page); ?><?= sidebar_link_class('Purchases order list'); ?>" href="<?= htmlspecialchars(sidebar_link_href('Purchases order list', 'purchase_orders_list.php'), ENT_QUOTES, 'UTF-8'); ?>"<?= sidebar_link_attrs('Purchases order list'); ?>>
+                    <a class="sidebar-link <?= is_active_menu('purchase_orders_list.php', $current_page); ?>" href="purchase_orders_list.php" data-echotech-access="Purchases order list">
                         <i class="mdi mdi-cart-outline me-2"></i><span>Purchase-orders</span>
                     </a>
                 </li>
                 <li class="sidebar-item mb-1">
-                    <a class="sidebar-link<?= is_active_menu('suppliers.php', $current_page); ?><?= sidebar_link_class('Supplier'); ?>" href="<?= htmlspecialchars(sidebar_link_href('Supplier', 'suppliers.php'), ENT_QUOTES, 'UTF-8'); ?>"<?= sidebar_link_attrs('Supplier'); ?>>
+                    <a class="sidebar-link <?= is_active_menu('suppliers.php', $current_page); ?>" href="suppliers.php" data-echotech-access="Supplier">
                         <i class="mdi mdi-account-group me-2"></i><span>Suppliers</span>
                     </a>
                 </li>
                 <li class="sidebar-item mb-1">
-                    <a class="sidebar-link<?= is_active_menu('add_product.php', $current_page); ?><?= sidebar_link_class('Add Product'); ?>" href="<?= htmlspecialchars(sidebar_link_href('Add Product', 'add_product.php'), ENT_QUOTES, 'UTF-8'); ?>"<?= sidebar_link_attrs('Add Product'); ?>>
+                    <a class="sidebar-link <?= is_active_menu('add_product.php', $current_page); ?>" href="add_product.php" data-echotech-access="Add Product">
                         <i class="mdi mdi-plus-circle-outline me-2"></i><span>Add Product</span>
                     </a>
                 </li>
                 <li class="sidebar-item mb-1">
-                    <a class="sidebar-link<?= is_active_menu('stock_transfer.php', $current_page); ?><?= sidebar_link_class('Stock exchange'); ?>" href="<?= htmlspecialchars(sidebar_link_href('Stock exchange', 'stock_transfer.php'), ENT_QUOTES, 'UTF-8'); ?>"<?= sidebar_link_attrs('Stock exchange'); ?>>
+                    <a class="sidebar-link <?= is_active_menu('stock_transfer.php', $current_page); ?>" href="stock_transfer.php" data-echotech-access="Stock exchange">
                         <i class="fas fa-exchange-alt me-2"></i><span>Stock Transfers</span>
                     </a>
                 </li>
                 <li class="sidebar-item mb-1">
-                    <a class="sidebar-link<?= is_active_menu('shift_log.php', $current_page); ?><?= sidebar_link_class('Shift log'); ?>" href="<?= htmlspecialchars(sidebar_link_href('Shift log', 'shift_log.php'), ENT_QUOTES, 'UTF-8'); ?>"<?= sidebar_link_attrs('Shift log'); ?>>
+                    <a class="sidebar-link <?= is_active_menu('shift_log.php', $current_page); ?>" href="shift_log.php" data-echotech-access="Shift log">
                         <i class="fas fa-user-clock me-2"></i><span>Duty & Shift Log</span>
                     </a>
                 </li>
@@ -202,21 +184,6 @@ function sidebar_link_attrs(string $page_name): string {
     background-color: #334155;
 }
 
-/* Dormant links remain visible when Access is OFF */
-.sidebar-link.dormant {
-    color: #566575 !important;
-    background: transparent !important;
-    opacity: 0.55;
-    cursor: not-allowed;
-}
-.sidebar-link.dormant i {
-    color: #536171 !important;
-}
-.sidebar-link.dormant:hover {
-    color: #566575 !important;
-    background: transparent !important;
-}
-
 /* Restored Original Logout Button Styling */
 .logout-btn-container {
     padding: 0.75rem;
@@ -239,4 +206,38 @@ function sidebar_link_attrs(string $page_name): string {
 .logout-btn:hover {
     background-color: #e02d4c;
 }
+
+/* Access OFF: keep the original visual appearance exactly the same.
+   pointer-events are disabled and cursor is unchanged; JS also blocks keyboard activation. */
+.sidebar-link.echotech-disabled {
+    pointer-events: none !important;
+}
 </style>
+
+
+<script>
+(function () {
+    function applyEchoTechLinkAccess() {
+        document.querySelectorAll('[data-echotech-access]').forEach(function (link) {
+            var page = link.getAttribute('data-echotech-access');
+
+            // Server renders the state through this attribute.
+            // It is deliberately not represented visually.
+            <?php
+            foreach ([
+                'Pharmacy stock' => 'pharmacy_stock.php',
+                'Purchases order list' => 'purchase_orders_list.php',
+                'Supplier' => 'suppliers.php',
+                'Add Product' => 'add_product.php',
+                'Stock exchange' => 'stock_transfer.php',
+                'Shift log' => 'shift_log.php'
+            ] as $p => $r) {
+                echo "if (page === " . json_encode($p) . " && !echotech_link_enabled(" . var_export($p, true) . ")) { link.classList.add('echotech-disabled'); link.setAttribute('aria-disabled','true'); }\n";
+            }
+            ?>
+        });
+    }
+
+    applyEchoTechLinkAccess();
+})();
+</script>
