@@ -694,16 +694,13 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <section class="panel permission-panel">
 <div class="panel-head">
     <div>
-        <h2>Page Access & Functions</h2>
+        <h2>Page Access</h2>
         <p>
-            Access controls whether the page can be opened.
-            Functions control whether the staff member can perform actions inside that page.
+            Control which POS pages each role is allowed to access.
         </p>
     </div>
     <div class="matrix-tools">
-        <button type="button" class="btn-smx" onclick="bulkRole('all')">All Functions</button>
-        <button type="button" class="btn-smx" onclick="bulkRole('access_only')">Access Only</button>
-        <button type="button" class="btn-smx danger" onclick="bulkRole('none')">Disable Role</button>
+        <span class="muted">Access is enabled by default for new role/page entries.</span>
     </div>
 </div>
 <div class="filters">
@@ -712,7 +709,7 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 </div>
 <div class="matrix-scroll">
 <table class="matrix" id="matrix">
-<thead><tr><th class="page-col">POS Page</th><?php foreach($roles as $r):?><th class="role-head"><span class="role-name"><?=eh($r)?></span><small>Access / Function</small></th><?php endforeach;?></tr></thead>
+<thead><tr><th class="page-col">POS Page</th><?php foreach($roles as $r):?><th class="role-head"><span class="role-name"><?=eh($r)?></span><small>Access</small></th><?php endforeach;?></tr></thead>
 <tbody>
 <?php foreach($pages as $p): $icon=$pageIcons[$p]??'fa-file';?>
 <tr class="pagerow" data-page="<?=eh(strtolower($p))?>">
@@ -735,20 +732,7 @@ h1{font-size:23px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
     <i class="fa-solid fa-eye"></i>
 </button>
 </form>
-<form method="post" class="d-inline permission-form">
-<input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
-<input type="hidden" name="form_action" value="permission">
-<input type="hidden" name="role" value="<?=eh($r)?>">
-<input type="hidden" name="page" value="<?=eh($p)?>">
-<input type="hidden" name="kind" value="function">
-<button type="submit"
-        class="cell-btn <?=$action?'fn':''?>"
-        <?=$access?'':'disabled'?>
-        title="<?=$access?($action?'Disable functions':'Enable functions'):'Enable Access first'?>"
-        aria-label="<?=$access?($action?'Disable functions':'Enable functions'):'Enable Access first'?>">
-    <i class="fa-solid fa-bolt"></i>
-</button>
-</form>
+
 </td>
 <?php endforeach;?>
 </tr>
@@ -834,22 +818,6 @@ document.querySelectorAll('.permission-form').forEach(form=>{
    if(btn){btn.disabled=true;btn.style.opacity='.6';}
  });
 });
-
-window.bulkRole=function(mode){
- const role=document.getElementById('matrixRole')?.value;
- if(!role){alert('Choose a role first.');return;}
- const labels={all:'enable Access and Functions for',access_only:'enable Access for',none:'disable Access and Functions for'};
- if(!confirm('Confirm: '+labels[mode]+' '+role+' on all POS pages?')) return;
- const f=document.createElement('form');
- f.method='post';
- f.innerHTML=`<input type="hidden" name="csrf_token" value="<?=eh($csrf)?>">
- <input type="hidden" name="form_action" value="matrix_bulk">
- <input type="hidden" name="role" value="">
- <input type="hidden" name="mode" value="">`;
- f.querySelector('[name="role"]').value=role;
- f.querySelector('[name="mode"]').value=mode;
- document.body.appendChild(f);f.submit();
-};
 
 setTimeout(()=>document.getElementById('notice')?.remove(),4500);
 })();
