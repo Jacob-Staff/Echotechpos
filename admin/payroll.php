@@ -702,7 +702,7 @@ if (file_exists(__DIR__ . '/../includes/aside.php')) {
             <div class="card-head">
                 <div>
                     <h2>Payroll</h2>
-                    <span><?= payroll_h($monthLabel); ?> · Current branch</span>
+                    <span><?= payroll_h($monthLabel); ?> Â· Current branch</span>
                 </div>
 
                 <?php if ($currentRun): ?>
@@ -720,7 +720,7 @@ if (file_exists(__DIR__ . '/../includes/aside.php')) {
                     <div class="period-title"><?= payroll_h($monthLabel); ?> Payroll</div>
                     <div class="period-meta">
                         <?= payroll_h(date('d M Y', strtotime($monthStart))); ?>
-                        –
+                        â€“
                         <?= payroll_h(date('d M Y', strtotime($monthEnd))); ?>
                     </div>
                 </div>
