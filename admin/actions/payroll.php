@@ -693,129 +693,143 @@ function payroll_render_payslip_sheet(array $data): string {
 function payroll_payslip_pdf_content(array $data): string {
     /*
      * IMPORTANT:
-     * The Admin payslip is rendered by the browser using the exact HTML/CSS
-     * produced by payroll_render_payslip_sheet(). Do NOT use Dompdf here.
+     * The Admin payslip and the emailed PDF MUST use the same template.
      *
-     * Dompdf does not render this payslip's CSS Grid layout the same way as
-     * Chrome/Edge, which is why the previous emailed PDF collapsed into a
-     * narrow vertical document.
-     *
-     * We therefore use the same browser engine (Chromium) on the server.
-     * This keeps the email attachment based on the SAME payslip template
-     * that Admin > Payroll > Payslip uses.
+     * Do not rebuild the payslip with Dompdf here.  The Admin print view is
+     * rendered by a real browser, so the email attachment is rendered by
+     * Chromium too.  This keeps the layout, fonts, tables, QR area and
+     * spacing consistent with the payslip the administrator sees.
      */
-    $chromeCandidates = [
+
+    $chromiumCandidates = [
         '/usr/bin/chromium',
         '/usr/bin/chromium-browser',
         '/usr/bin/google-chrome',
         '/usr/bin/google-chrome-stable',
+        '/opt/google/chrome/google-chrome',
     ];
 
-    $chrome = '';
-    foreach ($chromeCandidates as $candidate) {
+    $chromium = '';
+    foreach ($chromiumCandidates as $candidate) {
         if (is_file($candidate) && is_executable($candidate)) {
-            $chrome = $candidate;
+            $chromium = $candidate;
             break;
         }
     }
 
-    if ($chrome === '') {
-        throw new RuntimeException(
-            'The browser PDF engine is not installed on the server. '
-            . 'Add Chromium to the Docker image and redeploy.'
-        );
+    if ($chromium === '') {
+        $which = @shell_exec('command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null || command -v google-chrome 2>/dev/null || command -v google-chrome-stable 2>/dev/null');
+        $which = trim((string)$which);
+        if ($which !== '' && is_executable($which)) {
+            $chromium = $which;
+        }
+    }
+
+    if ($chromium === '') {
+        throw new RuntimeException('The browser PDF engine is not installed on the server. Add Chromium to the Docker image and redeploy.');
     }
 
     $sheet = payroll_render_payslip_sheet($data);
     $css = payroll_payslip_css();
 
     /*
-     * This is intentionally the SAME payslip sheet and the SAME stylesheet
-     * used by the Admin print page. We only provide a clean document shell
-     * around it for Chromium.
-     *
-     * The print CSS already contains:
-     *   body.print-payslip .payslip-sheet { display:block; ... }
-     * so Chromium prints exactly the Admin payslip rather than the dashboard.
+     * These are the SAME payslip styles already used by the Admin print
+     * screen.  The only additions below are print-environment resets.
      */
+    $printCss = $css . '\n'
+        . '@page{size:A4 portrait;margin:10mm;}'
+        . 'html,body{margin:0!important;padding:0!important;background:#fff!important;}'
+        . 'body{background:#fff!important;}'
+        . 'body.print-payslip .app{display:none!important;}'
+        . 'body.print-payslip .payslip-sheet{display:block!important;visibility:visible!important;width:190mm!important;max-width:190mm!important;margin:0 auto!important;padding:0!important;background:#fff!important;color:#111!important;font-family:Arial,Helvetica,sans-serif!important;font-size:10px!important;}'
+        . 'body.print-payslip .payslip-sheet *{visibility:visible!important;box-sizing:border-box!important;}'
+        . 'body.print-payslip .payslip-tables,body.print-payslip .payslip-summary,body.print-payslip .payslip-footer{page-break-inside:avoid!important;}'
+        . '.payslip-sheet{display:block!important;}';
+
     $html = '<!doctype html>'
-        . '<html lang="en"><head>'
-        . '<meta charset="UTF-8">'
-        . '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        . '<style>' . $css . '</style>'
+        . '<html><head><meta charset="UTF-8">'
+        . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        . '<style>' . $printCss . '</style>'
         . '</head><body class="print-payslip">'
         . $sheet
         . '</body></html>';
 
-    $tmpBase = tempnam(sys_get_temp_dir(), 'echotech_payslip_');
-    if ($tmpBase === false) {
-        throw new RuntimeException('Could not create a temporary payslip file.');
+    $tmpDir = rtrim((string)sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'echotech_payslip_' . bin2hex(random_bytes(8));
+
+    if (!@mkdir($tmpDir, 0700, true) && !is_dir($tmpDir)) {
+        throw new RuntimeException('Could not create a temporary directory for the payslip PDF.');
     }
 
-    $htmlFile = $tmpBase . '.html';
-    $pdfFile  = $tmpBase . '.pdf';
-
-    /*
-     * tempnam() creates the base file. Remove it and write the HTML using
-     * UTF-8 so characters such as em-dashes and the check mark remain valid.
-     */
-    @unlink($tmpBase);
+    $htmlFile = $tmpDir . DIRECTORY_SEPARATOR . 'payslip.html';
+    $pdfFile = $tmpDir . DIRECTORY_SEPARATOR . 'payslip.pdf';
+    $profileDir = $tmpDir . DIRECTORY_SEPARATOR . 'chrome-profile';
 
     try {
-        if (@file_put_contents($htmlFile, $html) === false) {
-            throw new RuntimeException('Could not write the temporary payslip HTML.');
+        if (@file_put_contents($htmlFile, $html, LOCK_EX) === false) {
+            throw new RuntimeException('Could not create the temporary payslip document.');
         }
 
-        $htmlPath = realpath($htmlFile);
-        if ($htmlPath === false) {
-            throw new RuntimeException('Could not resolve the temporary payslip HTML path.');
+        if (!@mkdir($profileDir, 0700, true) && !is_dir($profileDir)) {
+            throw new RuntimeException('Could not create the temporary browser profile.');
         }
-
-        $pdfPath = $pdfFile;
 
         /*
-         * The Admin PDF supplied by the current system is Letter portrait
-         * (612 x 792 points). These paper dimensions reproduce that document.
-         *
-         * Chrome uses print media by default for --print-to-pdf, so the
-         * existing @media print rules from the Admin payslip are honoured.
+         * Use Chromium's native print-to-PDF implementation.  This is the
+         * same browser rendering engine used when the administrator prints
+         * the payslip from /admin/payroll.php.
          */
-        $command =
-            escapeshellarg($chrome)
+        $command = escapeshellarg($chromium)
             . ' --headless=new'
             . ' --no-sandbox'
             . ' --disable-gpu'
             . ' --disable-dev-shm-usage'
-            . ' --allow-file-access-from-files'
-            . ' --no-pdf-header-footer'
-            . ' --print-to-pdf=' . escapeshellarg($pdfPath)
-            . ' --print-to-pdf-no-header'
+            . ' --disable-software-rasterizer'
+            . ' --no-first-run'
+            . ' --no-default-browser-check'
+            . ' --user-data-dir=' . escapeshellarg($profileDir)
             . ' --run-all-compositor-stages-before-draw'
             . ' --virtual-time-budget=5000'
-            . ' ' . escapeshellarg('file://' . $htmlPath);
+            . ' --print-to-pdf-no-header'
+            . ' --print-to-pdf=' . escapeshellarg($pdfFile)
+            . ' ' . escapeshellarg('file://' . $htmlFile)
+            . ' 2>&1';
 
         $output = [];
         $exitCode = 0;
-        exec($command . ' 2>&1', $output, $exitCode);
+        @exec($command, $output, $exitCode);
 
-        if ($exitCode !== 0 || !is_file($pdfFile) || filesize($pdfFile) < 100) {
+        if ($exitCode !== 0 || !is_file($pdfFile)) {
             $detail = trim(implode("\n", $output));
             throw new RuntimeException(
-                'Chromium could not create the payslip PDF.'
-                . ($detail !== '' ? ' ' . $detail : '')
+                'Chromium could not generate the payslip PDF.'
+                . ($detail !== '' ? ' ' . mb_substr($detail, 0, 500) : '')
             );
         }
 
         $pdf = @file_get_contents($pdfFile);
-
         if (!is_string($pdf) || strncmp($pdf, '%PDF-', 5) !== 0) {
-            throw new RuntimeException('The browser did not return a valid PDF document.');
+            throw new RuntimeException('Chromium returned an invalid payslip PDF document.');
         }
 
         return $pdf;
     } finally {
-        @unlink($htmlFile);
-        @unlink($pdfFile);
+        foreach ([$pdfFile, $htmlFile] as $file) {
+            if (is_file($file)) @unlink($file);
+        }
+
+        if (is_dir($profileDir)) {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($profileDir, FilesystemIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::CHILD_FIRST
+            );
+            foreach ($iterator as $item) {
+                if ($item->isDir()) @rmdir($item->getPathname());
+                else @unlink($item->getPathname());
+            }
+            @rmdir($profileDir);
+        }
+
+        if (is_dir($tmpDir)) @rmdir($tmpDir);
     }
 }
 
@@ -3611,7 +3625,7 @@ tbody tr:hover{background:#fbfcfd}
     .payslip-footer > div{text-align:left!important}
 }@media print{
     @page{
-        size:Letter portrait;
+        size:A4 portrait;
         margin:10mm;
     }
     html,body{
