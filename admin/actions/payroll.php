@@ -2402,177 +2402,201 @@ tbody tr:hover{background:#fbfcfd}
 
 .payslip-sheet{
     display:none;
-    width:860px;
+    width:190mm;
     max-width:100%;
     margin:0 auto;
     background:#fff;
-    color:#111827;
-    padding:24px;
+    color:#111;
+    padding:0;
     font-family:Arial,Helvetica,sans-serif;
-    font-size:12px;
+    font-size:10px;
+    line-height:1.25;
 }
 .payslip-sheet *{box-sizing:border-box}
 .payslip-header{
-    border:1px solid #111827;
-    border-bottom:0;
+    width:100%;
+    border:1px solid #111;
     text-align:center;
 }
 .payslip-company{
-    padding:8px 10px;
-    font-size:16px;
+    padding:7px 8px;
+    font-size:15px;
+    line-height:1.1;
     font-weight:800;
     text-transform:uppercase;
-    border-bottom:1px solid #111827;
+    border-bottom:1px solid #111;
 }
 .payslip-title{
-    padding:6px 10px;
-    font-size:13px;
+    padding:5px 8px;
+    font-size:11px;
+    line-height:1.1;
     font-weight:700;
 }
 .payslip-employee{
     display:grid;
     grid-template-columns:1fr 1fr;
-    border:1px solid #111827;
-    border-bottom:0;
+    width:100%;
+    border:1px solid #111;
+    border-top:0;
 }
 .payslip-employee-column{min-width:0}
-.payslip-employee-column + .payslip-employee-column{border-left:1px solid #111827}
+.payslip-employee-column + .payslip-employee-column{border-left:1px solid #111}
 .payslip-info-row{
     display:grid;
-    grid-template-columns:145px 1fr;
-    min-height:24px;
+    grid-template-columns:31% 69%;
+    min-height:22px;
 }
-.payslip-info-row + .payslip-info-row{border-top:1px solid #d1d5db}
-.payslip-info-label{padding:5px 7px;font-weight:700}
-.payslip-info-value{padding:5px 7px;word-break:break-word}
+.payslip-info-row + .payslip-info-row{border-top:1px solid #b8b8b8}
+.payslip-info-label{
+    padding:4px 6px;
+    font-weight:700;
+    white-space:nowrap;
+}
+.payslip-info-value{
+    padding:4px 6px;
+    word-break:break-word;
+}
 .payslip-tables{
     display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:10px;
-    margin-top:10px;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:8px;
+    width:100%;
+    margin-top:8px;
 }
-.payslip-table-wrap{border:1px solid #111827}
+.payslip-table-wrap{
+    min-width:0;
+    border:1px solid #111;
+    overflow:hidden;
+}
 .payslip-table-title{
     text-align:center;
     font-weight:800;
-    padding:6px;
-    border-bottom:1px solid #111827;
-    font-size:13px;
-}
-.payslip-table{width:100%;border-collapse:collapse;table-layout:fixed}
-.payslip-table th,.payslip-table td{
-    border-right:1px solid #d1d5db;
-    border-bottom:1px solid #d1d5db;
     padding:5px 6px;
+    border-bottom:1px solid #111;
+    font-size:11px;
+    line-height:1.1;
+}
+.payslip-table{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+}
+.payslip-table th,.payslip-table td{
+    border-right:1px solid #b8b8b8;
+    border-bottom:1px solid #cfcfcf;
+    padding:4px 5px;
     vertical-align:middle;
+    font-size:9px;
+    line-height:1.2;
 }
 .payslip-table th:last-child,.payslip-table td:last-child{border-right:0}
-.payslip-table th{font-weight:800;background:#f8fafc;text-align:left}
-.payslip-table th:first-child,.payslip-table td:first-child{width:48px;text-align:center}
+.payslip-table th{
+    font-weight:800;
+    background:#fafafa;
+    text-align:left;
+    font-size:8.5px;
+    text-transform:uppercase;
+}
+.payslip-table th:first-child,.payslip-table td:first-child{
+    width:13%;
+    text-align:center;
+}
+.payslip-table th:nth-child(2),.payslip-table td:nth-child(2){width:57%}
 .payslip-table th:last-child,.payslip-table td:last-child{
-    width:120px;text-align:right
+    width:30%;
+    text-align:right;
 }
 .payslip-table .amount{text-align:right;white-space:nowrap}
 .payslip-table .total-row td{
-    border-top:1px solid #111827;
+    border-top:1px solid #111;
     border-bottom:0;
     font-weight:800;
+    font-size:9.5px;
 }
 .payslip-summary{
-    margin-top:10px;
+    margin-top:8px;
     display:grid;
-    grid-template-columns:1fr 1fr;
-    column-gap:70px;
-    row-gap:7px;
-    align-items:center;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:6px 8px;
+    width:100%;
 }
 .payslip-summary-row{
     display:grid;
-    grid-template-columns:180px 1fr;
-    min-height:25px;
-    border:1px solid #111827;
+    grid-template-columns:62% 38%;
+    min-height:23px;
+    border:1px solid #111;
 }
-.payslip-summary-label{padding:5px 7px;font-weight:700}
+.payslip-summary-label{padding:4px 6px;font-weight:700}
 .payslip-summary-value{
-    padding:5px 7px;
+    padding:4px 6px;
     text-align:right;
     font-weight:700;
     white-space:nowrap;
 }
 .payslip-summary-row.full{
     grid-column:1 / -1;
-    width:calc(50% - 35px);
+    width:50%;
 }
 .payslip-net-row{
-    margin-top:7px;
-    border:1px solid #111827;
+    margin-top:6px;
+    border:1px solid #111;
     display:grid;
-    grid-template-columns:180px 1fr;
-    width:calc(50% - 35px);
+    grid-template-columns:62% 38%;
+    width:50%;
+    min-height:26px;
 }
-.payslip-net-row .payslip-summary-value{font-size:14px;font-weight:800}
+.payslip-net-row .payslip-summary-label{font-size:10px;font-weight:800}
+.payslip-net-row .payslip-summary-value{font-size:12px;font-weight:800}
 .payslip-footer{
-    margin-top:12px;
-    padding-top:8px;
-    border-top:1px solid #111827;
-    display:flex;
-    justify-content:space-between;
-    gap:20px;
-    font-size:10px;
+    margin-top:8px;
+    padding-top:6px;
+    border-top:1px solid #111;
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:10px;
+    font-size:8.5px;
 }
-.payslip-note{margin-top:8px;font-size:9px;color:#4b5563;text-align:center}
-@media(max-width:1200px){
-    .summary-grid{grid-template-columns:repeat(2,1fr)}
-    .filter-row{grid-template-columns:1fr 1fr}
-    .stat-grid{grid-template-columns:repeat(3,1fr)}
-    .row-form{grid-template-columns:repeat(4,1fr)}
-}
+.payslip-footer > div:nth-child(2){text-align:center}
+.payslip-footer > div:nth-child(3){text-align:right}
+.payslip-note{margin-top:6px;font-size:8px;color:#4b5563;text-align:center}
 @media(max-width:900px){
-    .main{margin-left:0}
-    .payroll-content{padding:20px 16px 32px}
-    .page-heading{align-items:flex-start;flex-direction:column}
-    .page-actions{width:100%}
+    .payslip-sheet{width:100%}
 }
-@media(max-width:600px){
-    .summary-grid{grid-template-columns:1fr}
-    .filter-row{grid-template-columns:1fr}
-    .stat-grid{grid-template-columns:1fr}
-    .form-grid{grid-template-columns:1fr}
-    .form-field.full{grid-column:auto}
-    .page-heading h1{font-size:23px}
-    .payroll-content{padding:16px 12px 30px}
-}
-@media print{
+@media(max-width:650px){
+    .payslip-tables{grid-template-columns:1fr}
+    .payslip-summary{grid-template-columns:1fr}
+    .payslip-summary-row.full,.payslip-net-row{width:100%}
+    .payslip-footer{grid-template-columns:1fr}
+    .payslip-footer > div{text-align:left!important}
+}@media print{
     @page{
         size:A4 portrait;
         margin:10mm;
     }
-
     html,body{
         margin:0!important;
         padding:0!important;
         background:#fff!important;
     }
-
     body.print-payslip .app{
         display:none!important;
     }
-
     body.print-payslip .payslip-sheet{
         display:block!important;
         visibility:visible!important;
-        width:100%!important;
-        max-width:none!important;
-        margin:0!important;
+        width:190mm!important;
+        max-width:190mm!important;
+        margin:0 auto!important;
         padding:0!important;
         background:#fff!important;
         color:#111!important;
+        font-size:10px!important;
     }
-
     body.print-payslip .payslip-sheet *{
         visibility:visible!important;
     }
-
+    body.print-payslip .payslip-tables,
+    body.print-payslip .payslip-summary,
     body.print-payslip .payslip-footer{
         page-break-inside:avoid;
     }
@@ -2915,7 +2939,7 @@ echo payroll_complete_h($initials ?: 'ST');
 <a
     class="btn small"
     href="?view=payroll&month=<?= $selectedMonth ?>&year=<?= $selectedYear ?>&payslip=<?= (int)$row['staff_id'] ?>&print=1"
-    target="_blank"
+    target="_self"
     title="Payslip"
 >
 <i class="fas fa-receipt"></i>
