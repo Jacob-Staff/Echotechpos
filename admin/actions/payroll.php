@@ -170,40 +170,18 @@ function payroll_public_base_url(): string {
 }
 
 function payroll_mail_config(): array {
+    /*
+     * Render Free blocks outbound SMTP ports such as 587.
+     * Payroll therefore uses Brevo's HTTPS transactional-email API.
+     * The API key must live only in the server environment.
+     */
     return [
-        'host' => trim((string)(getenv('MAIL_HOST') ?: '')),
-        'port' => (int)(getenv('MAIL_PORT') ?: 587),
-        'username' => trim((string)(getenv('MAIL_USERNAME') ?: '')),
-        'password' => (string)(getenv('MAIL_PASSWORD') ?: ''),
+        'api_key' => trim((string)(getenv('BREVO_API_KEY') ?: '')),
         'from_email' => trim((string)(getenv('MAIL_FROM_EMAIL') ?: '')),
         'from_name' => trim((string)(getenv('MAIL_FROM_NAME') ?: 'PHARMANOVA Payroll')),
-        'encryption' => strtolower(trim((string)(getenv('MAIL_ENCRYPTION') ?: 'tls'))),
         'timeout' => max(5, min(60, (int)(getenv('MAIL_TIMEOUT') ?: 20))),
+        'api_url' => 'https://api.brevo.com/v3/smtp/email',
     ];
-}
-
-function payroll_mail_read($fp, int $timeout): string {
-    stream_set_timeout($fp, $timeout);
-    $data = '';
-    while (!feof($fp)) {
-        $line = fgets($fp, 515);
-        if ($line === false) break;
-        $data .= $line;
-        if (isset($line[3]) && $line[3] === ' ') break;
-    }
-    return trim($data);
-}
-
-function payroll_mail_expect($fp, array $codes, int $timeout): bool {
-    $response = payroll_mail_read($fp, $timeout);
-    if ($response === '') return false;
-    $code = (int)substr($response, 0, 3);
-    return in_array($code, $codes, true);
-}
-
-function payroll_mail_command($fp, string $command, array $codes, int $timeout): bool {
-    if (fwrite($fp, $command . "\r\n") === false) return false;
-    return payroll_mail_expect($fp, $codes, $timeout);
 }
 
 function payroll_mail_send_html(
@@ -215,240 +193,139 @@ function payroll_mail_send_html(
 ): array {
     $cfg = payroll_mail_config();
 
-    if ($cfg['host'] === '' || $cfg['username'] === '' || $cfg['password'] === '' || $cfg['from_email'] === '') {
+    if ($cfg['api_key'] === '' || $cfg['from_email'] === '') {
         return [
             'ok' => false,
-            'error' => 'Payroll email is not configured. Set MAIL_HOST, MAIL_USERNAME, MAIL_PASSWORD and MAIL_FROM_EMAIL in the server environment.'
+            'error' => 'Payroll email is not configured. Set BREVO_API_KEY and MAIL_FROM_EMAIL in the server environment.'
         ];
+    }
+
+    if (!filter_var($cfg['from_email'], FILTER_VALIDATE_EMAIL)) {
+        return ['ok' => false, 'error' => 'The configured payroll sender email address is invalid.'];
     }
 
     if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
         return ['ok' => false, 'error' => 'Employee email address is invalid.'];
     }
 
-    $host = $cfg['host'];
-    $port = $cfg['port'];
-    $timeout = $cfg['timeout'];
-    $encryption = $cfg['encryption'];
+    $safeName = trim(preg_replace('/[\\r\\n]+/', ' ', $toName));
+    $safeSubject = trim(preg_replace('/[\\r\\n]+/', ' ', $subject));
 
-    $remote = ($encryption === 'ssl' || $port === 465)
-        ? 'ssl://' . $host . ':' . $port
-        : $host . ':' . $port;
+    $payload = [
+        'sender' => [
+            'name' => $cfg['from_name'] !== '' ? $cfg['from_name'] : 'PHARMANOVA Payroll',
+            'email' => $cfg['from_email'],
+        ],
+        'to' => [[
+            'email' => $to,
+            'name' => $safeName !== '' ? $safeName : $to,
+        ]],
+        'subject' => $safeSubject,
+        'htmlContent' => $html,
+        'textContent' => $text,
+    ];
 
-    $errno = 0;
-    $errstr = '';
-    $fp = @stream_socket_client(
-        $remote,
-        $errno,
-        $errstr,
-        $timeout,
-        STREAM_CLIENT_CONNECT
-    );
-
-    if (!$fp) {
-        return ['ok' => false, 'error' => 'Could not connect to the configured mail server: ' . ($errstr ?: 'connection failed')];
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        return ['ok' => false, 'error' => 'Could not encode the payroll email request.'];
     }
 
-    try {
-        if (!payroll_mail_expect($fp, [220], $timeout)) {
-            throw new RuntimeException('Mail server did not accept the connection.');
+    $headers = [
+        'accept: application/json',
+        'api-key: ' . $cfg['api_key'],
+        'content-type: application/json',
+    ];
+
+    /* Preferred path: PHP cURL over HTTPS/443. */
+    if (function_exists('curl_init')) {
+        $ch = curl_init($cfg['api_url']);
+        if ($ch === false) {
+            return ['ok' => false, 'error' => 'Could not initialize the HTTPS email client.'];
         }
 
-        $heloHost = preg_replace('/[^a-zA-Z0-9.-]/', '', (string)($_SERVER['SERVER_NAME'] ?? 'echotechpos.onrender.com'));
-        if ($heloHost === '') $heloHost = 'echotechpos.onrender.com';
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $json,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => min(15, $cfg['timeout']),
+            CURLOPT_TIMEOUT => $cfg['timeout'],
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
 
-        if (!payroll_mail_command($fp, 'EHLO ' . $heloHost, [250], $timeout)) {
-            throw new RuntimeException('SMTP EHLO failed.');
+        $response = curl_exec($ch);
+        $curlError = curl_error($ch);
+        $curlErrno = curl_errno($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($response === false) {
+            $detail = $curlError !== '' ? $curlError : 'HTTPS request failed.';
+            return ['ok' => false, 'error' => 'Could not connect to the email service: ' . $detail];
         }
 
-        if ($encryption === 'tls' && $port !== 465) {
-            if (!payroll_mail_command($fp, 'STARTTLS', [220], $timeout)) {
-                throw new RuntimeException('SMTP STARTTLS was rejected.');
-            }
+        $decoded = json_decode((string)$response, true);
 
-            if (!@stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-                throw new RuntimeException('Could not establish SMTP TLS encryption.');
-            }
-
-            if (!payroll_mail_command($fp, 'EHLO ' . $heloHost, [250], $timeout)) {
-                throw new RuntimeException('SMTP EHLO after STARTTLS failed.');
-            }
+        if ($httpCode >= 200 && $httpCode < 300) {
+            return [
+                'ok' => true,
+                'message_id' => is_array($decoded) ? (string)($decoded['messageId'] ?? '') : '',
+            ];
         }
 
-        if (!payroll_mail_command($fp, 'AUTH LOGIN', [334], $timeout)) {
-            throw new RuntimeException('SMTP authentication was not accepted.');
+        $message = '';
+        if (is_array($decoded)) {
+            $message = trim((string)($decoded['message'] ?? $decoded['code'] ?? ''));
+        }
+        if ($message === '') {
+            $message = 'Brevo returned HTTP ' . $httpCode . '.';
         }
 
-        if (!payroll_mail_command($fp, base64_encode($cfg['username']), [334], $timeout)) {
-            throw new RuntimeException('SMTP username was rejected.');
-        }
+        /* Never expose the API key in an error returned to the browser. */
+        return ['ok' => false, 'error' => 'Email service rejected the request: ' . $message];
+    }
 
-        if (!payroll_mail_command($fp, base64_encode($cfg['password']), [235], $timeout)) {
-            throw new RuntimeException('SMTP password was rejected.');
-        }
+    /* Fallback for hosts without the PHP cURL extension. */
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => implode("\r\n", $headers) . "\r\n",
+            'content' => $json,
+            'timeout' => $cfg['timeout'],
+            'ignore_errors' => true,
+        ],
+        'ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'allow_self_signed' => false,
+        ],
+    ]);
 
-        if (!payroll_mail_command($fp, 'MAIL FROM:<' . $cfg['from_email'] . '>', [250], $timeout)) {
-            throw new RuntimeException('SMTP sender address was rejected.');
-        }
+    $response = @file_get_contents($cfg['api_url'], false, $context);
+    $statusLine = (string)($http_response_header[0] ?? '');
+    $httpCode = 0;
+    if (preg_match('/\\s(\\d{3})\\s/', $statusLine, $m)) {
+        $httpCode = (int)$m[1];
+    }
 
-        if (!payroll_mail_command($fp, 'RCPT TO:<' . $to . '>', [250,251], $timeout)) {
-            throw new RuntimeException('SMTP recipient address was rejected.');
-        }
+    if ($response === false) {
+        return ['ok' => false, 'error' => 'Could not connect to the email service over HTTPS.'];
+    }
 
-        if (!payroll_mail_command($fp, 'DATA', [354], $timeout)) {
-            throw new RuntimeException('SMTP DATA command was rejected.');
-        }
-
-        $safeName = trim(preg_replace('/[\r\n]+/', ' ', $toName));
-        $safeSubject = trim(preg_replace('/[\r\n]+/', ' ', $subject));
-        $boundary = '=_EchoTech_' . bin2hex(random_bytes(12));
-
-        $headers = [
-            'Date: ' . date('r'),
-            'From: ' . mb_encode_mimeheader($cfg['from_name'], 'UTF-8') . ' <' . $cfg['from_email'] . '>',
-            'To: ' . ($safeName !== '' ? mb_encode_mimeheader($safeName, 'UTF-8') . ' <' . $to . '>' : '<' . $to . '>'),
-            'Subject: ' . mb_encode_mimeheader($safeSubject, 'UTF-8'),
-            'MIME-Version: 1.0',
-            'Content-Type: multipart/alternative; boundary="' . $boundary . '"',
+    $decoded = json_decode((string)$response, true);
+    if ($httpCode >= 200 && $httpCode < 300) {
+        return [
+            'ok' => true,
+            'message_id' => is_array($decoded) ? (string)($decoded['messageId'] ?? '') : '',
         ];
-
-        $body = implode("\r\n", $headers) . "\r\n\r\n";
-        $body .= '--' . $boundary . "\r\n";
-        $body .= "Content-Type: text/plain; charset=UTF-8\r\n";
-        $body .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-        $body .= str_replace(["\r\n", "\r"], "\n", $text) . "\r\n\r\n";
-        $body .= '--' . $boundary . "\r\n";
-        $body .= "Content-Type: text/html; charset=UTF-8\r\n";
-        $body .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-        $body .= str_replace(["\r\n", "\r"], "\n", $html) . "\r\n\r\n";
-        $body .= '--' . $boundary . "--\r\n";
-
-        $body = preg_replace('/^\./m', '..', $body);
-
-        if (fwrite($fp, $body . "\r\n.\r\n") === false) {
-            throw new RuntimeException('Could not transmit the email body.');
-        }
-
-        if (!payroll_mail_expect($fp, [250], $timeout)) {
-            throw new RuntimeException('Mail server did not accept the message.');
-        }
-
-        @fwrite($fp, "QUIT\r\n");
-        @fclose($fp);
-
-        return ['ok' => true, 'error' => ''];
-    } catch (Throwable $e) {
-        @fwrite($fp, "RSET\r\n");
-        @fwrite($fp, "QUIT\r\n");
-        @fclose($fp);
-        return ['ok' => false, 'error' => $e->getMessage()];
-    }
-}
-
-function payroll_payslip_email_content(
-    array $row,
-    string $companyName,
-    string $verificationUrl,
-    string $periodLabel
-): array {
-    $name = trim((string)($row['staff_name'] ?? 'Employee'));
-    $basic = payroll_complete_money((float)($row['basic_salary'] ?? 0));
-    $allowances = payroll_complete_money((float)($row['allowances'] ?? 0));
-    $bonus = payroll_complete_money((float)($row['bonus'] ?? 0));
-    $overtime = payroll_complete_money((float)($row['overtime'] ?? 0));
-    $otherEarnings = payroll_complete_money((float)($row['other_earnings'] ?? 0));
-    $gross = payroll_complete_money((float)($row['gross_salary'] ?? 0));
-    $paye = payroll_complete_money((float)($row['paye'] ?? 0));
-    $napsa = payroll_complete_money((float)($row['napsa'] ?? 0));
-    $nhima = payroll_complete_money((float)($row['nhima'] ?? 0));
-    $loan = payroll_complete_money((float)($row['loan_deduction'] ?? 0));
-    $advance = payroll_complete_money((float)($row['salary_advance'] ?? 0));
-    $otherDed = payroll_complete_money((float)($row['other_deductions'] ?? 0));
-    $deductions = payroll_complete_money((float)($row['total_deductions'] ?? 0));
-    $net = payroll_complete_money((float)($row['net_salary'] ?? 0));
-
-    $e = static fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
-
-    $html = '<!doctype html><html><body style="margin:0;background:#f3f6fa;font-family:Arial,sans-serif;color:#202831;">'
-        . '<div style="max-width:680px;margin:24px auto;background:#fff;border:1px solid #dfe6ee;border-radius:12px;overflow:hidden;">'
-        . '<div style="padding:24px;background:#1f6fff;color:#fff;"><h1 style="margin:0;font-size:22px;">' . $e($companyName) . '</h1><div style="margin-top:6px;font-size:14px;">Official Payroll Payslip</div></div>'
-        . '<div style="padding:24px;">'
-        . '<p style="font-size:16px;">Dear <strong>' . $e($name) . '</strong>,</p>'
-        . '<p>Your official payslip for <strong>' . $e($periodLabel) . '</strong> is now available.</p>'
-        . '<table width="100%" cellpadding="9" cellspacing="0" style="border-collapse:collapse;font-size:14px;">'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Employee No.</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $e($row['employee_number'] ?? $row['staff_id']) . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Designation</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $e($row['staff_role'] ?? 'Staff') . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Branch</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $e($row['branch_name'] ?? '') . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Basic Salary</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $basic . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Gross Salary</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $gross . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Total Deductions</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $deductions . '</strong></td></tr>'
-        . '<tr><td style="padding-top:14px;font-size:17px;">NET SALARY</td><td align="right" style="padding-top:14px;font-size:19px;"><strong>' . $net . '</strong></td></tr>'
-        . '</table>'
-        . '<div style="margin-top:22px;padding:16px;background:#f5f8fc;border-radius:9px;">'
-        . '<strong>Official verification</strong><p style="margin:8px 0 14px;color:#5d6b79;">Use the official verification page to confirm that this payslip matches the company payroll record.</p>'
-        . '<a href="' . $e($verificationUrl) . '" style="display:inline-block;padding:11px 16px;background:#1f6fff;color:#fff;text-decoration:none;border-radius:7px;font-weight:bold;">Verify Payslip</a>'
-        . '</div>'
-        . '<p style="margin-top:24px;font-size:12px;color:#7a8794;">This email was generated by the official ' . $e($companyName) . ' Payroll system. Please keep this message for your records.</p>'
-        . '</div></div></body></html>';
-
-    $text = $companyName . " - Official Payroll Payslip\n\n"
-        . "Dear " . $name . ",\n\n"
-        . "Your official payslip for " . $periodLabel . " is now available.\n\n"
-        . "Employee No.: " . ($row['employee_number'] ?? $row['staff_id']) . "\n"
-        . "Designation: " . ($row['staff_role'] ?? 'Staff') . "\n"
-        . "Branch: " . ($row['branch_name'] ?? '') . "\n"
-        . "Basic Salary: " . $basic . "\n"
-        . "Allowances: " . $allowances . "\n"
-        . "Bonus: " . $bonus . "\n"
-        . "Overtime: " . $overtime . "\n"
-        . "Other Earnings: " . $otherEarnings . "\n"
-        . "Gross Salary: " . $gross . "\n"
-        . "PAYE: " . $paye . "\n"
-        . "NAPSA: " . $napsa . "\n"
-        . "NHIMA: " . $nhima . "\n"
-        . "Loan: " . $loan . "\n"
-        . "Salary Advance: " . $advance . "\n"
-        . "Other Deductions: " . $otherDed . "\n"
-        . "Total Deductions: " . $deductions . "\n"
-        . "NET SALARY: " . $net . "\n\n"
-        . "Verify this official payslip:\n" . $verificationUrl . "\n";
-
-    return ['html' => $html, 'text' => $text];
-}
-
-function payroll_ensure_payslip_identity(mysqli $conn, int $pharmacyId, array &$row): bool {
-    if (!payroll_complete_col($conn, 'payroll_records', 'verification_token')) return false;
-    if (!payroll_complete_col($conn, 'payroll_records', 'document_hash')) return false;
-
-    $token = trim((string)($row['verification_token'] ?? ''));
-    if ($token === '') {
-        $token = payroll_verification_token();
-        $stmt = $conn->prepare(
-            "UPDATE payroll_records SET verification_token=? WHERE id=? AND pharmacy_id=? AND (verification_token IS NULL OR verification_token='')"
-        );
-        if (!$stmt) return false;
-        $id = (int)$row['id'];
-        $stmt->bind_param('sii', $token, $id, $pharmacyId);
-        $stmt->execute();
-        $stmt->close();
-        $row['verification_token'] = $token;
     }
 
-    $hash = trim((string)($row['document_hash'] ?? ''));
-    if ($hash === '') {
-        $hash = payroll_verification_hash($row, $token);
-        $stmt = $conn->prepare(
-            "UPDATE payroll_records SET document_hash=? WHERE id=? AND pharmacy_id=? AND (document_hash IS NULL OR document_hash='')"
-        );
-        if (!$stmt) return false;
-        $id = (int)$row['id'];
-        $stmt->bind_param('sii', $hash, $id, $pharmacyId);
-        $stmt->execute();
-        $stmt->close();
-        $row['document_hash'] = $hash;
-    }
-
-    return $token !== '' && $hash !== '';
+    $message = is_array($decoded) ? trim((string)($decoded['message'] ?? $decoded['code'] ?? '')) : '';
+    return [
+        'ok' => false,
+        'error' => $message !== '' ? 'Email service rejected the request: ' . $message : 'Email service returned HTTP ' . $httpCode . '.',
+    ];
 }
 
 function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$row, string $companyName, string $periodLabel): array {
