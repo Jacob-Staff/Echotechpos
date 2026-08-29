@@ -21,34 +21,60 @@ function verify_log(string $message): void {
 
 /** Load the same connection file that the working Payroll controller uses. */
 function verify_load_connection(): ?mysqli {
+    /*
+     * IMPORTANT:
+     * Do NOT require conn.php inside a scope and then look in $GLOBALS.
+     * PHP variables created by require are local to the calling function.
+     * The previous verifier made exactly that mistake, so it always returned
+     * "database connection unavailable" even though Payroll itself connected.
+     *
+     * Payroll already proves that /includes/conn.php is the application's
+     * central connection file. Load that same file and return its local
+     * $conn variable directly.
+     */
     $candidates = [
-        // Public file at /var/www/html/verify-payslip.php
         __DIR__ . '/includes/conn.php',
-        __DIR__ . '/config.php',
-        __DIR__ . '/db.php',
-
-        // Same paths used by /admin/actions/payroll.php.
+        dirname(__DIR__) . '/includes/conn.php',
         __DIR__ . '/admin/actions/../../includes/conn.php',
-        __DIR__ . '/admin/actions/../../config.php',
-        __DIR__ . '/admin/actions/../../db.php',
     ];
 
     foreach (array_unique($candidates) as $file) {
-        if (!is_file($file)) {
+        $file = realpath($file);
+
+        if (!$file || !is_file($file)) {
             continue;
         }
 
         try {
             require_once $file;
         } catch (Throwable $e) {
-            verify_log('Connection include failed: ' . $file . ' :: ' . $e->getMessage());
+            verify_log(
+                'Connection include failed: ' .
+                $file .
+                ' :: ' .
+                $e->getMessage()
+            );
             continue;
         }
 
-        foreach (['conn', 'db', 'mysqli'] as $name) {
-            if (isset($GLOBALS[$name]) && $GLOBALS[$name] instanceof mysqli) {
-                return $GLOBALS[$name];
-            }
+        /*
+         * Because this require happens inside this function, $conn is
+         * intentionally checked locally, not through $GLOBALS.
+         */
+        if (isset($conn) && $conn instanceof mysqli) {
+            return $conn;
+        }
+
+        /*
+         * Also support projects whose connection file names the variable
+         * $db or $mysqli.
+         */
+        if (isset($db) && $db instanceof mysqli) {
+            return $db;
+        }
+
+        if (isset($mysqli) && $mysqli instanceof mysqli) {
+            return $mysqli;
         }
     }
 
