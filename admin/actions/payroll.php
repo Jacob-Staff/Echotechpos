@@ -121,6 +121,54 @@ function payroll_complete_money(float $v): string {
     return 'K' . number_format($v, 2);
 }
 
+function payroll_verification_token(): string {
+    try {
+        return strtoupper(bin2hex(random_bytes(24)));
+    } catch (Throwable $e) {
+        return strtoupper(hash('sha256', uniqid((string)mt_rand(), true) . microtime(true)));
+    }
+}
+
+function payroll_verification_hash(array $row, string $token): string {
+    $parts = [
+        (string)($row['pharmacy_id'] ?? ''),
+        (string)($row['staff_id'] ?? ''),
+        (string)($row['payroll_period'] ?? ''),
+        (string)($row['basic_salary'] ?? 0),
+        (string)($row['allowances'] ?? 0),
+        (string)($row['bonus'] ?? 0),
+        (string)($row['overtime'] ?? 0),
+        (string)($row['other_earnings'] ?? 0),
+        (string)($row['paye'] ?? 0),
+        (string)($row['napsa'] ?? 0),
+        (string)($row['nhima'] ?? 0),
+        (string)($row['loan_deduction'] ?? 0),
+        (string)($row['salary_advance'] ?? 0),
+        (string)($row['other_deductions'] ?? 0),
+        (string)($row['gross_salary'] ?? 0),
+        (string)($row['total_deductions'] ?? 0),
+        (string)($row['net_salary'] ?? 0),
+        (string)($row['employer_napsa'] ?? 0),
+        (string)($row['employer_nhima'] ?? 0),
+        /* Payment metadata can legitimately be added after approval.
+         * It is therefore deliberately excluded from the payroll integrity
+         * fingerprint so an approved payslip does not become invalid merely
+         * because the payment was subsequently recorded. */
+        $token,
+    ];
+    return hash('sha256', implode('|', $parts));
+}
+
+function payroll_public_base_url(): string {
+    $forwarded = strtolower(trim((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')));
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443)
+        || $forwarded === 'https';
+    $host = (string)($_SERVER['HTTP_HOST'] ?? 'echotechpos.onrender.com');
+    $host = preg_replace('/[^a-zA-Z0-9.:-]/', '', $host) ?: 'echotechpos.onrender.com';
+    return ($https ? 'https://' : 'http://') . $host;
+}
+
 function payroll_template_components_sum(mixed $json): float {
     $items = is_string($json) ? json_decode($json, true) : $json;
     if (!is_array($items)) return 0.0;
@@ -586,6 +634,11 @@ if (!payroll_complete_table($conn, 'payroll_records')) {
             `payment_date` DATE NULL,
             `payment_reference` VARCHAR(150) NULL,
             `payment_method` VARCHAR(50) NULL,
+            `verification_token` CHAR(48) NULL,
+            `document_hash` CHAR(64) NULL,
+            `verified_at` DATETIME NULL,
+            `revoked_at` DATETIME NULL,
+            `revoked_by` VARCHAR(150) NULL,
             `created_by` VARCHAR(150) NULL,
             `updated_by` VARCHAR(150) NULL,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -628,6 +681,11 @@ if ($error === '') {
         'payment_date' => 'DATE NULL',
         'payment_reference' => 'VARCHAR(150) NULL',
         'payment_method' => 'VARCHAR(50) NULL',
+        'verification_token' => 'CHAR(48) NULL',
+        'document_hash' => 'CHAR(64) NULL',
+        'verified_at' => 'DATETIME NULL',
+        'revoked_at' => 'DATETIME NULL',
+        'revoked_by' => 'VARCHAR(150) NULL',
     ];
 
     foreach ($upgradeColumns as $col => $definition) {
@@ -1860,6 +1918,65 @@ if ($payslipStaffId > 0) {
     }
 }
 
+/* ---------- Payslip authenticity identity ---------- */
+
+$payslipVerificationToken = '';
+$payslipDocumentHash = '';
+$payslipVerificationUrl = '';
+$payslipIsFinal = false;
+
+if (is_array($payslip)) {
+    $payslipIsFinal = in_array(
+        strtolower((string)($payslip['status'] ?? '')),
+        ['approved', 'paid', 'locked'],
+        true
+    );
+
+    if ($payslipIsFinal && payroll_complete_col($conn, 'payroll_records', 'verification_token')) {
+        $payslipVerificationToken = trim((string)($payslip['verification_token'] ?? ''));
+
+        if ($payslipVerificationToken === '') {
+            $payslipVerificationToken = payroll_verification_token();
+            $stmt = $conn->prepare(
+                "UPDATE payroll_records
+                 SET verification_token = ?
+                 WHERE id = ? AND pharmacy_id = ?
+                   AND verification_token IS NULL"
+            );
+            if ($stmt) {
+                $recordId = (int)$payslip['id'];
+                $stmt->bind_param('sii', $payslipVerificationToken, $recordId, $pharmacyId);
+                $stmt->execute();
+                $stmt->close();
+            }
+            $payslip['verification_token'] = $payslipVerificationToken;
+        }
+
+        $payslipDocumentHash = trim((string)($payslip['document_hash'] ?? ''));
+        if ($payslipDocumentHash === '' && payroll_complete_col($conn, 'payroll_records', 'document_hash')) {
+            $payslipDocumentHash = payroll_verification_hash($payslip, $payslipVerificationToken);
+            $stmt = $conn->prepare(
+                "UPDATE payroll_records
+                 SET document_hash = ?
+                 WHERE id = ? AND pharmacy_id = ?
+                   AND (document_hash IS NULL OR document_hash = '')"
+            );
+            if ($stmt) {
+                $recordId = (int)$payslip['id'];
+                $stmt->bind_param('sii', $payslipDocumentHash, $recordId, $pharmacyId);
+                $stmt->execute();
+                $stmt->close();
+            }
+        }
+
+        if ($payslipVerificationToken !== '') {
+            $payslipVerificationUrl = payroll_public_base_url()
+                . '/verify-payslip.php?token='
+                . rawurlencode($payslipVerificationToken);
+        }
+    }
+}
+
 /*
  * Payslip salary template data.
  * The monthly payroll record remains the source for calculated amounts.
@@ -2403,59 +2520,263 @@ tbody tr:hover{background:#fbfcfd}
 .payslip-sheet{
     display:none;
     width:190mm;
-    max-width:190mm;
+    max-width:100%;
     margin:0 auto;
     background:#fff;
-    color:#111827;
+    color:#111;
     padding:0;
     font-family:Arial,Helvetica,sans-serif;
     font-size:10px;
     line-height:1.25;
 }
 .payslip-sheet *{box-sizing:border-box}
-.payslip-header{width:100%;border:1px solid #111;text-align:center}
-.payslip-company{padding:8px 10px 6px;font-size:17px;line-height:1.1;font-weight:800;text-transform:uppercase;border-bottom:1px solid #111;letter-spacing:.15px}
-.payslip-title{padding:5px 8px;font-size:11px;line-height:1.1;font-weight:700}
-.payslip-employee{display:grid;grid-template-columns:1fr 1fr;width:100%;border:1px solid #111;border-top:0}
+.payslip-header{
+    width:100%;
+    border:1px solid #111;
+    text-align:center;
+}
+.payslip-company{
+    padding:7px 8px;
+    font-size:15px;
+    line-height:1.1;
+    font-weight:800;
+    text-transform:uppercase;
+    border-bottom:1px solid #111;
+}
+.payslip-title{
+    padding:5px 8px;
+    font-size:11px;
+    line-height:1.1;
+    font-weight:700;
+}
+.payslip-employee{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    width:100%;
+    border:1px solid #111;
+    border-top:0;
+}
 .payslip-employee-column{min-width:0}
 .payslip-employee-column + .payslip-employee-column{border-left:1px solid #111}
-.payslip-info-row{display:grid;grid-template-columns:36% 64%;min-height:23px}
+.payslip-info-row{
+    display:grid;
+    grid-template-columns:31% 69%;
+    min-height:22px;
+}
 .payslip-info-row + .payslip-info-row{border-top:1px solid #b8b8b8}
-.payslip-info-label{padding:4px 7px;font-weight:700;white-space:nowrap;font-size:9.5px}
-.payslip-info-value{padding:4px 7px;word-break:break-word;font-size:9.5px}
-.payslip-tables{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px;width:100%;margin-top:8px}
-.payslip-table-wrap{min-width:0;width:100%;border:1px solid #111;overflow:hidden}
-.payslip-table-title{text-align:center;font-weight:800;padding:5px 6px;border-bottom:1px solid #111;font-size:11px;line-height:1.1}
-.payslip-table{width:100%!important;max-width:100%!important;border-collapse:collapse;border-spacing:0;table-layout:fixed}
-.payslip-table th,.payslip-table td{border-right:1px solid #b8b8b8;border-bottom:1px solid #cfcfcf;padding:4px 5px;vertical-align:middle;font-size:9px;line-height:1.2;overflow:hidden}
+.payslip-info-label{
+    padding:4px 6px;
+    font-weight:700;
+    white-space:nowrap;
+}
+.payslip-info-value{
+    padding:4px 6px;
+    word-break:break-word;
+}
+.payslip-tables{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:8px;
+    width:100%;
+    margin-top:8px;
+}
+.payslip-table-wrap{
+    min-width:0;
+    border:1px solid #111;
+    overflow:hidden;
+}
+.payslip-table-title{
+    text-align:center;
+    font-weight:800;
+    padding:5px 6px;
+    border-bottom:1px solid #111;
+    font-size:11px;
+    line-height:1.1;
+}
+.payslip-table{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+}
+.payslip-table th,.payslip-table td{
+    border-right:1px solid #b8b8b8;
+    border-bottom:1px solid #cfcfcf;
+    padding:4px 5px;
+    vertical-align:middle;
+    font-size:9px;
+    line-height:1.2;
+}
 .payslip-table th:last-child,.payslip-table td:last-child{border-right:0}
-.payslip-table th{font-weight:800;background:#fafafa;text-align:left;font-size:8.5px;text-transform:uppercase}
-.payslip-table th:first-child,.payslip-table td:first-child{width:12%!important;text-align:center}
-.payslip-table th:nth-child(2),.payslip-table td:nth-child(2){width:53%!important;text-align:left}
-.payslip-table th:nth-child(3),.payslip-table td:nth-child(3){width:35%!important;text-align:right}
-.payslip-table .amount{text-align:right!important;white-space:nowrap;font-variant-numeric:tabular-nums}
-.payslip-table .total-row td{border-top:1px solid #111;border-bottom:0;font-weight:800;font-size:9.5px}
-.payslip-summary{margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px 7px;width:100%}
-.payslip-summary-row{display:grid;grid-template-columns:63% 37%;min-height:24px;border:1px solid #111}
-.payslip-summary-label{padding:4px 7px;font-weight:700;font-size:9.5px}
-.payslip-summary-value{padding:4px 7px;text-align:right;font-weight:700;font-size:9.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
-.payslip-summary-row.full{grid-column:1 / -1;width:50%}
-.payslip-net-row{margin-top:6px;border:1.5px solid #111;display:grid;grid-template-columns:63% 37%;width:50%;min-height:29px}
-.payslip-net-row .payslip-summary-label{font-size:11px;font-weight:800;letter-spacing:.2px}
-.payslip-net-row .payslip-summary-value{font-size:13px;font-weight:800}
-.payslip-footer{margin-top:8px;padding-top:6px;border-top:1px solid #111;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:8.5px}
+.payslip-table th{
+    font-weight:800;
+    background:#fafafa;
+    text-align:left;
+    font-size:8.5px;
+    text-transform:uppercase;
+}
+.payslip-table th:first-child,.payslip-table td:first-child{
+    width:13%;
+    text-align:center;
+}
+.payslip-table th:nth-child(2),.payslip-table td:nth-child(2){width:57%}
+.payslip-table th:last-child,.payslip-table td:last-child{
+    width:30%;
+    text-align:right;
+}
+.payslip-table .amount{text-align:right;white-space:nowrap}
+.payslip-table .total-row td{
+    border-top:1px solid #111;
+    border-bottom:0;
+    font-weight:800;
+    font-size:9.5px;
+}
+.payslip-summary{
+    margin-top:8px;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:6px 8px;
+    width:100%;
+}
+.payslip-summary-row{
+    display:grid;
+    grid-template-columns:62% 38%;
+    min-height:23px;
+    border:1px solid #111;
+}
+.payslip-summary-label{padding:4px 6px;font-weight:700}
+.payslip-summary-value{
+    padding:4px 6px;
+    text-align:right;
+    font-weight:700;
+    white-space:nowrap;
+}
+.payslip-summary-row.full{
+    grid-column:1 / -1;
+    width:50%;
+}
+.payslip-net-row{
+    margin-top:6px;
+    border:1px solid #111;
+    display:grid;
+    grid-template-columns:62% 38%;
+    width:50%;
+    min-height:26px;
+}
+.payslip-net-row .payslip-summary-label{font-size:10px;font-weight:800}
+.payslip-net-row .payslip-summary-value{font-size:12px;font-weight:800}
+.payslip-authentication{
+    margin-top:7px;
+    border:1px solid #111;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 34mm;
+    min-height:29mm;
+    page-break-inside:avoid;
+}
+.payslip-auth-copy{
+    padding:6px 8px;
+    min-width:0;
+}
+.payslip-auth-title{
+    font-size:9px;
+    font-weight:800;
+    letter-spacing:.35px;
+}
+.payslip-auth-status{
+    margin-top:2px;
+    font-size:8px;
+    font-weight:700;
+}
+.payslip-auth-id{
+    margin-top:4px;
+    font-size:8px;
+}
+.payslip-auth-instruction{
+    margin-top:3px;
+    max-width:145mm;
+    font-size:7.5px;
+    line-height:1.25;
+}
+.payslip-auth-url{
+    margin-top:3px;
+    font-size:6.5px;
+    line-height:1.15;
+    word-break:break-all;
+    color:#333;
+}
+.payslip-qr{
+    border-left:1px solid #111;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:3px;
+}
+.payslip-qr img{
+    display:block;
+    width:25mm;
+    height:25mm;
+    object-fit:contain;
+}
+.payslip-qr span{
+    margin-top:1px;
+    font-size:6px;
+    font-weight:800;
+}
+.payslip-footer{
+    margin-top:8px;
+    padding-top:6px;
+    border-top:1px solid #111;
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:10px;
+    font-size:8.5px;
+}
 .payslip-footer > div:nth-child(2){text-align:center}
 .payslip-footer > div:nth-child(3){text-align:right}
-.payslip-note{margin-top:5px;font-size:8px;color:#4b5563;text-align:center}
-@media(max-width:900px){.payslip-sheet{width:100%;max-width:100%}}
-@media(max-width:650px){.payslip-tables{grid-template-columns:1fr}.payslip-summary{grid-template-columns:1fr}.payslip-summary-row.full,.payslip-net-row{width:100%}.payslip-footer{grid-template-columns:1fr}.payslip-footer > div{text-align:left!important}}
-@media print{
-    @page{size:A4 portrait;margin:8mm}
-    html,body{margin:0!important;padding:0!important;background:#fff!important}
-    body.print-payslip .app{display:none!important}
-    body.print-payslip .payslip-sheet{display:block!important;visibility:visible!important;width:190mm!important;max-width:190mm!important;margin:0 auto!important;padding:0!important;background:#fff!important;color:#111!important;font-family:Arial,Helvetica,sans-serif!important;font-size:10px!important}
-    body.print-payslip .payslip-sheet *{visibility:visible!important}
-    body.print-payslip .payslip-tables,body.print-payslip .payslip-summary,body.print-payslip .payslip-footer{page-break-inside:avoid}
+.payslip-note{margin-top:6px;font-size:8px;color:#4b5563;text-align:center}
+@media(max-width:900px){
+    .payslip-sheet{width:100%}
+}
+@media(max-width:650px){
+    .payslip-tables{grid-template-columns:1fr}
+    .payslip-summary{grid-template-columns:1fr}
+    .payslip-summary-row.full,.payslip-net-row{width:100%}
+    .payslip-authentication{grid-template-columns:1fr}
+    .payslip-qr{border-left:0;border-top:1px solid #111;padding:5px}
+    .payslip-footer{grid-template-columns:1fr}
+    .payslip-footer > div{text-align:left!important}
+}@media print{
+    @page{
+        size:A4 portrait;
+        margin:10mm;
+    }
+    html,body{
+        margin:0!important;
+        padding:0!important;
+        background:#fff!important;
+    }
+    body.print-payslip .app{
+        display:none!important;
+    }
+    body.print-payslip .payslip-sheet{
+        display:block!important;
+        visibility:visible!important;
+        width:190mm!important;
+        max-width:190mm!important;
+        margin:0 auto!important;
+        padding:0!important;
+        background:#fff!important;
+        color:#111!important;
+        font-size:10px!important;
+    }
+    body.print-payslip .payslip-sheet *{
+        visibility:visible!important;
+    }
+    body.print-payslip .payslip-tables,
+    body.print-payslip .payslip-summary,
+    body.print-payslip .payslip-footer{
+        page-break-inside:avoid;
+    }
 }
 
 /* Salary Template UI */
@@ -3790,7 +4111,6 @@ foreach ($ytdRows as $yr) {
             <div class="payslip-table-title">Earnings</div>
 
             <table class="payslip-table">
-                <colgroup><col style="width:12%"><col style="width:53%"><col style="width:35%"></colgroup>
                 <thead>
                     <tr>
                         <th>Serial<br>No.</th>
@@ -3872,7 +4192,6 @@ foreach ($ytdRows as $yr) {
             <div class="payslip-table-title">Deductions</div>
 
             <table class="payslip-table">
-                <colgroup><col style="width:12%"><col style="width:53%"><col style="width:35%"></colgroup>
                 <thead>
                     <tr>
                         <th>Serial<br>No.</th>
@@ -3992,6 +4311,25 @@ foreach ($ytdRows as $yr) {
         <div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['net_salary']) ?></div>
     </div>
 
+    <?php if ($payslipIsFinal && $payslipVerificationToken !== ''): ?>
+    <div class="payslip-authentication">
+        <div class="payslip-auth-copy">
+            <div class="payslip-auth-title">OFFICIAL ELECTRONIC PAYSLIP</div>
+            <div class="payslip-auth-status">âœ“ Issued by <?= payroll_complete_h($pharmacyName) ?> Payroll</div>
+            <div class="payslip-auth-id">Payslip ID: <strong><?= payroll_complete_h('PS-' . substr($payslipVerificationToken, 0, 8) . '-' . substr($payslipVerificationToken, 8, 8)) ?></strong></div>
+            <div class="payslip-auth-instruction">Scan the QR code or visit the verification address to confirm this payslip against the official payroll record.</div>
+            <div class="payslip-auth-url"><?= payroll_complete_h($payslipVerificationUrl) ?></div>
+        </div>
+        <div class="payslip-qr">
+            <img
+                src="https://quickchart.io/qr?text=<?= rawurlencode($payslipVerificationUrl) ?>&size=150&margin=1"
+                alt="Payslip verification QR code"
+            >
+            <span>SCAN TO VERIFY</span>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <div class="payslip-footer">
         <div>
             Payment:
@@ -4016,10 +4354,32 @@ foreach ($ytdRows as $yr) {
 
 <script>
 (function () {
+    const returnUrl = <?= json_encode('/admin/payroll.php?view=payroll&month=' . $selectedMonth . '&year=' . $selectedYear) ?>;
+    let returned = false;
+
+    function returnToPayroll() {
+        if (returned) return;
+        returned = true;
+        window.location.replace(returnUrl);
+    }
+
+    window.addEventListener('afterprint', function () {
+        window.setTimeout(returnToPayroll, 150);
+    });
+
     window.addEventListener('load', function () {
-        window.setTimeout(function () {
-            window.print();
-        }, 250);
+        const qr = document.querySelector('.payslip-qr img');
+        const printNow = function () {
+            window.setTimeout(function () { window.print(); }, 300);
+        };
+
+        if (qr && !qr.complete) {
+            qr.addEventListener('load', printNow, {once:true});
+            qr.addEventListener('error', printNow, {once:true});
+            window.setTimeout(printNow, 1800);
+        } else {
+            printNow();
+        }
     });
 })();
 </script>
