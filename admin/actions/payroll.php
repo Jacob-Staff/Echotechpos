@@ -227,55 +227,34 @@ function payroll_mail_send_html(
     ];
 
     /*
-     * Payslips MUST be delivered as real file attachments.
-     * Brevo expects the field name "attachment" and each item must contain
-     * a filename plus base64-encoded file content.
+     * Brevo attachments must contain a filename and base64-encoded bytes.
+     * Validate the attachment before the request is sent so we never report
+     * a payslip as emailed without the PDF being included.
      */
-    if (empty($attachments)) {
-        return [
-            'ok' => false,
-            'error' => 'The payslip PDF was not supplied to the email service.'
-        ];
-    }
+    if (!empty($attachments)) {
+        $payload['attachment'] = [];
 
-    $payload['attachment'] = [];
-    foreach ($attachments as $attachment) {
-        $name = trim((string)($attachment['name'] ?? ''));
-        $content = $attachment['content'] ?? null;
+        foreach ($attachments as $attachment) {
+            $name = trim((string)($attachment['name'] ?? ''));
+            $content = $attachment['content'] ?? null;
 
-        if ($name === '' || !is_string($content) || $content === '') {
-            return [
-                'ok' => false,
-                'error' => 'The payslip attachment is empty or has no filename.'
+            if ($name === '' || $content === null || $content === '') {
+                return ['ok' => false, 'error' => 'Payslip PDF attachment could not be prepared.'];
+            }
+
+            if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'pdf') {
+                return ['ok' => false, 'error' => 'Payslip attachment must be a PDF file.'];
+            }
+
+            if (strncmp((string)$content, '%PDF-', 5) !== 0) {
+                return ['ok' => false, 'error' => 'Generated payslip attachment is not a valid PDF.'];
+            }
+
+            $payload['attachment'][] = [
+                'name' => $name,
+                'content' => base64_encode($content),
             ];
         }
-
-        /* Only allow the payroll PDF attachment through this sender. */
-        if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'pdf') {
-            return [
-                'ok' => false,
-                'error' => 'The payslip attachment must be a PDF file.'
-            ];
-        }
-
-        if (strncmp($content, '%PDF-', 5) !== 0) {
-            return [
-                'ok' => false,
-                'error' => 'The generated payslip is not a valid PDF document.'
-            ];
-        }
-
-        $payload['attachment'][] = [
-            'name' => $name,
-            'content' => base64_encode($content),
-        ];
-    }
-
-    if (count($payload['attachment']) < 1) {
-        return [
-            'ok' => false,
-            'error' => 'No payslip PDF attachment was prepared.'
-        ];
     }
 
     $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -508,103 +487,198 @@ function payroll_ensure_payslip_identity(mysqli $conn, int $pharmacyId, array &$
     return $token !== '' && $hash !== '';
 }
 
-/**
- * Build a dependency-free, valid one-page PDF payslip.
- * This avoids requiring Dompdf/MPDF on Render while still producing
- * a real downloadable PDF attachment for the employee.
- */
+
 function payroll_payslip_pdf_content(array $row, string $companyName, string $verificationUrl, string $periodLabel): string {
-    $clean = static function ($value): string {
-        $value = trim((string)$value);
-        if ($value === '') return 'â€”';
+    /*
+     * This is the EMAIL version of the same standard payslip displayed by
+     * the admin's ?payslip=ID&print=1 view. The browser Print dialog itself
+     * cannot be captured by PHP, so we reproduce that exact document
+     * structure server-side for the PDF attachment.
+     */
+    $clean = static function ($v): string {
+        $v = trim((string)$v);
+        if ($v === '') return 'â€”';
         if (function_exists('iconv')) {
-            $converted = @iconv('UTF-8', 'Windows-1252//TRANSLIT', $value);
-            if ($converted !== false) $value = $converted;
+            $x = @iconv('UTF-8', 'Windows-1252//TRANSLIT', $v);
+            if ($x !== false) $v = $x;
         }
-        return preg_replace('/[^\x20-\x7E\x80-\xFF]/', '?', $value) ?: '?';
+        $v = preg_replace('/[^\x20-\x7E\x80-\xFF]/', '?', $v);
+        return $v !== false ? $v : '?';
     };
-
-    $esc = static function (string $value): string {
-        return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $value);
+    $esc = static function ($v) use ($clean): string {
+        return str_replace(['\\','(',')'], ['\\\\','\\(','\\)'], $clean($v));
     };
+    $money = static fn($v) => 'K' . number_format((float)$v, 2);
 
-    $money = static function ($value): string {
-        return 'K' . number_format((float)$value, 2);
-    };
+    $company=$clean($companyName);
+    $period=$clean($periodLabel);
+    $name=$clean($row['staff_name'] ?? 'Employee');
+    $role=$clean($row['staff_role'] ?? 'Staff');
+    $branch=$clean($row['branch_name'] ?? 'Main Branch');
+    $emp=$clean($row['employee_number'] ?? ($row['staff_id'] ?? ''));
+    $grade=$clean($row['salary_grade'] ?? $row['grade_name'] ?? 'â€”');
+    $bank=$clean($row['bank_name'] ?? 'â€”');
+    $accountName=$clean($row['account_name'] ?? $name);
+    $accountNo=$clean($row['account_number'] ?? 'â€”');
+    $currency=$clean($row['currency'] ?? 'ZMW');
+    $status=$clean(ucfirst((string)($row['status'] ?? 'draft')));
+    $payment=$clean($row['payment_method'] ?? 'Not paid');
+    $reference=$clean($row['payment_reference'] ?? 'â€”');
+    $token=trim((string)($row['verification_token'] ?? ''));
+    $days=(int)date('t', strtotime(($row['payroll_period'] ?? date('Y-m')) . '-01'));
+    if($days<1 || $days>31) $days=30;
 
-    $name = $clean($row['staff_name'] ?? 'Employee');
-    $employeeNo = $clean($row['employee_number'] ?? ($row['staff_id'] ?? ''));
-    $role = $clean($row['staff_role'] ?? 'Staff');
-    $branch = $clean($row['branch_name'] ?? 'Main Branch');
-    $company = $clean($companyName);
-    $period = $clean($periodLabel);
-    $verify = $clean($verificationUrl);
+    $earn=[['Basic Salary',(float)($row['basic_salary']??0)]];
+    $allowTotal=0.0;
+    $allowJson=json_decode((string)($row['allowances_json']??'[]'),true);
+    if(is_array($allowJson)) foreach($allowJson as $a){
+        $n=trim((string)($a['name']??'')); $amt=(float)($a['amount']??0);
+        if($n!==''){ $earn[]=[$clean($n),$amt]; $allowTotal+=$amt; }
+    }
+    $remaining=max(0,(float)($row['allowances']??0)-$allowTotal);
+    if($remaining>0.004) $earn[]=['Other Allowances',$remaining];
+    foreach([['Bonus','bonus'],['Overtime','overtime'],['Other Earnings / Reimbursement','other_earnings']] as $x){
+        $amt=(float)($row[$x[1]]??0); if($amt>0) $earn[]=[$x[0],$amt];
+    }
 
-    $lines = [
-        [$company, 18, 805],
-        ['OFFICIAL PAYROLL PAYSLIP', 11, 780],
-        ['Payroll Period: ' . $period, 10, 758],
-        ['Employee Information', 12, 720],
-        ['Employee: ' . $name, 10, 698],
-        ['Employee No.: ' . $employeeNo, 10, 680],
-        ['Designation: ' . $role, 10, 662],
-        ['Branch / Location: ' . $branch, 10, 644],
-        ['Earnings', 12, 606],
-        ['Basic Salary: ' . $money($row['basic_salary'] ?? 0), 10, 584],
-        ['Allowances: ' . $money($row['allowances'] ?? 0), 10, 566],
-        ['Bonus: ' . $money($row['bonus'] ?? 0), 10, 548],
-        ['Overtime: ' . $money($row['overtime'] ?? 0), 10, 530],
-        ['Other Earnings: ' . $money($row['other_earnings'] ?? 0), 10, 512],
-        ['Gross Salary: ' . $money($row['gross_salary'] ?? 0), 10, 490],
-        ['Deductions', 12, 452],
-        ['PAYE: ' . $money($row['paye'] ?? 0), 10, 430],
-        ['NAPSA: ' . $money($row['napsa'] ?? 0), 10, 412],
-        ['NHIMA: ' . $money($row['nhima'] ?? 0), 10, 394],
-        ['Loan: ' . $money($row['loan_deduction'] ?? 0), 10, 376],
-        ['Salary Advance: ' . $money($row['salary_advance'] ?? 0), 10, 358],
-        ['Other Deductions: ' . $money($row['other_deductions'] ?? 0), 10, 340],
-        ['Total Deductions: ' . $money($row['total_deductions'] ?? 0), 10, 318],
-        ['NET SALARY: ' . $money($row['net_salary'] ?? 0), 14, 278],
-        ['Official Verification', 12, 232],
-        ['Verify this payslip online:', 10, 210],
-        [$verify, 8, 192],
-        ['This PDF was generated by the official ' . $company . ' Payroll system.', 8, 150],
-        ['Payslip verification should be performed using the official verification URL above.', 8, 136],
+    $ded=[['PAYE',(float)($row['paye']??0)],['NAPSA - Employee',(float)($row['napsa']??0)],['NHIMA - Employee',(float)($row['nhima']??0)]];
+    $dedJson=json_decode((string)($row['deductions_json']??'[]'),true);
+    if(is_array($dedJson)) foreach($dedJson as $d){
+        $n=trim((string)($d['name']??'')); $amt=(float)($d['amount']??0);
+        if($n!=='') $ded[]=[$clean($n),$amt];
+    }
+    foreach([['Loan','loan_deduction'],['Salary Advance','salary_advance'],['Other Deductions','other_deductions']] as $x){
+        $amt=(float)($row[$x[1]]??0); if($amt>0) $ded[]=[$x[0],$amt];
+    }
+
+    $W=595; $H=842; $L=30; $R=565; $CW=$R-$L; $y=812;
+    $c=[]; $c[]='q'; $c[]='0 0 0 RG'; $c[]='0 0 0 rg'; $c[]='0.65 w';
+    $line=function(&$c,$x1,$y1,$x2,$y2){$c[]=sprintf('%.2f %.2f m %.2f %.2f l S',$x1,$y1,$x2,$y2);};
+    $rect=function(&$c,$x,$yy,$w,$h){$c[]=sprintf('%.2f %.2f %.2f %.2f re S',$x,$yy,$w,$h);};
+    $tx=function(&$c,$f,$s,$x,$yy,$v)use($esc){$c[]=sprintf('BT /%s %.2f Tf %.2f %.2f Td (%s) Tj ET',$f,$s,$x,$yy,$esc($v));};
+    $tr=function(&$c,$f,$s,$x,$yy,$v)use($esc){$v=$esc($v);$x-=strlen($v)*$s*.48;$c[]=sprintf('BT /%s %.2f Tf %.2f %.2f Td (%s) Tj ET',$f,$s,max(0,$x),$yy,$v);};
+
+    # header
+    $rect($c,$L,$y-43,$CW,43); $line($c,$L,$y-22,$R,$y-22);
+    $tx($c,'F2',15,$L+($CW/2)-strlen($company)*4.0,$y-15,strtoupper($company));
+    $tx($c,'F2',10,$L+($CW/2)-strlen('Salary Slip for '.$period)*2.6,$y-36,'Salary Slip for '.$period);
+    $y-=48;
+
+    # employee info
+    $ih=91; $it=$y; $ib=$it-$ih; $half=$CW/2;
+    $rect($c,$L,$ib,$CW,$ih); $line($c,$L+$half,$ib,$L+$half,$it);
+    $pairs=[
+      [['Name',$name],['Department','â€”']],
+      [['Designation',$role],['Bank Name',$bank]],
+      [['Location',$branch],['Account Name',$accountName]],
+      [['Employee No.',$emp],['Bank Account No.',$accountNo]],
+      [['Salary Grade',$grade],['Currency',$currency]]
     ];
-
-    $content = "BT\n";
-    foreach ($lines as [$text, $size, $y]) {
-        $content .= sprintf("/F1 %d Tf 50 %d Td (%s) Tj 0 -%d Td\n", $size, $y, $esc($text), $y);
+    $rh=$ih/5;
+    foreach($pairs as $i=>$pair){
+        $ry=$it-(($i+1)*$rh); if($i>0)$line($c,$L,$ry,$R,$ry);
+        for($s=0;$s<2;$s++){
+            $bx=$L+$s*$half;
+            $tx($c,'F2',7.2,$bx+6,$ry+6,$pair[$s][0]);
+            $tx($c,'F1',8.0,$bx+$half*.31+2,$ry+6,$pair[$s][1]);
+        }
     }
-    $content .= "ET\n";
+    $y=$ib-7;
 
-    // Add simple horizontal separators using PDF drawing commands.
-    $content = "0.12 0.12 0.12 rg\n" . $content;
+    # tables
+    $gap=7; $tw=($CW-$gap)/2; $titleH=20; $headH=21; $max=max(count($earn),count($ded),1);
+    $rh=min(20,max(14,128/$max)); $th=$titleH+$headH+(($max+1)*$rh);
+    $draw=function(&$c,$x,$top,$w,$title,$rows)use($line,$rect,$tx,$tr,$money,$currency,$titleH,$headH,$rh,$max){
+        $bottom=$top-$GLOBALS['__th']; # placeholder overwritten below
+    };
+    $drawTable=function(&$c,$x,$top,$w,$title,$rows)use($line,$rect,$tx,$tr,$money,$currency,$titleH,$headH,$rh,$max,$th){
+        $bottom=$top-$th; $rect($c,$x,$bottom,$w,$th);
+        $line($c,$x,$top-$titleH,$x+$w,$top-$titleH);
+        $line($c,$x,$top-$titleH-$headH,$x+$w,$top-$titleH-$headH);
+        $sw=42;$aw=88;
+        $line($c,$x+$sw,$bottom,$x+$sw,$top-$titleH);
+        $line($c,$x+$w-$aw,$bottom,$x+$w-$aw,$top-$titleH);
+        $tx($c,'F2',9.5,$x+$w/2-strlen($title)*2.6,$top-13,$title);
+        $tx($c,'F2',6.5,$x+6,$top-$titleH-12,'SERIAL');
+        $tx($c,'F2',6.5,$x+6,$top-$titleH-18,'NO.');
+        $tx($c,'F2',6.7,$x+$sw+5,$top-$titleH-15,'SALARY HEAD');
+        $tr($c,'F2',6.3,$x+$w-5,$top-$titleH-15,'AMOUNT ('.$currency.')');
+        $bt=$top-$titleH-$headH;
+        for($i=0;$i<$max+1;$i++){
+            $rt=$bt-$i*$rh; $rb=$rt-$rh;
+            if($i>0)$line($c,$x,$rt,$x+$w,$rt);
+            if($i<count($rows)){
+                $label=(string)$rows[$i][0]; if(strlen($label)>31)$label=substr($label,0,28).'...';
+                $tx($c,'F1',7.1,$x+16,$rb+$rh/2-2,(string)($i+1));
+                $tx($c,'F1',7.1,$x+$sw+5,$rb+$rh/2-2,$label);
+                $tr($c,'F1',7.1,$x+$w-5,$rb+$rh/2-2,$money($rows[$i][1]));
+            }
+        }
+        $total=0; foreach($rows as $r)$total+=(float)$r[1];
+        $tx($c,'F2',7.0,$x+$sw+5,$bottom+7,$title==='Earnings'?'Salary (Gross) / PM':'Total Deduction');
+        $tr($c,'F2',7.0,$x+$w-5,$bottom+7,$money($total));
+    };
+    $drawTable($c,$L,$y,$tw,'Earnings',$earn);
+    $drawTable($c,$L+$tw+$gap,$y,$tw,'Deductions',$ded);
+    $y-=$th+7;
 
-    $objects = [];
-    $objects[] = '<< /Type /Catalog /Pages 2 0 R >>';
-    $objects[] = '<< /Type /Pages /Kids [3 0 R] /Count 1 >>';
-    $objects[] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>';
-    $objects[] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
-    $objects[] = '<< /Length ' . strlen($content) . " >>\nstream\n" . $content . "endstream";
-
-    $pdf = "%PDF-1.4\n";
-    $offsets = [0];
-    foreach ($objects as $i => $object) {
-        $num = $i + 1;
-        $offsets[$num] = strlen($pdf);
-        $pdf .= $num . " 0 obj\n" . $object . "\nendobj\n";
+    # summaries
+    $sg=7;$sw=($CW-$sg)/2;$srh=23;
+    $ctc=(float)($row['gross_salary']??0)+(float)($row['employer_napsa']??0)+(float)($row['employer_nhima']??0);
+    $sum=[
+      ['Salary (Gross) / PM',$money($row['gross_salary']??0)],
+      ['Total Deduction',$money($row['total_deductions']??0)],
+      ['Salary (CTC) / PM',$money($ctc)],
+      ['Payment Status',$status],
+      ['Total Number of Days',(string)$days]
+    ];
+    for($i=0;$i<4;$i++){
+        $col=$i%2;$rn=intdiv($i,2);$sx=$L+$col*($sw+$sg);$sy=$y-$rn*($srh+6);
+        $rect($c,$sx,$sy-$srh,$sw,$srh);$line($c,$sx+$sw*.62,$sy-$srh,$sx+$sw*.62,$sy);
+        $tx($c,'F2',7,$sx+5,$sy-15,$sum[$i][0]);$tr($c,'F2',7.1,$sx+$sw-5,$sy-15,$sum[$i][1]);
     }
+    $dy=$y-2*($srh+6);$rect($c,$L,$dy-$srh,$sw,$srh);$line($c,$L+$sw*.62,$dy-$srh,$L+$sw*.62,$dy);
+    $tx($c,'F2',7,$L+5,$dy-15,$sum[4][0]);$tr($c,'F2',7.1,$L+$sw-5,$dy-15,$sum[4][1]);
 
-    $xref = strlen($pdf);
-    $pdf .= "xref\n0 " . (count($objects) + 1) . "\n";
-    $pdf .= "0000000000 65535 f \n";
-    for ($i = 1; $i <= count($objects); $i++) {
-        $pdf .= sprintf("%010d 00000 n \n", $offsets[$i]);
-    }
-    $pdf .= "trailer\n<< /Size " . (count($objects) + 1) . " /Root 1 0 R >>\n";
-    $pdf .= "startxref\n" . $xref . "\n%%EOF\n";
+    $ny=$dy-$srh-7;$nh=27;$rect($c,$L,$ny-$nh,$sw,$nh);$line($c,$L+$sw*.62,$ny-$nh,$L+$sw*.62,$ny);
+    $tx($c,'F2',9,$L+5,$ny-18,'NET SALARY');$tr($c,'F2',11.5,$L+$sw-5,$ny-18,$money($row['net_salary']??0));
+    $y=$ny-$nh-7;
 
+    # authentication block
+    $ah=76;$ab=$y-$ah;$qw=96;$rect($c,$L,$ab,$CW,$ah);$line($c,$R-$qw,$ab,$R-$qw,$y);
+    $tx($c,'F2',7.5,$L+7,$y-14,'OFFICIAL ELECTRONIC PAYSLIP');
+    $tx($c,'F2',7,$L+7,$y-27,'Issued by '.$company.' Payroll');
+    $pid=$token!==''?'PS-'.substr($token,0,8).'-'.substr($token,8,8):'â€”';
+    $tx($c,'F1',7,$L+7,$y-40,'Payslip ID: '.$pid);
+    $tx($c,'F1',6.4,$L+7,$y-51,'Scan the QR code or visit the official verification address.');
+    $url=$verificationUrl; if(strlen($url)>105)$url=substr($url,0,102).'...';
+    $tx($c,'F1',5.7,$L+7,$y-63,$url);
+    $qx=$R-$qw+18;$qy=$ab+15;$qs=58;$rect($c,$qx,$qy,$qs,$qs);
+    $tx($c,'F2',6,$qx+9,$qy-9,'VERIFY ONLINE');
+    $y=$ab-7;
+
+    # footer
+    $line($c,$L,$y,$R,$y);
+    $tx($c,'F1',6.5,$L,$y-13,'Payment:');$tx($c,'F2',6.5,$L+35,$y-13,$payment);
+    $tx($c,'F1',6.2,$L+205,$y-13,'Payment Reference: '.$reference);
+    $tr($c,'F1',6.2,$R,$y-13,'Generated: '.date('d M Y H:i'));
+    $tx($c,'F1',6.1,$L+115,$y-27,'This payslip is generated from the Payroll register for '.$period.'.');
+    $c[]='Q';
+
+    $content=implode("\n",$c)."\n";
+    $objs=[
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /ProcSet [/PDF /Text] /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
+      '<< /Length '.strlen($content)." >>\nstream\n".$content."endstream"
+    ];
+    $pdf="%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";$offs=[0];
+    foreach($objs as $i=>$obj){$n=$i+1;$offs[$n]=strlen($pdf);$pdf.=$n." 0 obj\n".$obj."\nendobj\n";}
+    $xref=strlen($pdf);$pdf.="xref\n0 ".(count($objs)+1)."\n0000000000 65535 f \n";
+    for($i=1;$i<=count($objs);$i++)$pdf.=sprintf("%010d 00000 n \n",$offs[$i]);
+    $pdf.="trailer\n<< /Size ".(count($objs)+1)." /Root 1 0 R >>\nstartxref\n".$xref."\n%%EOF\n";
     return $pdf;
 }
 
@@ -626,17 +700,18 @@ function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$r
     $subject = $companyName . ' â€” Payslip for ' . $periodLabel;
 
     $pdfContent = payroll_payslip_pdf_content($row, $companyName, $verificationUrl, $periodLabel);
-
-    /* Never send a successful email without a real PDF attachment. */
-    if (!is_string($pdfContent) || strlen($pdfContent) < 100 || strncmp($pdfContent, '%PDF-', 5) !== 0) {
-        return ['ok'=>false, 'error'=>'Could not generate a valid PDF payslip for this employee.'];
+    if (strncmp($pdfContent, '%PDF-', 5) !== 0 || strlen($pdfContent) < 1000) {
+        return ['ok'=>false, 'error'=>'The official payslip PDF could not be generated.'];
     }
 
     $safeEmployee = preg_replace('/[^A-Za-z0-9_-]+/', '-', trim((string)($row['staff_name'] ?? 'Employee')));
     $safeEmployee = trim($safeEmployee, '-_');
     if ($safeEmployee === '') $safeEmployee = 'Employee';
+
     $safePeriod = preg_replace('/[^A-Za-z0-9_-]+/', '-', $periodLabel);
-    $pdfName = 'Payslip-' . $safeEmployee . '-' . trim($safePeriod, '-_') . '.pdf';
+    $safePeriod = trim($safePeriod, '-_');
+
+    $pdfName = 'Payslip-' . $safeEmployee . '-' . $safePeriod . '.pdf';
 
     $result = payroll_mail_send_html(
         $email,
