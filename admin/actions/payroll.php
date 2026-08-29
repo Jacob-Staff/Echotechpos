@@ -227,34 +227,55 @@ function payroll_mail_send_html(
     ];
 
     /*
-     * Brevo attachments must contain a filename and base64-encoded bytes.
-     * Validate the attachment before the request is sent so we never report
-     * a payslip as emailed without the PDF being included.
+     * Payslips MUST be delivered as real file attachments.
+     * Brevo expects the field name "attachment" and each item must contain
+     * a filename plus base64-encoded file content.
      */
-    if (!empty($attachments)) {
-        $payload['attachment'] = [];
+    if (empty($attachments)) {
+        return [
+            'ok' => false,
+            'error' => 'The payslip PDF was not supplied to the email service.'
+        ];
+    }
 
-        foreach ($attachments as $attachment) {
-            $name = trim((string)($attachment['name'] ?? ''));
-            $content = $attachment['content'] ?? null;
+    $payload['attachment'] = [];
+    foreach ($attachments as $attachment) {
+        $name = trim((string)($attachment['name'] ?? ''));
+        $content = $attachment['content'] ?? null;
 
-            if ($name === '' || $content === null || $content === '') {
-                return ['ok' => false, 'error' => 'Payslip PDF attachment could not be prepared.'];
-            }
-
-            if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'pdf') {
-                return ['ok' => false, 'error' => 'Payslip attachment must be a PDF file.'];
-            }
-
-            if (strncmp((string)$content, '%PDF-', 5) !== 0) {
-                return ['ok' => false, 'error' => 'Generated payslip attachment is not a valid PDF.'];
-            }
-
-            $payload['attachment'][] = [
-                'name' => $name,
-                'content' => base64_encode($content),
+        if ($name === '' || !is_string($content) || $content === '') {
+            return [
+                'ok' => false,
+                'error' => 'The payslip attachment is empty or has no filename.'
             ];
         }
+
+        /* Only allow the payroll PDF attachment through this sender. */
+        if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'pdf') {
+            return [
+                'ok' => false,
+                'error' => 'The payslip attachment must be a PDF file.'
+            ];
+        }
+
+        if (strncmp($content, '%PDF-', 5) !== 0) {
+            return [
+                'ok' => false,
+                'error' => 'The generated payslip is not a valid PDF document.'
+            ];
+        }
+
+        $payload['attachment'][] = [
+            'name' => $name,
+            'content' => base64_encode($content),
+        ];
+    }
+
+    if (count($payload['attachment']) < 1) {
+        return [
+            'ok' => false,
+            'error' => 'No payslip PDF attachment was prepared.'
+        ];
     }
 
     $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -360,75 +381,28 @@ function payroll_mail_send_html(
     ];
 }
 
-function payroll_payslip_email_content(
-    array $row,
-    string $companyName,
-    string $verificationUrl,
-    string $periodLabel
-): array {
+function payroll_payslip_email_message(array $row, string $companyName, string $verificationUrl, string $periodLabel): array {
     $name = trim((string)($row['staff_name'] ?? 'Employee'));
-    $basic = payroll_complete_money((float)($row['basic_salary'] ?? 0));
-    $allowances = payroll_complete_money((float)($row['allowances'] ?? 0));
-    $bonus = payroll_complete_money((float)($row['bonus'] ?? 0));
-    $overtime = payroll_complete_money((float)($row['overtime'] ?? 0));
-    $otherEarnings = payroll_complete_money((float)($row['other_earnings'] ?? 0));
-    $gross = payroll_complete_money((float)($row['gross_salary'] ?? 0));
-    $paye = payroll_complete_money((float)($row['paye'] ?? 0));
-    $napsa = payroll_complete_money((float)($row['napsa'] ?? 0));
-    $nhima = payroll_complete_money((float)($row['nhima'] ?? 0));
-    $loan = payroll_complete_money((float)($row['loan_deduction'] ?? 0));
-    $advance = payroll_complete_money((float)($row['salary_advance'] ?? 0));
-    $otherDed = payroll_complete_money((float)($row['other_deductions'] ?? 0));
-    $deductions = payroll_complete_money((float)($row['total_deductions'] ?? 0));
-    $net = payroll_complete_money((float)($row['net_salary'] ?? 0));
-
     $e = static fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 
     $html = '<!doctype html><html><body style="margin:0;background:#f3f6fa;font-family:Arial,sans-serif;color:#202831;">'
         . '<div style="max-width:680px;margin:24px auto;background:#fff;border:1px solid #dfe6ee;border-radius:12px;overflow:hidden;">'
-        . '<div style="padding:24px;background:#1f6fff;color:#fff;"><h1 style="margin:0;font-size:22px;">' . $e($companyName) . '</h1><div style="margin-top:6px;font-size:14px;">Official Payroll Payslip</div></div>'
-        . '<div style="padding:24px;">'
-        . '<p style="font-size:16px;">Dear <strong>' . $e($name) . '</strong>,</p>'
-        . '<p>Your official payslip for <strong>' . $e($periodLabel) . '</strong> is now available.</p>'
-        . '<table width="100%" cellpadding="9" cellspacing="0" style="border-collapse:collapse;font-size:14px;">'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Employee No.</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $e($row['employee_number'] ?? $row['staff_id']) . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Designation</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $e($row['staff_role'] ?? 'Staff') . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Branch</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $e($row['branch_name'] ?? '') . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Basic Salary</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $basic . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Gross Salary</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $gross . '</strong></td></tr>'
-        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Total Deductions</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $deductions . '</strong></td></tr>'
-        . '<tr><td style="padding-top:14px;font-size:17px;">NET SALARY</td><td align="right" style="padding-top:14px;font-size:19px;"><strong>' . $net . '</strong></td></tr>'
-        . '</table>'
-        . '<div style="margin-top:22px;padding:16px;background:#f5f8fc;border-radius:9px;">'
-        . '<strong>Official verification</strong><p style="margin:8px 0 14px;color:#5d6b79;">Use the official verification page to confirm that this payslip matches the company payroll record.</p>'
-        . '<a href="' . $e($verificationUrl) . '" style="display:inline-block;padding:11px 16px;background:#1f6fff;color:#fff;text-decoration:none;border-radius:7px;font-weight:bold;">Verify Payslip</a>'
-        . '</div>'
-        . '<p style="margin-top:24px;font-size:12px;color:#7a8794;">This email was generated by the official ' . $e($companyName) . ' Payroll system. Please keep this message for your records.</p>'
+        . '<div style="padding:22px;background:#1f6fff;color:#fff;"><h1 style="margin:0;font-size:21px;">' . $e($companyName) . '</h1>'
+        . '<div style="margin-top:5px;font-size:13px;">Official Payroll Payslip</div></div>'
+        . '<div style="padding:22px;">'
+        . '<p style="font-size:15px;">Dear <strong>' . $e($name) . '</strong>,</p>'
+        . '<p>Your official payslip for <strong>' . $e($periodLabel) . '</strong> is attached to this email as a PDF.</p>'
+        . '<p style="font-size:13px;color:#5d6b79;">The attached PDF is the same official payslip displayed in the Admin Payroll system. Use the verification address below to confirm its authenticity.</p>'
+        . '<p><a href="' . $e($verificationUrl) . '" style="display:inline-block;padding:10px 15px;background:#1f6fff;color:#fff;text-decoration:none;border-radius:7px;font-weight:bold;">Verify Payslip</a></p>'
+        . '<p style="margin-top:22px;font-size:11px;color:#7a8794;">Please keep the attached PDF for your records.</p>'
         . '</div></div></body></html>';
 
     $text = $companyName . " - Official Payroll Payslip\n\n"
         . "Dear " . $name . ",\n\n"
-        . "Your official payslip for " . $periodLabel . " is now available.\n\n"
-        . "Employee No.: " . ($row['employee_number'] ?? $row['staff_id']) . "\n"
-        . "Designation: " . ($row['staff_role'] ?? 'Staff') . "\n"
-        . "Branch: " . ($row['branch_name'] ?? '') . "\n"
-        . "Basic Salary: " . $basic . "\n"
-        . "Allowances: " . $allowances . "\n"
-        . "Bonus: " . $bonus . "\n"
-        . "Overtime: " . $overtime . "\n"
-        . "Other Earnings: " . $otherEarnings . "\n"
-        . "Gross Salary: " . $gross . "\n"
-        . "PAYE: " . $paye . "\n"
-        . "NAPSA: " . $napsa . "\n"
-        . "NHIMA: " . $nhima . "\n"
-        . "Loan: " . $loan . "\n"
-        . "Salary Advance: " . $advance . "\n"
-        . "Other Deductions: " . $otherDed . "\n"
-        . "Total Deductions: " . $deductions . "\n"
-        . "NET SALARY: " . $net . "\n\n"
-        . "Verify this official payslip:\n" . $verificationUrl . "\n";
+        . "Your official payslip for " . $periodLabel . " is attached to this email as a PDF.\n\n"
+        . "Verify this payslip:\n" . $verificationUrl . "\n";
 
-    return ['html' => $html, 'text' => $text];
+    return ['html'=>$html,'text'=>$text];
 }
 
 function payroll_ensure_payslip_identity(mysqli $conn, int $pharmacyId, array &$row): bool {
@@ -487,271 +461,315 @@ function payroll_ensure_payslip_identity(mysqli $conn, int $pharmacyId, array &$
     return $token !== '' && $hash !== '';
 }
 
+function payroll_prepare_payslip_view_data(mysqli $conn, array &$row, string $companyName, string $periodLabel): array {
+    $pharmacyId = (int)($row['pharmacy_id'] ?? 0);
+    $staffId = (int)($row['staff_id'] ?? 0);
 
-function payroll_payslip_pdf_content(array $row, string $companyName, string $verificationUrl, string $periodLabel): string {
-    /*
-     * This is the EMAIL version of the same standard payslip displayed by
-     * the admin's ?payslip=ID&print=1 view. The browser Print dialog itself
-     * cannot be captured by PHP, so we reproduce that exact document
-     * structure server-side for the PDF attachment.
-     */
-    $clean = static function ($v): string {
-        $v = trim((string)$v);
-        if ($v === '') return 'â€”';
-        if (function_exists('iconv')) {
-            $x = @iconv('UTF-8', 'Windows-1252//TRANSLIT', $v);
-            if ($x !== false) $v = $x;
-        }
-        $v = preg_replace('/[^\x20-\x7E\x80-\xFF]/', '?', $v);
-        return $v !== false ? $v : '?';
-    };
-    $esc = static function ($v) use ($clean): string {
-        return str_replace(['\\','(',')'], ['\\\\','\\(','\\)'], $clean($v));
-    };
-    $money = static fn($v) => 'K' . number_format((float)$v, 2);
-
-    $company=$clean($companyName);
-    $period=$clean($periodLabel);
-    $name=$clean($row['staff_name'] ?? 'Employee');
-    $role=$clean($row['staff_role'] ?? 'Staff');
-    $branch=$clean($row['branch_name'] ?? 'Main Branch');
-    $emp=$clean($row['employee_number'] ?? ($row['staff_id'] ?? ''));
-    $grade=$clean($row['salary_grade'] ?? $row['grade_name'] ?? 'â€”');
-    $bank=$clean($row['bank_name'] ?? 'â€”');
-    $accountName=$clean($row['account_name'] ?? $name);
-    $accountNo=$clean($row['account_number'] ?? 'â€”');
-    $currency=$clean($row['currency'] ?? 'ZMW');
-    $status=$clean(ucfirst((string)($row['status'] ?? 'draft')));
-    $payment=$clean($row['payment_method'] ?? 'Not paid');
-    $reference=$clean($row['payment_reference'] ?? 'â€”');
-    $token=trim((string)($row['verification_token'] ?? ''));
-    $days=(int)date('t', strtotime(($row['payroll_period'] ?? date('Y-m')) . '-01'));
-    if($days<1 || $days>31) $days=30;
-
-    $earn=[['Basic Salary',(float)($row['basic_salary']??0)]];
-    $allowTotal=0.0;
-    $allowJson=json_decode((string)($row['allowances_json']??'[]'),true);
-    if(is_array($allowJson)) foreach($allowJson as $a){
-        $n=trim((string)($a['name']??'')); $amt=(float)($a['amount']??0);
-        if($n!==''){ $earn[]=[$clean($n),$amt]; $allowTotal+=$amt; }
-    }
-    $remaining=max(0,(float)($row['allowances']??0)-$allowTotal);
-    if($remaining>0.004) $earn[]=['Other Allowances',$remaining];
-    foreach([['Bonus','bonus'],['Overtime','overtime'],['Other Earnings / Reimbursement','other_earnings']] as $x){
-        $amt=(float)($row[$x[1]]??0); if($amt>0) $earn[]=[$x[0],$amt];
+    foreach ([
+        'basic_salary','allowances','bonus','overtime','other_earnings',
+        'paye','napsa','nhima','loan_deduction','salary_advance',
+        'other_deductions','gross_salary','total_deductions','net_salary',
+        'employer_napsa','employer_nhima'
+    ] as $col) {
+        $row[$col] = (float)($row[$col] ?? 0);
     }
 
-    $ded=[['PAYE',(float)($row['paye']??0)],['NAPSA - Employee',(float)($row['napsa']??0)],['NHIMA - Employee',(float)($row['nhima']??0)]];
-    $dedJson=json_decode((string)($row['deductions_json']??'[]'),true);
-    if(is_array($dedJson)) foreach($dedJson as $d){
-        $n=trim((string)($d['name']??'')); $amt=(float)($d['amount']??0);
-        if($n!=='') $ded[]=[$clean($n),$amt];
-    }
-    foreach([['Loan','loan_deduction'],['Salary Advance','salary_advance'],['Other Deductions','other_deductions']] as $x){
-        $amt=(float)($row[$x[1]]??0); if($amt>0) $ded[]=[$x[0],$amt];
-    }
-
-    $W=595; $H=842; $L=30; $R=565; $CW=$R-$L; $y=812;
-    $c=[]; $c[]='q'; $c[]='0 0 0 RG'; $c[]='0 0 0 rg'; $c[]='0.65 w';
-    $line=function(&$c,$x1,$y1,$x2,$y2){$c[]=sprintf('%.2f %.2f m %.2f %.2f l S',$x1,$y1,$x2,$y2);};
-    $rect=function(&$c,$x,$yy,$w,$h){$c[]=sprintf('%.2f %.2f %.2f %.2f re S',$x,$yy,$w,$h);};
-    $tx=function(&$c,$f,$s,$x,$yy,$v)use($esc){$c[]=sprintf('BT /%s %.2f Tf %.2f %.2f Td (%s) Tj ET',$f,$s,$x,$yy,$esc($v));};
-    $tr=function(&$c,$f,$s,$x,$yy,$v)use($esc){$v=$esc($v);$x-=strlen($v)*$s*.48;$c[]=sprintf('BT /%s %.2f Tf %.2f %.2f Td (%s) Tj ET',$f,$s,max(0,$x),$yy,$v);};
-
-    # header
-    $rect($c,$L,$y-43,$CW,43); $line($c,$L,$y-22,$R,$y-22);
-    $tx($c,'F2',15,$L+($CW/2)-strlen($company)*4.0,$y-15,strtoupper($company));
-    $tx($c,'F2',10,$L+($CW/2)-strlen('Salary Slip for '.$period)*2.6,$y-36,'Salary Slip for '.$period);
-    $y-=48;
-
-    # employee info
-    $ih=91; $it=$y; $ib=$it-$ih; $half=$CW/2;
-    $rect($c,$L,$ib,$CW,$ih); $line($c,$L+$half,$ib,$L+$half,$it);
-    $pairs=[
-      [['Name',$name],['Department','â€”']],
-      [['Designation',$role],['Bank Name',$bank]],
-      [['Location',$branch],['Account Name',$accountName]],
-      [['Employee No.',$emp],['Bank Account No.',$accountNo]],
-      [['Salary Grade',$grade],['Currency',$currency]]
-    ];
-    $rh=$ih/5;
-    foreach($pairs as $i=>$pair){
-        $ry=$it-(($i+1)*$rh); if($i>0)$line($c,$L,$ry,$R,$ry);
-        for($s=0;$s<2;$s++){
-            $bx=$L+$s*$half;
-            $tx($c,'F2',7.2,$bx+6,$ry+6,$pair[$s][0]);
-            $tx($c,'F1',8.0,$bx+$half*.31+2,$ry+6,$pair[$s][1]);
+    if (trim((string)($row['branch_name'] ?? '')) === '') {
+        $row['branch_name'] = 'Main Branch';
+        $branchId = (int)($row['branch_id'] ?? 0);
+        if ($branchId > 0 && payroll_complete_table($conn, 'branches')) {
+            $b = payroll_complete_rows(
+                $conn,
+                "SELECT branch_name FROM branches WHERE id=? AND pharmacy_id=? LIMIT 1",
+                'ii',
+                [$branchId, $pharmacyId]
+            );
+            if (!empty($b[0]['branch_name'])) $row['branch_name'] = $b[0]['branch_name'];
         }
     }
-    $y=$ib-7;
 
-    # tables
-    $gap=7; $tw=($CW-$gap)/2; $titleH=20; $headH=21; $max=max(count($earn),count($ded),1);
-    $rh=min(20,max(14,128/$max)); $th=$titleH+$headH+(($max+1)*$rh);
-    $draw=function(&$c,$x,$top,$w,$title,$rows)use($line,$rect,$tx,$tr,$money,$currency,$titleH,$headH,$rh,$max){
-        $bottom=$top-$GLOBALS['__th']; # placeholder overwritten below
-    };
-    $drawTable=function(&$c,$x,$top,$w,$title,$rows)use($line,$rect,$tx,$tr,$money,$currency,$titleH,$headH,$rh,$max,$th){
-        $bottom=$top-$th; $rect($c,$x,$bottom,$w,$th);
-        $line($c,$x,$top-$titleH,$x+$w,$top-$titleH);
-        $line($c,$x,$top-$titleH-$headH,$x+$w,$top-$titleH-$headH);
-        $sw=42;$aw=88;
-        $line($c,$x+$sw,$bottom,$x+$sw,$top-$titleH);
-        $line($c,$x+$w-$aw,$bottom,$x+$w-$aw,$top-$titleH);
-        $tx($c,'F2',9.5,$x+$w/2-strlen($title)*2.6,$top-13,$title);
-        $tx($c,'F2',6.5,$x+6,$top-$titleH-12,'SERIAL');
-        $tx($c,'F2',6.5,$x+6,$top-$titleH-18,'NO.');
-        $tx($c,'F2',6.7,$x+$sw+5,$top-$titleH-15,'SALARY HEAD');
-        $tr($c,'F2',6.3,$x+$w-5,$top-$titleH-15,'AMOUNT ('.$currency.')');
-        $bt=$top-$titleH-$headH;
-        for($i=0;$i<$max+1;$i++){
-            $rt=$bt-$i*$rh; $rb=$rt-$rh;
-            if($i>0)$line($c,$x,$rt,$x+$w,$rt);
-            if($i<count($rows)){
-                $label=(string)$rows[$i][0]; if(strlen($label)>31)$label=substr($label,0,28).'...';
-                $tx($c,'F1',7.1,$x+16,$rb+$rh/2-2,(string)($i+1));
-                $tx($c,'F1',7.1,$x+$sw+5,$rb+$rh/2-2,$label);
-                $tr($c,'F1',7.1,$x+$w-5,$rb+$rh/2-2,$money($rows[$i][1]));
-            }
-        }
-        $total=0; foreach($rows as $r)$total+=(float)$r[1];
-        $tx($c,'F2',7.0,$x+$sw+5,$bottom+7,$title==='Earnings'?'Salary (Gross) / PM':'Total Deduction');
-        $tr($c,'F2',7.0,$x+$w-5,$bottom+7,$money($total));
-    };
-    $drawTable($c,$L,$y,$tw,'Earnings',$earn);
-    $drawTable($c,$L+$tw+$gap,$y,$tw,'Deductions',$ded);
-    $y-=$th+7;
-
-    # summaries
-    $sg=7;$sw=($CW-$sg)/2;$srh=23;
-    $ctc=(float)($row['gross_salary']??0)+(float)($row['employer_napsa']??0)+(float)($row['employer_nhima']??0);
-    $sum=[
-      ['Salary (Gross) / PM',$money($row['gross_salary']??0)],
-      ['Total Deduction',$money($row['total_deductions']??0)],
-      ['Salary (CTC) / PM',$money($ctc)],
-      ['Payment Status',$status],
-      ['Total Number of Days',(string)$days]
-    ];
-    for($i=0;$i<4;$i++){
-        $col=$i%2;$rn=intdiv($i,2);$sx=$L+$col*($sw+$sg);$sy=$y-$rn*($srh+6);
-        $rect($c,$sx,$sy-$srh,$sw,$srh);$line($c,$sx+$sw*.62,$sy-$srh,$sx+$sw*.62,$sy);
-        $tx($c,'F2',7,$sx+5,$sy-15,$sum[$i][0]);$tr($c,'F2',7.1,$sx+$sw-5,$sy-15,$sum[$i][1]);
+    if (!payroll_ensure_payslip_identity($conn, $pharmacyId, $row)) {
+        throw new RuntimeException('Could not create the official payslip verification identity.');
     }
-    $dy=$y-2*($srh+6);$rect($c,$L,$dy-$srh,$sw,$srh);$line($c,$L+$sw*.62,$dy-$srh,$L+$sw*.62,$dy);
-    $tx($c,'F2',7,$L+5,$dy-15,$sum[4][0]);$tr($c,'F2',7.1,$L+$sw-5,$dy-15,$sum[4][1]);
 
-    $ny=$dy-$srh-7;$nh=27;$rect($c,$L,$ny-$nh,$sw,$nh);$line($c,$L+$sw*.62,$ny-$nh,$L+$sw*.62,$ny);
-    $tx($c,'F2',9,$L+5,$ny-18,'NET SALARY');$tr($c,'F2',11.5,$L+$sw-5,$ny-18,$money($row['net_salary']??0));
-    $y=$ny-$nh-7;
+    $verificationToken = trim((string)($row['verification_token'] ?? ''));
+    $verificationUrl = payroll_public_base_url()
+        . '/verify-payslip.php?token=' . rawurlencode($verificationToken);
 
-    # authentication block
-    $ah=76;$ab=$y-$ah;$qw=96;$rect($c,$L,$ab,$CW,$ah);$line($c,$R-$qw,$ab,$R-$qw,$y);
-    $tx($c,'F2',7.5,$L+7,$y-14,'OFFICIAL ELECTRONIC PAYSLIP');
-    $tx($c,'F2',7,$L+7,$y-27,'Issued by '.$company.' Payroll');
-    $pid=$token!==''?'PS-'.substr($token,0,8).'-'.substr($token,8,8):'â€”';
-    $tx($c,'F1',7,$L+7,$y-40,'Payslip ID: '.$pid);
-    $tx($c,'F1',6.4,$L+7,$y-51,'Scan the QR code or visit the official verification address.');
-    $url=$verificationUrl; if(strlen($url)>105)$url=substr($url,0,102).'...';
-    $tx($c,'F1',5.7,$L+7,$y-63,$url);
-    $qx=$R-$qw+18;$qy=$ab+15;$qs=58;$rect($c,$qx,$qy,$qs,$qs);
-    $tx($c,'F2',6,$qx+9,$qy-9,'VERIFY ONLINE');
-    $y=$ab-7;
+    $template = null;
+    if ($staffId > 0 && payroll_complete_table($conn, 'payroll_salary_templates')) {
+        $templates = payroll_complete_rows(
+            $conn,
+            "SELECT * FROM payroll_salary_templates WHERE pharmacy_id=? AND staff_id=? LIMIT 1",
+            'ii',
+            [$pharmacyId, $staffId]
+        );
+        $template = $templates[0] ?? null;
+    }
 
-    # footer
-    $line($c,$L,$y,$R,$y);
-    $tx($c,'F1',6.5,$L,$y-13,'Payment:');$tx($c,'F2',6.5,$L+35,$y-13,$payment);
-    $tx($c,'F1',6.2,$L+205,$y-13,'Payment Reference: '.$reference);
-    $tr($c,'F1',6.2,$R,$y-13,'Generated: '.date('d M Y H:i'));
-    $tx($c,'F1',6.1,$L+115,$y-27,'This payslip is generated from the Payroll register for '.$period.'.');
-    $c[]='Q';
+    $allowanceItems = [];
+    $deductionItems = [];
+    if (is_array($template)) {
+        $decodedAllowances = json_decode((string)($template['allowances_json'] ?? '[]'), true);
+        $decodedDeductions = json_decode((string)($template['deductions_json'] ?? '[]'), true);
 
-    $content=implode("\n",$c)."\n";
-    $objs=[
-      '<< /Type /Catalog /Pages 2 0 R >>',
-      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /ProcSet [/PDF /Text] /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
-      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
-      '<< /Length '.strlen($content)." >>\nstream\n".$content."endstream"
+        foreach (is_array($decodedAllowances) ? $decodedAllowances : [] as $item) {
+            if (!is_array($item)) continue;
+            $name = trim((string)($item['name'] ?? $item['component'] ?? ''));
+            $amount = max(0, (float)($item['amount'] ?? 0));
+            if ($name !== '' && $amount > 0) $allowanceItems[] = ['name'=>$name,'amount'=>$amount];
+        }
+        foreach (is_array($decodedDeductions) ? $decodedDeductions : [] as $item) {
+            if (!is_array($item)) continue;
+            $name = trim((string)($item['name'] ?? $item['component'] ?? ''));
+            $amount = max(0, (float)($item['amount'] ?? 0));
+            if ($name !== '' && $amount > 0) $deductionItems[] = ['name'=>$name,'amount'=>$amount];
+        }
+    }
+
+    $date = DateTime::createFromFormat('Y-m-d', $periodLabel . '-01');
+    $days = $date ? (int)$date->format('t') : 30;
+
+    $currency = is_array($template) && trim((string)($template['currency'] ?? '')) !== ''
+        ? trim((string)$template['currency']) : 'ZMW';
+    $bankName = is_array($template) ? trim((string)($template['bank_name'] ?? '')) : '';
+    $accountName = is_array($template) ? trim((string)($template['account_name'] ?? '')) : '';
+    $accountNumber = is_array($template) ? trim((string)($template['account_number'] ?? '')) : '';
+    $grade = is_array($template) ? trim((string)($template['grade_name'] ?? '')) : '';
+
+    $isFinal = in_array(strtolower((string)($row['status'] ?? '')), ['approved','paid','locked'], true);
+
+    return [
+        'payslip' => $row,
+        'pharmacyName' => $companyName,
+        'periodLabel' => $periodLabel,
+        'payslipAllowanceItems' => $allowanceItems,
+        'payslipDeductionItems' => $deductionItems,
+        'payslipDaysInMonth' => $days,
+        'payslipCurrency' => $currency,
+        'payslipBankName' => $bankName,
+        'payslipAccountName' => $accountName,
+        'payslipAccountNumber' => $accountNumber,
+        'payslipGrade' => $grade,
+        'payslipVerificationToken' => $isFinal ? $verificationToken : '',
+        'payslipVerificationUrl' => $isFinal ? $verificationUrl : '',
+        'payslipIsFinal' => $isFinal,
     ];
-    $pdf="%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";$offs=[0];
-    foreach($objs as $i=>$obj){$n=$i+1;$offs[$n]=strlen($pdf);$pdf.=$n." 0 obj\n".$obj."\nendobj\n";}
-    $xref=strlen($pdf);$pdf.="xref\n0 ".(count($objs)+1)."\n0000000000 65535 f \n";
-    for($i=1;$i<=count($objs);$i++)$pdf.=sprintf("%010d 00000 n \n",$offs[$i]);
-    $pdf.="trailer\n<< /Size ".(count($objs)+1)." /Root 1 0 R >>\nstartxref\n".$xref."\n%%EOF\n";
+}
+
+function payroll_payslip_css(): string {
+    $source = @file_get_contents(__FILE__);
+    if ($source !== false && preg_match('/<style>(.*?)<\\/style>/is', $source, $m)) {
+        return (string)$m[1];
+    }
+    return '';
+}
+
+function payroll_render_payslip_sheet(array $data): string {
+    $payslip = $data['payslip'];
+    $pharmacyName = (string)$data['pharmacyName'];
+    $periodLabel = (string)$data['periodLabel'];
+    $payslipAllowanceItems = $data['payslipAllowanceItems'] ?? [];
+    $payslipDeductionItems = $data['payslipDeductionItems'] ?? [];
+    $payslipDaysInMonth = (int)($data['payslipDaysInMonth'] ?? 30);
+    $payslipCurrency = (string)($data['payslipCurrency'] ?? 'ZMW');
+    $payslipBankName = (string)($data['payslipBankName'] ?? '');
+    $payslipAccountName = (string)($data['payslipAccountName'] ?? '');
+    $payslipAccountNumber = (string)($data['payslipAccountNumber'] ?? '');
+    $payslipGrade = (string)($data['payslipGrade'] ?? '');
+    $payslipVerificationToken = (string)($data['payslipVerificationToken'] ?? '');
+    $payslipVerificationUrl = (string)($data['payslipVerificationUrl'] ?? '');
+    $payslipIsFinal = (bool)($data['payslipIsFinal'] ?? false);
+
+    ob_start();
+?>
+<!-- PAYSLIP_TEMPLATE_START -->
+<section class="payslip-sheet" id="payslipSheet">
+
+    <div class="payslip-header">
+        <div class="payslip-company">
+            <?= payroll_complete_h($pharmacyName) ?>
+        </div>
+        <div class="payslip-title">
+            Salary Slip for <?= payroll_complete_h($periodLabel) ?>
+        </div>
+    </div>
+
+    <div class="payslip-employee">
+        <div class="payslip-employee-column">
+            <div class="payslip-info-row"><div class="payslip-info-label">Name</div><div class="payslip-info-value"><?= payroll_complete_h($payslip['staff_name']) ?></div></div>
+            <div class="payslip-info-row"><div class="payslip-info-label">Designation</div><div class="payslip-info-value"><?= payroll_complete_h($payslip['staff_role']) ?></div></div>
+            <div class="payslip-info-row"><div class="payslip-info-label">Location</div><div class="payslip-info-value"><?= payroll_complete_h($payslip['branch_name']) ?></div></div>
+            <div class="payslip-info-row"><div class="payslip-info-label">Employee No.</div><div class="payslip-info-value"><?= $payslip['employee_number'] !== '' ? payroll_complete_h($payslip['employee_number']) : (int)$payslip['staff_id'] ?></div></div>
+            <div class="payslip-info-row"><div class="payslip-info-label">Salary Grade</div><div class="payslip-info-value"><?= payroll_complete_h($payslipGrade !== '' ? $payslipGrade : 'â€”') ?></div></div>
+        </div>
+        <div class="payslip-employee-column">
+            <div class="payslip-info-row"><div class="payslip-info-label">Department</div><div class="payslip-info-value">â€”</div></div>
+            <div class="payslip-info-row"><div class="payslip-info-label">Bank Name</div><div class="payslip-info-value"><?= payroll_complete_h($payslipBankName !== '' ? $payslipBankName : 'â€”') ?></div></div>
+            <div class="payslip-info-row"><div class="payslip-info-label">Account Name</div><div class="payslip-info-value"><?= payroll_complete_h($payslipAccountName !== '' ? $payslipAccountName : $payslip['staff_name']) ?></div></div>
+            <div class="payslip-info-row"><div class="payslip-info-label">Bank Account No.</div><div class="payslip-info-value"><?= payroll_complete_h($payslipAccountNumber !== '' ? $payslipAccountNumber : 'â€”') ?></div></div>
+            <div class="payslip-info-row"><div class="payslip-info-label">Currency</div><div class="payslip-info-value"><?= payroll_complete_h($payslipCurrency) ?></div></div>
+        </div>
+    </div>
+
+    <div class="payslip-tables">
+        <div class="payslip-table-wrap">
+            <div class="payslip-table-title">Earnings</div>
+            <table class="payslip-table"><thead><tr><th>Serial<br>No.</th><th>Salary Head</th><th>Amount (<?= payroll_complete_h($payslipCurrency) ?>)</th></tr></thead><tbody>
+<?php $earningSerial = 1; ?>
+            <tr><td><?= $earningSerial++ ?></td><td>Basic Salary</td><td class="amount"><?= payroll_complete_money((float)$payslip['basic_salary']) ?></td></tr>
+<?php $aggregateNamedAllowances = 0.0; foreach ($payslipAllowanceItems as $allowance): $aggregateNamedAllowances += (float)$allowance['amount']; ?>
+            <tr><td><?= $earningSerial++ ?></td><td><?= payroll_complete_h($allowance['name']) ?></td><td class="amount"><?= payroll_complete_money((float)$allowance['amount']) ?></td></tr>
+<?php endforeach; $remainingAllowances = max(0,(float)$payslip['allowances']-$aggregateNamedAllowances); if ($remainingAllowances > 0.004): ?>
+            <tr><td><?= $earningSerial++ ?></td><td>Other Allowances</td><td class="amount"><?= payroll_complete_money($remainingAllowances) ?></td></tr>
+<?php endif; if ((float)$payslip['bonus'] > 0): ?>
+            <tr><td><?= $earningSerial++ ?></td><td>Bonus</td><td class="amount"><?= payroll_complete_money((float)$payslip['bonus']) ?></td></tr>
+<?php endif; if ((float)$payslip['overtime'] > 0): ?>
+            <tr><td><?= $earningSerial++ ?></td><td>Overtime</td><td class="amount"><?= payroll_complete_money((float)$payslip['overtime']) ?></td></tr>
+<?php endif; if ((float)$payslip['other_earnings'] > 0): ?>
+            <tr><td><?= $earningSerial++ ?></td><td>Other Earnings / Reimbursement</td><td class="amount"><?= payroll_complete_money((float)$payslip['other_earnings']) ?></td></tr>
+<?php endif; ?>
+            <tr class="total-row"><td></td><td>Salary (Gross) / PM</td><td class="amount"><?= payroll_complete_money((float)$payslip['gross_salary']) ?></td></tr>
+            </tbody></table>
+        </div>
+
+        <div class="payslip-table-wrap">
+            <div class="payslip-table-title">Deductions</div>
+            <table class="payslip-table"><thead><tr><th>Serial<br>No.</th><th>Salary Head</th><th>Amount (<?= payroll_complete_h($payslipCurrency) ?>)</th></tr></thead><tbody>
+<?php $deductionSerial = 1; ?>
+            <tr><td><?= $deductionSerial++ ?></td><td>PAYE</td><td class="amount"><?= payroll_complete_money((float)$payslip['paye']) ?></td></tr>
+            <tr><td><?= $deductionSerial++ ?></td><td>NAPSA - Employee</td><td class="amount"><?= payroll_complete_money((float)$payslip['napsa']) ?></td></tr>
+            <tr><td><?= $deductionSerial++ ?></td><td>NHIMA - Employee</td><td class="amount"><?= payroll_complete_money((float)$payslip['nhima']) ?></td></tr>
+<?php $aggregateNamedDeductions = 0.0; foreach ($payslipDeductionItems as $deduction): $aggregateNamedDeductions += (float)$deduction['amount']; ?>
+            <tr><td><?= $deductionSerial++ ?></td><td><?= payroll_complete_h($deduction['name']) ?></td><td class="amount"><?= payroll_complete_money((float)$deduction['amount']) ?></td></tr>
+<?php endforeach; if ((float)$payslip['loan_deduction'] > 0): ?>
+            <tr><td><?= $deductionSerial++ ?></td><td>Loan</td><td class="amount"><?= payroll_complete_money((float)$payslip['loan_deduction']) ?></td></tr>
+<?php endif; if ((float)$payslip['salary_advance'] > 0): ?>
+            <tr><td><?= $deductionSerial++ ?></td><td>Salary Advance</td><td class="amount"><?= payroll_complete_money((float)$payslip['salary_advance']) ?></td></tr>
+<?php endif; if ((float)$payslip['other_deductions'] > 0): ?>
+            <tr><td><?= $deductionSerial++ ?></td><td>Other Deductions</td><td class="amount"><?= payroll_complete_money((float)$payslip['other_deductions']) ?></td></tr>
+<?php endif; ?>
+            <tr class="total-row"><td></td><td>Total Deduction</td><td class="amount"><?= payroll_complete_money((float)$payslip['total_deductions']) ?></td></tr>
+            </tbody></table>
+        </div>
+    </div>
+
+    <div class="payslip-summary">
+        <div class="payslip-summary-row"><div class="payslip-summary-label">Salary (Gross) / PM</div><div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['gross_salary']) ?></div></div>
+        <div class="payslip-summary-row"><div class="payslip-summary-label">Total Deduction</div><div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['total_deductions']) ?></div></div>
+        <div class="payslip-summary-row"><div class="payslip-summary-label">Salary (CTC) / PM</div><div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['gross_salary']+(float)$payslip['employer_napsa']+(float)$payslip['employer_nhima']) ?></div></div>
+        <div class="payslip-summary-row"><div class="payslip-summary-label">Payment Status</div><div class="payslip-summary-value"><?= payroll_complete_h(ucfirst((string)($payslip['status'] ?? 'draft'))) ?></div></div>
+        <div class="payslip-summary-row full"><div class="payslip-summary-label">Total Number of Days</div><div class="payslip-summary-value"><?= $payslipDaysInMonth ?></div></div>
+    </div>
+
+    <div class="payslip-net-row"><div class="payslip-summary-label">NET SALARY</div><div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['net_salary']) ?></div></div>
+
+<?php if ($payslipIsFinal && $payslipVerificationToken !== ''): ?>
+    <div class="payslip-authentication">
+        <div class="payslip-auth-copy">
+            <div class="payslip-auth-title">OFFICIAL ELECTRONIC PAYSLIP</div>
+            <div class="payslip-auth-status">âœ“ Issued by <?= payroll_complete_h($pharmacyName) ?> Payroll</div>
+            <div class="payslip-auth-id">Payslip ID: <strong><?= payroll_complete_h('PS-' . substr($payslipVerificationToken,0,8) . '-' . substr($payslipVerificationToken,8,8)) ?></strong></div>
+            <div class="payslip-auth-instruction">Scan the QR code or visit the verification address to confirm this payslip against the official payroll record.</div>
+            <div class="payslip-auth-url"><?= payroll_complete_h($payslipVerificationUrl) ?></div>
+        </div>
+        <div class="payslip-qr"><img src="https://quickchart.io/qr?text=<?= rawurlencode($payslipVerificationUrl) ?>&size=150&margin=1" alt="Payslip verification QR code"><span>SCAN TO VERIFY</span></div>
+    </div>
+<?php endif; ?>
+
+    <div class="payslip-footer">
+        <div>Payment: <strong><?= payroll_complete_h($payslip['payment_method'] ?? 'Not paid') ?></strong></div>
+        <div>Payment Reference: <strong><?= payroll_complete_h($payslip['payment_reference'] ?? 'â€”') ?></strong></div>
+        <div>Generated: <strong><?= payroll_complete_h(date('d M Y H:i')) ?></strong></div>
+    </div>
+    <div class="payslip-note">This payslip is generated from the Payroll register for <?= payroll_complete_h($periodLabel) ?>.</div>
+
+</section>
+<!-- PAYSLIP_TEMPLATE_END -->
+<?php
+    return (string)ob_get_clean();
+}
+
+function payroll_payslip_pdf_content(array $data): string {
+    $autoloads = [
+        __DIR__ . '/../../vendor/autoload.php',
+        __DIR__ . '/../../../vendor/autoload.php',
+        dirname(__DIR__, 2) . '/vendor/autoload.php',
+    ];
+    foreach ($autoloads as $autoload) {
+        if (is_file($autoload)) {
+            require_once $autoload;
+            if (class_exists('Dompdf\\Dompdf')) break;
+        }
+    }
+
+    if (!class_exists('Dompdf\\Dompdf')) {
+        throw new RuntimeException('PDF engine is not installed. Run: composer require dompdf/dompdf');
+    }
+
+    $sheet = payroll_render_payslip_sheet($data);
+    $css = payroll_payslip_css();
+    $html = '<!doctype html><html><head><meta charset="UTF-8"><style>' . $css . '</style>'
+        . '<style>html,body{margin:0!important;padding:0!important;background:#fff!important;} .payslip-sheet{display:block!important;width:190mm!important;max-width:190mm!important;margin:0 auto!important;padding:0!important;background:#fff!important;color:#111!important;font-size:10px!important;} .payslip-sheet *{box-sizing:border-box!important;} @page{size:A4 portrait;margin:10mm;}</style>'
+        . '</head><body class="print-payslip">' . $sheet . '</body></html>';
+
+    $options = new \Dompdf\Options();
+    $options->set('isRemoteEnabled', true);
+    $options->set('defaultFont', 'Arial');
+    $options->set('isHtml5ParserEnabled', true);
+
+    $dompdf = new \Dompdf\Dompdf($options);
+    $dompdf->loadHtml($html, 'UTF-8');
+    $dompdf->setPaper('A4', 'portrait');
+    $dompdf->render();
+    $pdf = $dompdf->output();
+
+    if (!is_string($pdf) || strncmp($pdf, '%PDF-', 5) !== 0) {
+        throw new RuntimeException('PDF engine did not return a valid PDF document.');
+    }
     return $pdf;
 }
 
 function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$row, string $companyName, string $periodLabel): array {
     $email = trim((string)($row['email'] ?? ''));
-    if ($email === '') {
-        return ['ok'=>false, 'error'=>'No email address is recorded for this employee.'];
+    if ($email === '') return ['ok'=>false, 'error'=>'No email address is recorded for this employee.'];
+
+    try {
+        $data = payroll_prepare_payslip_view_data($conn, $row, $companyName, $periodLabel);
+        $verificationUrl = (string)($data['payslipVerificationUrl'] ?? '');
+        $content = payroll_payslip_email_message($row, $companyName, $verificationUrl, $periodLabel);
+        $pdf = payroll_payslip_pdf_content($data);
+
+        $safeName = preg_replace('/[^A-Za-z0-9._-]+/', '_', trim((string)($row['staff_name'] ?? 'Employee')));
+        $safeName = trim((string)$safeName, '._-');
+        if ($safeName === '') $safeName = 'Employee';
+        $filename = 'Payslip-' . $safeName . '-' . preg_replace('/[^0-9-]/', '', $periodLabel) . '.pdf';
+
+        $subject = $companyName . ' â€” Payslip for ' . $periodLabel;
+        $result = payroll_mail_send_html(
+            $email,
+            (string)($row['staff_name'] ?? ''),
+            $subject,
+            $content['html'],
+            $content['text'],
+            [['name'=>$filename,'content'=>$pdf]]
+        );
+    } catch (Throwable $e) {
+        $result = ['ok'=>false, 'error'=>$e->getMessage()];
     }
-
-    if (!payroll_ensure_payslip_identity($conn, $pharmacyId, $row)) {
-        return ['ok'=>false, 'error'=>'Could not create the official payslip verification identity.'];
-    }
-
-    $verificationUrl = payroll_public_base_url()
-        . '/verify-payslip.php?token='
-        . rawurlencode((string)$row['verification_token']);
-
-    $content = payroll_payslip_email_content($row, $companyName, $verificationUrl, $periodLabel);
-    $subject = $companyName . ' â€” Payslip for ' . $periodLabel;
-
-    $pdfContent = payroll_payslip_pdf_content($row, $companyName, $verificationUrl, $periodLabel);
-    if (strncmp($pdfContent, '%PDF-', 5) !== 0 || strlen($pdfContent) < 1000) {
-        return ['ok'=>false, 'error'=>'The official payslip PDF could not be generated.'];
-    }
-
-    $safeEmployee = preg_replace('/[^A-Za-z0-9_-]+/', '-', trim((string)($row['staff_name'] ?? 'Employee')));
-    $safeEmployee = trim($safeEmployee, '-_');
-    if ($safeEmployee === '') $safeEmployee = 'Employee';
-
-    $safePeriod = preg_replace('/[^A-Za-z0-9_-]+/', '-', $periodLabel);
-    $safePeriod = trim($safePeriod, '-_');
-
-    $pdfName = 'Payslip-' . $safeEmployee . '-' . $safePeriod . '.pdf';
-
-    $result = payroll_mail_send_html(
-        $email,
-        (string)($row['staff_name'] ?? ''),
-        $subject,
-        $content['html'],
-        $content['text'],
-        [[
-            'name' => $pdfName,
-            'content' => $pdfContent,
-        ]]
-    );
 
     $status = $result['ok'] ? 'sent' : 'failed';
     $errorText = $result['ok'] ? null : (string)$result['error'];
-
-    $stmt = $conn->prepare(
-        "UPDATE payroll_records
-         SET payslip_email_status=?,
-             payslip_email_sent_at=CASE WHEN ?='sent' THEN NOW() ELSE payslip_email_sent_at END,
-             payslip_email_error=?
-         WHERE id=? AND pharmacy_id=?"
-    );
+    $stmt = $conn->prepare("UPDATE payroll_records SET payslip_email_status=?, payslip_email_sent_at=CASE WHEN ?='sent' THEN NOW() ELSE payslip_email_sent_at END, payslip_email_error=? WHERE id=? AND pharmacy_id=?");
     if ($stmt) {
-        $stmt->bind_param(
-            'sssii',
-            $status,
-            $status,
-            $errorText,
-            $row['id'],
-            $pharmacyId
-        );
+        $id = (int)($row['id'] ?? 0);
+        $stmt->bind_param('sssii', $status, $status, $errorText, $id, $pharmacyId);
         $stmt->execute();
         $stmt->close();
     }
-
     $row['payslip_email_status'] = $status;
     $row['payslip_email_error'] = $errorText;
     if ($result['ok']) $row['payslip_email_sent_at'] = date('Y-m-d H:i:s');
-
     return $result;
 }
 
@@ -4832,319 +4850,22 @@ foreach ($ytdRows as $yr) {
 
 <?php if ($payslip !== null && isset($_GET['print']) && $_GET['print'] === '1'): ?>
 
-<section class="payslip-sheet" id="payslipSheet">
-
-    <div class="payslip-header">
-        <div class="payslip-company">
-            <?= payroll_complete_h($pharmacyName) ?>
-        </div>
-        <div class="payslip-title">
-            Salary Slip for <?= payroll_complete_h($periodLabel) ?>
-        </div>
-    </div>
-
-    <div class="payslip-employee">
-
-        <div class="payslip-employee-column">
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Name</div>
-                <div class="payslip-info-value"><?= payroll_complete_h($payslip['staff_name']) ?></div>
-            </div>
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Designation</div>
-                <div class="payslip-info-value"><?= payroll_complete_h($payslip['staff_role']) ?></div>
-            </div>
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Location</div>
-                <div class="payslip-info-value"><?= payroll_complete_h($payslip['branch_name']) ?></div>
-            </div>
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Employee No.</div>
-                <div class="payslip-info-value">
-                    <?= $payslip['employee_number'] !== ''
-                        ? payroll_complete_h($payslip['employee_number'])
-                        : (int)$payslip['staff_id'] ?>
-                </div>
-            </div>
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Salary Grade</div>
-                <div class="payslip-info-value"><?= payroll_complete_h($payslipGrade !== '' ? $payslipGrade : 'â€”') ?></div>
-            </div>
-        </div>
-
-        <div class="payslip-employee-column">
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Department</div>
-                <div class="payslip-info-value">â€”</div>
-            </div>
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Bank Name</div>
-                <div class="payslip-info-value"><?= payroll_complete_h($payslipBankName !== '' ? $payslipBankName : 'â€”') ?></div>
-            </div>
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Account Name</div>
-                <div class="payslip-info-value">
-                    <?= payroll_complete_h($payslipAccountName !== '' ? $payslipAccountName : $payslip['staff_name']) ?>
-                </div>
-            </div>
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Bank Account No.</div>
-                <div class="payslip-info-value"><?= payroll_complete_h($payslipAccountNumber !== '' ? $payslipAccountNumber : 'â€”') ?></div>
-            </div>
-            <div class="payslip-info-row">
-                <div class="payslip-info-label">Currency</div>
-                <div class="payslip-info-value"><?= payroll_complete_h($payslipCurrency) ?></div>
-            </div>
-        </div>
-
-    </div>
-
-    <div class="payslip-tables">
-
-        <div class="payslip-table-wrap">
-            <div class="payslip-table-title">Earnings</div>
-
-            <table class="payslip-table">
-                <thead>
-                    <tr>
-                        <th>Serial<br>No.</th>
-                        <th>Salary Head</th>
-                        <th>Amount (<?= payroll_complete_h($payslipCurrency) ?>)</th>
-                    </tr>
-                </thead>
-                <tbody>
-
-                    <?php $earningSerial = 1; ?>
-
-                    <tr>
-                        <td><?= $earningSerial++ ?></td>
-                        <td>Basic Salary</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['basic_salary']) ?></td>
-                    </tr>
-
-                    <?php
-                    $aggregateNamedAllowances = 0.0;
-                    foreach ($payslipAllowanceItems as $allowance):
-                        $aggregateNamedAllowances += (float)$allowance['amount'];
-                    ?>
-                    <tr>
-                        <td><?= $earningSerial++ ?></td>
-                        <td><?= payroll_complete_h($allowance['name']) ?></td>
-                        <td class="amount"><?= payroll_complete_money((float)$allowance['amount']) ?></td>
-                    </tr>
-                    <?php endforeach; ?>
-
-                    <?php
-                    $remainingAllowances = max(
-                        0,
-                        (float)$payslip['allowances'] - $aggregateNamedAllowances
-                    );
-                    ?>
-                    <?php if ($remainingAllowances > 0.004): ?>
-                    <tr>
-                        <td><?= $earningSerial++ ?></td>
-                        <td>Other Allowances</td>
-                        <td class="amount"><?= payroll_complete_money($remainingAllowances) ?></td>
-                    </tr>
-                    <?php endif; ?>
-
-                    <?php if ((float)$payslip['bonus'] > 0): ?>
-                    <tr>
-                        <td><?= $earningSerial++ ?></td>
-                        <td>Bonus</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['bonus']) ?></td>
-                    </tr>
-                    <?php endif; ?>
-
-                    <?php if ((float)$payslip['overtime'] > 0): ?>
-                    <tr>
-                        <td><?= $earningSerial++ ?></td>
-                        <td>Overtime</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['overtime']) ?></td>
-                    </tr>
-                    <?php endif; ?>
-
-                    <?php if ((float)$payslip['other_earnings'] > 0): ?>
-                    <tr>
-                        <td><?= $earningSerial++ ?></td>
-                        <td>Other Earnings / Reimbursement</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['other_earnings']) ?></td>
-                    </tr>
-                    <?php endif; ?>
-
-                    <tr class="total-row">
-                        <td></td>
-                        <td>Salary (Gross) / PM</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['gross_salary']) ?></td>
-                    </tr>
-
-                </tbody>
-            </table>
-        </div>
-
-        <div class="payslip-table-wrap">
-            <div class="payslip-table-title">Deductions</div>
-
-            <table class="payslip-table">
-                <thead>
-                    <tr>
-                        <th>Serial<br>No.</th>
-                        <th>Salary Head</th>
-                        <th>Amount (<?= payroll_complete_h($payslipCurrency) ?>)</th>
-                    </tr>
-                </thead>
-                <tbody>
-
-                    <?php $deductionSerial = 1; ?>
-
-                    <tr>
-                        <td><?= $deductionSerial++ ?></td>
-                        <td>PAYE</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['paye']) ?></td>
-                    </tr>
-
-                    <tr>
-                        <td><?= $deductionSerial++ ?></td>
-                        <td>NAPSA - Employee</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['napsa']) ?></td>
-                    </tr>
-
-                    <tr>
-                        <td><?= $deductionSerial++ ?></td>
-                        <td>NHIMA - Employee</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['nhima']) ?></td>
-                    </tr>
-
-                    <?php
-                    $aggregateNamedDeductions = 0.0;
-                    foreach ($payslipDeductionItems as $deduction):
-                        $aggregateNamedDeductions += (float)$deduction['amount'];
-                    ?>
-                    <tr>
-                        <td><?= $deductionSerial++ ?></td>
-                        <td><?= payroll_complete_h($deduction['name']) ?></td>
-                        <td class="amount"><?= payroll_complete_money((float)$deduction['amount']) ?></td>
-                    </tr>
-                    <?php endforeach; ?>
-
-                    <?php if ((float)$payslip['loan_deduction'] > 0): ?>
-                    <tr>
-                        <td><?= $deductionSerial++ ?></td>
-                        <td>Loan</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['loan_deduction']) ?></td>
-                    </tr>
-                    <?php endif; ?>
-
-                    <?php if ((float)$payslip['salary_advance'] > 0): ?>
-                    <tr>
-                        <td><?= $deductionSerial++ ?></td>
-                        <td>Salary Advance</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['salary_advance']) ?></td>
-                    </tr>
-                    <?php endif; ?>
-
-                    <?php if ((float)$payslip['other_deductions'] > 0): ?>
-                    <tr>
-                        <td><?= $deductionSerial++ ?></td>
-                        <td>Other Deductions</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['other_deductions']) ?></td>
-                    </tr>
-                    <?php endif; ?>
-
-                    <tr class="total-row">
-                        <td></td>
-                        <td>Total Deduction</td>
-                        <td class="amount"><?= payroll_complete_money((float)$payslip['total_deductions']) ?></td>
-                    </tr>
-
-                </tbody>
-            </table>
-        </div>
-
-    </div>
-
-    <div class="payslip-summary">
-
-        <div class="payslip-summary-row">
-            <div class="payslip-summary-label">Salary (Gross) / PM</div>
-            <div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['gross_salary']) ?></div>
-        </div>
-
-        <div class="payslip-summary-row">
-            <div class="payslip-summary-label">Total Deduction</div>
-            <div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['total_deductions']) ?></div>
-        </div>
-
-        <div class="payslip-summary-row">
-            <div class="payslip-summary-label">Salary (CTC) / PM</div>
-            <div class="payslip-summary-value">
-                <?= payroll_complete_money(
-                    (float)$payslip['gross_salary']
-                    + (float)$payslip['employer_napsa']
-                    + (float)$payslip['employer_nhima']
-                ) ?>
-            </div>
-        </div>
-
-        <div class="payslip-summary-row">
-            <div class="payslip-summary-label">Payment Status</div>
-            <div class="payslip-summary-value">
-                <?= payroll_complete_h(ucfirst((string)($payslip['status'] ?? 'draft'))) ?>
-            </div>
-        </div>
-
-        <div class="payslip-summary-row full">
-            <div class="payslip-summary-label">Total Number of Days</div>
-            <div class="payslip-summary-value"><?= (int)$payslipDaysInMonth ?></div>
-        </div>
-
-    </div>
-
-    <div class="payslip-net-row">
-        <div class="payslip-summary-label">NET SALARY</div>
-        <div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['net_salary']) ?></div>
-    </div>
-
-    <?php if ($payslipIsFinal && $payslipVerificationToken !== ''): ?>
-    <div class="payslip-authentication">
-        <div class="payslip-auth-copy">
-            <div class="payslip-auth-title">OFFICIAL ELECTRONIC PAYSLIP</div>
-            <div class="payslip-auth-status">âœ“ Issued by <?= payroll_complete_h($pharmacyName) ?> Payroll</div>
-            <div class="payslip-auth-id">Payslip ID: <strong><?= payroll_complete_h('PS-' . substr($payslipVerificationToken, 0, 8) . '-' . substr($payslipVerificationToken, 8, 8)) ?></strong></div>
-            <div class="payslip-auth-instruction">Scan the QR code or visit the verification address to confirm this payslip against the official payroll record.</div>
-            <div class="payslip-auth-url"><?= payroll_complete_h($payslipVerificationUrl) ?></div>
-        </div>
-        <div class="payslip-qr">
-            <img
-                src="https://quickchart.io/qr?text=<?= rawurlencode($payslipVerificationUrl) ?>&size=150&margin=1"
-                alt="Payslip verification QR code"
-            >
-            <span>SCAN TO VERIFY</span>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <div class="payslip-footer">
-        <div>
-            Payment:
-            <strong><?= payroll_complete_h($payslip['payment_method'] ?? 'Not paid') ?></strong>
-        </div>
-        <div>
-            Payment Reference:
-            <strong><?= payroll_complete_h($payslip['payment_reference'] ?? 'â€”') ?></strong>
-        </div>
-        <div>
-            Generated:
-            <strong><?= payroll_complete_h(date('d M Y H:i')) ?></strong>
-        </div>
-    </div>
-
-    <div class="payslip-note">
-        This payslip is generated from the Payroll register for
-        <?= payroll_complete_h($periodLabel) ?>.
-    </div>
-
-</section>
+<?= payroll_render_payslip_sheet([
+    'payslip' => $payslip,
+    'pharmacyName' => $pharmacyName,
+    'periodLabel' => $periodLabel,
+    'payslipAllowanceItems' => $payslipAllowanceItems,
+    'payslipDeductionItems' => $payslipDeductionItems,
+    'payslipDaysInMonth' => $payslipDaysInMonth,
+    'payslipCurrency' => $payslipCurrency,
+    'payslipBankName' => $payslipBankName,
+    'payslipAccountName' => $payslipAccountName,
+    'payslipAccountNumber' => $payslipAccountNumber,
+    'payslipGrade' => $payslipGrade,
+    'payslipVerificationToken' => $payslipVerificationToken,
+    'payslipVerificationUrl' => $payslipVerificationUrl,
+    'payslipIsFinal' => $payslipIsFinal,
+]) ?>
 
 <script>
 (function () {
