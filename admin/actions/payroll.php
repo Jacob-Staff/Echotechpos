@@ -1850,17 +1850,102 @@ if ($view === 'ytd') {
 
 $payslipStaffId = (int)($_GET['payslip'] ?? 0);
 $payslip = null;
-$payslipTemplate = [];
 
 if ($payslipStaffId > 0) {
     foreach ($payrollRows as $row) {
         if ((int)$row['staff_id'] === $payslipStaffId) {
             $payslip = $row;
-            $payslipTemplate = $salaryTemplates[$payslipStaffId] ?? [];
             break;
         }
     }
 }
+
+/*
+ * Payslip salary template data.
+ * The monthly payroll record remains the source for calculated amounts.
+ * The template supplies salary metadata and named recurring components.
+ */
+$payslipTemplate = null;
+if ($payslip !== null) {
+    $payslipTemplate = $salaryTemplates[(int)$payslip['staff_id']] ?? null;
+}
+
+$payslipAllowanceItems = [];
+$payslipDeductionItems = [];
+
+if (is_array($payslipTemplate)) {
+    $decodedAllowances = json_decode(
+        (string)($payslipTemplate['allowances_json'] ?? '[]'),
+        true
+    );
+    $decodedDeductions = json_decode(
+        (string)($payslipTemplate['deductions_json'] ?? '[]'),
+        true
+    );
+
+    if (is_array($decodedAllowances)) {
+        foreach ($decodedAllowances as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $name = trim((string)($item['name'] ?? $item['component'] ?? ''));
+            $amount = max(0, (float)($item['amount'] ?? 0));
+
+            if ($name !== '' && $amount > 0) {
+                $payslipAllowanceItems[] = [
+                    'name' => $name,
+                    'amount' => $amount,
+                ];
+            }
+        }
+    }
+
+    if (is_array($decodedDeductions)) {
+        foreach ($decodedDeductions as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $name = trim((string)($item['name'] ?? $item['component'] ?? ''));
+            $amount = max(0, (float)($item['amount'] ?? 0));
+
+            if ($name !== '' && $amount > 0) {
+                $payslipDeductionItems[] = [
+                    'name' => $name,
+                    'amount' => $amount,
+                ];
+            }
+        }
+    }
+}
+
+$payslipDaysInMonth = cal_days_in_month(
+    CAL_GREGORIAN,
+    $selectedMonth,
+    $selectedYear
+);
+
+$payslipCurrency = 'ZMW';
+if (is_array($payslipTemplate) && !empty($payslipTemplate['currency'])) {
+    $payslipCurrency = (string)$payslipTemplate['currency'];
+}
+
+$payslipBankName = is_array($payslipTemplate)
+    ? trim((string)($payslipTemplate['bank_name'] ?? ''))
+    : '';
+
+$payslipAccountName = is_array($payslipTemplate)
+    ? trim((string)($payslipTemplate['account_name'] ?? ''))
+    : '';
+
+$payslipAccountNumber = is_array($payslipTemplate)
+    ? trim((string)($payslipTemplate['account_number'] ?? ''))
+    : '';
+
+$payslipGrade = is_array($payslipTemplate)
+    ? trim((string)($payslipTemplate['grade_name'] ?? ''))
+    : '';
 
 /* ---------- Shared shell ---------- */
 
@@ -2318,141 +2403,125 @@ tbody tr:hover{background:#fbfcfd}
 
 .payslip-sheet{
     display:none;
-    width:900px;
+    width:860px;
     max-width:100%;
     margin:0 auto;
     background:#fff;
-    color:#111;
-    padding:18px;
+    color:#111827;
+    padding:24px;
     font-family:Arial,Helvetica,sans-serif;
     font-size:12px;
 }
-.payslip-standard{
-    border:1px solid #111;
-    background:#fff;
-}
-.ps-company{
+.payslip-sheet *{box-sizing:border-box}
+.payslip-header{
+    border:1px solid #111827;
+    border-bottom:0;
     text-align:center;
-    border-bottom:1px solid #111;
 }
-.ps-company-name{
-    font-size:18px;
+.payslip-company{
+    padding:8px 10px;
+    font-size:16px;
     font-weight:800;
     text-transform:uppercase;
-    padding:8px 10px 5px;
+    border-bottom:1px solid #111827;
 }
-.ps-title{
+.payslip-title{
+    padding:6px 10px;
     font-size:13px;
     font-weight:700;
-    padding:5px 10px 7px;
-    border-top:1px solid #111;
 }
-.ps-meta{
-    width:100%;
-    border-collapse:collapse;
-}
-.ps-meta td{
-    width:50%;
-    padding:4px 10px;
-    vertical-align:top;
-}
-.ps-meta td:nth-child(odd){
-    border-right:1px solid #111;
-}
-.ps-label{
-    display:inline-block;
-    min-width:105px;
-    font-weight:700;
-}
-.ps-body{
+.payslip-employee{
     display:grid;
     grid-template-columns:1fr 1fr;
-    border-top:1px solid #111;
+    border:1px solid #111827;
+    border-bottom:0;
 }
-.ps-box{
-    min-width:0;
+.payslip-employee-column{min-width:0}
+.payslip-employee-column + .payslip-employee-column{border-left:1px solid #111827}
+.payslip-info-row{
+    display:grid;
+    grid-template-columns:145px 1fr;
+    min-height:24px;
 }
-.ps-box:first-child{
-    border-right:1px solid #111;
+.payslip-info-row + .payslip-info-row{border-top:1px solid #d1d5db}
+.payslip-info-label{padding:5px 7px;font-weight:700}
+.payslip-info-value{padding:5px 7px;word-break:break-word}
+.payslip-tables{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    margin-top:10px;
 }
-.ps-table{
-    width:100%;
-    border-collapse:collapse;
+.payslip-table-wrap{border:1px solid #111827}
+.payslip-table-title{
+    text-align:center;
+    font-weight:800;
+    padding:6px;
+    border-bottom:1px solid #111827;
+    font-size:13px;
 }
-.ps-table th,
-.ps-table td{
-    border-bottom:1px solid #111;
+.payslip-table{width:100%;border-collapse:collapse;table-layout:fixed}
+.payslip-table th,.payslip-table td{
+    border-right:1px solid #d1d5db;
+    border-bottom:1px solid #d1d5db;
+    padding:5px 6px;
+    vertical-align:middle;
+}
+.payslip-table th:last-child,.payslip-table td:last-child{border-right:0}
+.payslip-table th{font-weight:800;background:#f8fafc;text-align:left}
+.payslip-table th:first-child,.payslip-table td:first-child{width:48px;text-align:center}
+.payslip-table th:last-child,.payslip-table td:last-child{
+    width:120px;text-align:right
+}
+.payslip-table .amount{text-align:right;white-space:nowrap}
+.payslip-table .total-row td{
+    border-top:1px solid #111827;
+    border-bottom:0;
+    font-weight:800;
+}
+.payslip-summary{
+    margin-top:10px;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    column-gap:70px;
+    row-gap:7px;
+    align-items:center;
+}
+.payslip-summary-row{
+    display:grid;
+    grid-template-columns:180px 1fr;
+    min-height:25px;
+    border:1px solid #111827;
+}
+.payslip-summary-label{padding:5px 7px;font-weight:700}
+.payslip-summary-value{
     padding:5px 7px;
-    vertical-align:top;
-}
-.ps-table th{
-    font-weight:800;
-    text-align:center;
-    background:#fafafa;
-}
-.ps-table th:first-child,
-.ps-table td:first-child{
-    text-align:center;
-    width:58px;
-}
-.ps-table th:nth-child(2),
-.ps-table td:nth-child(2){
-    text-align:left;
-}
-.ps-table th:last-child,
-.ps-table td:last-child{
     text-align:right;
-    width:125px;
-}
-.ps-total-row td{
-    font-weight:800;
-    border-top:1px solid #111;
-}
-.ps-summary{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    border-top:1px solid #111;
-}
-.ps-summary-box{
-    padding:0;
-}
-.ps-summary-box:first-child{
-    border-right:1px solid #111;
-}
-.ps-summary-line{
-    display:grid;
-    grid-template-columns:1fr 150px;
-    min-height:28px;
-    border-bottom:1px solid #111;
-}
-.ps-summary-line span,
-.ps-summary-line strong{
-    padding:6px 9px;
-}
-.ps-summary-line strong{
-    text-align:right;
-    border-left:1px solid #111;
-}
-.ps-net-line{
-    font-size:14px;
-    font-weight:800;
-}
-.ps-footer{
-    display:flex;
-    justify-content:space-between;
-    gap:15px;
-    padding:9px 10px;
-    font-size:10px;
-}
-.ps-amount{
+    font-weight:700;
     white-space:nowrap;
 }
-@media(max-width:700px){
-    .ps-body,.ps-summary{grid-template-columns:1fr}
-    .ps-box:first-child,.ps-summary-box:first-child{border-right:0}
-    .ps-box + .ps-box,.ps-summary-box + .ps-summary-box{border-top:1px solid #111}
-    .ps-summary-line{grid-template-columns:1fr 120px}
+.payslip-summary-row.full{
+    grid-column:1 / -1;
+    width:calc(50% - 35px);
 }
+.payslip-net-row{
+    margin-top:7px;
+    border:1px solid #111827;
+    display:grid;
+    grid-template-columns:180px 1fr;
+    width:calc(50% - 35px);
+}
+.payslip-net-row .payslip-summary-value{font-size:14px;font-weight:800}
+.payslip-footer{
+    margin-top:12px;
+    padding-top:8px;
+    border-top:1px solid #111827;
+    display:flex;
+    justify-content:space-between;
+    gap:20px;
+    font-size:10px;
+}
+.payslip-note{margin-top:8px;font-size:9px;color:#4b5563;text-align:center}
 @media(max-width:1200px){
     .summary-grid{grid-template-columns:repeat(2,1fr)}
     .filter-row{grid-template-columns:1fr 1fr}
@@ -3729,158 +3798,329 @@ foreach ($ytdRows as $yr) {
 <?php
 /*
 |--------------------------------------------------------------------------
-| Inline printable payslip.
+| Standard printable payslip.
 |
-| It is deliberately part of this same payroll action file.
+| This remains inside the single Payroll controller. Monthly payroll values
+| are the source of calculated amounts; the salary template supplies bank
+| and named recurring salary components.
 |--------------------------------------------------------------------------
 */
+?>
 
-if ($payslip !== null && isset($_GET['print']) && $_GET['print'] === '1'):
+<?php if ($payslip !== null && isset($_GET['print']) && $_GET['print'] === '1'): ?>
 
-    $currency = strtoupper(trim((string)($payslipTemplate['currency'] ?? 'ZMW'))) ?: 'ZMW';
-    $basic = (float)$payslip['basic_salary'];
-    $gross = (float)$payslip['gross_salary'];
-    $totalDeductions = (float)$payslip['total_deductions'];
-    $net = (float)$payslip['net_salary'];
-    $employerNapsa = (float)$payslip['employer_napsa'];
-    $employerNhima = (float)$payslip['employer_nhima'];
-    $ctc = $gross + $employerNapsa + $employerNhima;
-    $daysInMonth = cal_days_in_month(CAL_GREGORIAN, $selectedMonth, $selectedYear);
-    $allowanceComponents = payroll_template_components_decode($payslipTemplate['allowances_json'] ?? '[]');
-    $deductionComponents = payroll_template_components_decode($payslipTemplate['deductions_json'] ?? '[]');
-    $bankName = trim((string)($payslipTemplate['bank_name'] ?? ''));
-    $accountName = trim((string)($payslipTemplate['account_name'] ?? ''));
-    $accountNumber = trim((string)($payslipTemplate['account_number'] ?? ''));
-    $department = trim((string)($payslip['staff_role'] ?? ''));
-    $designation = trim((string)($payslip['staff_role'] ?? ''));
-    $location = trim((string)($payslip['branch_name'] ?? ''));
-    $employeeNumber = trim((string)($payslip['employee_number'] ?? $payslip['staff_id']));
-    $allowanceIndex = 1;
-    $deductionIndex = 1;
-    ?>
+<section class="payslip-sheet" id="payslipSheet">
 
-<script>
-(function(){
-    const app = document.querySelector('.app');
-    if (app) app.style.display = 'none';
+    <div class="payslip-header">
+        <div class="payslip-company">
+            <?= payroll_complete_h($pharmacyName) ?>
+        </div>
+        <div class="payslip-title">
+            Salary Slip for <?= payroll_complete_h($periodLabel) ?>
+        </div>
+    </div>
 
-    const sheet = document.createElement('section');
-    sheet.className = 'payslip-sheet';
-    sheet.style.display = 'block';
+    <div class="payslip-employee">
 
-    sheet.innerHTML = `
-        <div class="payslip-standard">
-            <div class="ps-company">
-                <div class="ps-company-name"><?= payroll_complete_h($pharmacyName) ?></div>
-                <div class="ps-title">Salary Slip for <?= payroll_complete_h($periodLabel) ?></div>
+        <div class="payslip-employee-column">
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Name</div>
+                <div class="payslip-info-value"><?= payroll_complete_h($payslip['staff_name']) ?></div>
             </div>
-
-            <table class="ps-meta">
-                <tr>
-                    <td><span class="ps-label">Name</span><?= payroll_complete_h($payslip['staff_name']) ?></td>
-                    <td><span class="ps-label">Department</span><?= payroll_complete_h($department ?: 'â€”') ?></td>
-                </tr>
-                <tr>
-                    <td><span class="ps-label">Designation</span><?= payroll_complete_h($designation ?: 'â€”') ?></td>
-                    <td><span class="ps-label">Bank Name</span><?= payroll_complete_h($bankName ?: 'â€”') ?></td>
-                </tr>
-                <tr>
-                    <td><span class="ps-label">Location</span><?= payroll_complete_h($location ?: 'â€”') ?></td>
-                    <td><span class="ps-label">Account Name</span><?= payroll_complete_h($accountName ?: 'â€”') ?></td>
-                </tr>
-                <tr>
-                    <td><span class="ps-label">Employee No.</span><?= payroll_complete_h($employeeNumber) ?></td>
-                    <td><span class="ps-label">Bank Account No.</span><?= payroll_complete_h($accountNumber ?: 'â€”') ?></td>
-                </tr>
-            </table>
-
-            <div class="ps-body">
-                <div class="ps-box">
-                    <table class="ps-table">
-                        <thead>
-                            <tr><th>Serial No.</th><th>Earnings / Salary Head</th><th>Amount (<?= payroll_complete_h($currency) ?>)</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr><td>1</td><td>Basic Salary</td><td class="ps-amount"><?= payroll_complete_money($basic) ?></td></tr>
-                            <?php foreach ($allowanceComponents as $component): ?>
-                            <tr><td><?= $allowanceIndex++ ?></td><td><?= payroll_complete_h((string)($component['name'] ?? 'Allowance')) ?></td><td class="ps-amount"><?= payroll_complete_money((float)($component['amount'] ?? 0)) ?></td></tr>
-                            <?php endforeach; ?>
-                            <?php if ((float)$payslip['bonus'] != 0): ?>
-                            <tr><td><?= $allowanceIndex++ ?></td><td>Bonus</td><td class="ps-amount"><?= payroll_complete_money($payslip['bonus']) ?></td></tr>
-                            <?php endif; ?>
-                            <?php if ((float)$payslip['overtime'] != 0): ?>
-                            <tr><td><?= $allowanceIndex++ ?></td><td>Overtime</td><td class="ps-amount"><?= payroll_complete_money($payslip['overtime']) ?></td></tr>
-                            <?php endif; ?>
-                            <?php if ((float)$payslip['other_earnings'] != 0): ?>
-                            <tr><td><?= $allowanceIndex++ ?></td><td>Other Earnings / Reimbursement</td><td class="ps-amount"><?= payroll_complete_money($payslip['other_earnings']) ?></td></tr>
-                            <?php endif; ?>
-                            <tr class="ps-total-row"><td></td><td>Salary (Gross) / PM</td><td class="ps-amount"><?= payroll_complete_money($gross) ?></td></tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <div class="ps-box">
-                    <table class="ps-table">
-                        <thead>
-                            <tr><th>Serial No.</th><th>Deductions / Salary Head</th><th>Amount (<?= payroll_complete_h($currency) ?>)</th></tr>
-                        </thead>
-                        <tbody>
-                            <?php $deductionSerial = 1; ?>
-                            <tr><td><?= $deductionSerial++ ?></td><td>PAYE</td><td class="ps-amount"><?= payroll_complete_money($payslip['paye']) ?></td></tr>
-                            <tr><td><?= $deductionSerial++ ?></td><td>NAPSA â€” Employee</td><td class="ps-amount"><?= payroll_complete_money($payslip['napsa']) ?></td></tr>
-                            <tr><td><?= $deductionSerial++ ?></td><td>NHIMA â€” Employee</td><td class="ps-amount"><?= payroll_complete_money($payslip['nhima']) ?></td></tr>
-                            <?php if ((float)$payslip['loan_deduction'] != 0): ?>
-                            <tr><td><?= $deductionSerial++ ?></td><td>Loan Deduction</td><td class="ps-amount"><?= payroll_complete_money($payslip['loan_deduction']) ?></td></tr>
-                            <?php endif; ?>
-                            <?php if ((float)$payslip['salary_advance'] != 0): ?>
-                            <tr><td><?= $deductionSerial++ ?></td><td>Salary Advance</td><td class="ps-amount"><?= payroll_complete_money($payslip['salary_advance']) ?></td></tr>
-                            <?php endif; ?>
-                            <?php if ($deductionComponents): ?>
-                                <?php foreach ($deductionComponents as $component): ?>
-                                <tr><td><?= $deductionSerial++ ?></td><td><?= payroll_complete_h((string)($component['name'] ?? 'Other Deduction')) ?></td><td class="ps-amount"><?= payroll_complete_money((float)($component['amount'] ?? 0)) ?></td></tr>
-                                <?php endforeach; ?>
-                            <?php elseif ((float)$payslip['other_deductions'] != 0): ?>
-                            <tr><td><?= $deductionSerial++ ?></td><td>Other Deductions</td><td class="ps-amount"><?= payroll_complete_money($payslip['other_deductions']) ?></td></tr>
-                            <?php endif; ?>
-                            <tr class="ps-total-row"><td></td><td>Total Deduction</td><td class="ps-amount"><?= payroll_complete_money($totalDeductions) ?></td></tr>
-                        </tbody>
-                    </table>
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Designation</div>
+                <div class="payslip-info-value"><?= payroll_complete_h($payslip['staff_role']) ?></div>
+            </div>
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Location</div>
+                <div class="payslip-info-value"><?= payroll_complete_h($payslip['branch_name']) ?></div>
+            </div>
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Employee No.</div>
+                <div class="payslip-info-value">
+                    <?= $payslip['employee_number'] !== ''
+                        ? payroll_complete_h($payslip['employee_number'])
+                        : (int)$payslip['staff_id'] ?>
                 </div>
             </div>
-
-            <div class="ps-summary">
-                <div class="ps-summary-box">
-                    <div class="ps-summary-line"><span>SALARY (GROSS) / PM</span><strong><?= payroll_complete_money($gross) ?></strong></div>
-                    <div class="ps-summary-line"><span>Reimbursement / Other Earnings</span><strong><?= payroll_complete_money($payslip['other_earnings']) ?></strong></div>
-                    <div class="ps-summary-line"><span>SALARY (CTC) / PM</span><strong><?= payroll_complete_money($ctc) ?></strong></div>
-                </div>
-                <div class="ps-summary-box">
-                    <div class="ps-summary-line"><span>TOTAL DEDUCTION</span><strong><?= payroll_complete_money($totalDeductions) ?></strong></div>
-                    <div class="ps-summary-line ps-net-line"><span>NET SALARY</span><strong><?= payroll_complete_money($net) ?></strong></div>
-                </div>
-            </div>
-
-            <div class="ps-summary" style="border-top:0">
-                <div class="ps-summary-box">
-                    <div class="ps-summary-line"><span>TOTAL NUMBER OF DAYS</span><strong><?= (int)$daysInMonth ?></strong></div>
-                </div>
-                <div class="ps-summary-box">
-                    <div class="ps-summary-line"><span>PAYMENT STATUS</span><strong><?= payroll_complete_h(strtoupper((string)$payslip['status'])) ?></strong></div>
-                </div>
-            </div>
-
-            <div class="ps-footer">
-                <span>Payment: <?= payroll_complete_h($payslip['payment_method'] ?? 'Not paid') ?></span>
-                <span>Reference: <?= payroll_complete_h($payslip['payment_reference'] ?? 'â€”') ?></span>
-                <span>Generated <?= payroll_complete_h(date('d M Y H:i')) ?></span>
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Salary Grade</div>
+                <div class="payslip-info-value"><?= payroll_complete_h($payslipGrade !== '' ? $payslipGrade : 'â€”') ?></div>
             </div>
         </div>
-    `;
 
-    document.body.appendChild(sheet);
+        <div class="payslip-employee-column">
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Department</div>
+                <div class="payslip-info-value">â€”</div>
+            </div>
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Bank Name</div>
+                <div class="payslip-info-value"><?= payroll_complete_h($payslipBankName !== '' ? $payslipBankName : 'â€”') ?></div>
+            </div>
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Account Name</div>
+                <div class="payslip-info-value">
+                    <?= payroll_complete_h($payslipAccountName !== '' ? $payslipAccountName : $payslip['staff_name']) ?>
+                </div>
+            </div>
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Bank Account No.</div>
+                <div class="payslip-info-value"><?= payroll_complete_h($payslipAccountNumber !== '' ? $payslipAccountNumber : 'â€”') ?></div>
+            </div>
+            <div class="payslip-info-row">
+                <div class="payslip-info-label">Currency</div>
+                <div class="payslip-info-value"><?= payroll_complete_h($payslipCurrency) ?></div>
+            </div>
+        </div>
 
-    window.addEventListener('load', function(){
-        setTimeout(function(){ window.print(); }, 250);
+    </div>
+
+    <div class="payslip-tables">
+
+        <div class="payslip-table-wrap">
+            <div class="payslip-table-title">Earnings</div>
+
+            <table class="payslip-table">
+                <thead>
+                    <tr>
+                        <th>Serial<br>No.</th>
+                        <th>Salary Head</th>
+                        <th>Amount (<?= payroll_complete_h($payslipCurrency) ?>)</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                    <?php $earningSerial = 1; ?>
+
+                    <tr>
+                        <td><?= $earningSerial++ ?></td>
+                        <td>Basic Salary</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['basic_salary']) ?></td>
+                    </tr>
+
+                    <?php
+                    $aggregateNamedAllowances = 0.0;
+                    foreach ($payslipAllowanceItems as $allowance):
+                        $aggregateNamedAllowances += (float)$allowance['amount'];
+                    ?>
+                    <tr>
+                        <td><?= $earningSerial++ ?></td>
+                        <td><?= payroll_complete_h($allowance['name']) ?></td>
+                        <td class="amount"><?= payroll_complete_money((float)$allowance['amount']) ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+
+                    <?php
+                    $remainingAllowances = max(
+                        0,
+                        (float)$payslip['allowances'] - $aggregateNamedAllowances
+                    );
+                    ?>
+                    <?php if ($remainingAllowances > 0.004): ?>
+                    <tr>
+                        <td><?= $earningSerial++ ?></td>
+                        <td>Other Allowances</td>
+                        <td class="amount"><?= payroll_complete_money($remainingAllowances) ?></td>
+                    </tr>
+                    <?php endif; ?>
+
+                    <?php if ((float)$payslip['bonus'] > 0): ?>
+                    <tr>
+                        <td><?= $earningSerial++ ?></td>
+                        <td>Bonus</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['bonus']) ?></td>
+                    </tr>
+                    <?php endif; ?>
+
+                    <?php if ((float)$payslip['overtime'] > 0): ?>
+                    <tr>
+                        <td><?= $earningSerial++ ?></td>
+                        <td>Overtime</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['overtime']) ?></td>
+                    </tr>
+                    <?php endif; ?>
+
+                    <?php if ((float)$payslip['other_earnings'] > 0): ?>
+                    <tr>
+                        <td><?= $earningSerial++ ?></td>
+                        <td>Other Earnings / Reimbursement</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['other_earnings']) ?></td>
+                    </tr>
+                    <?php endif; ?>
+
+                    <tr class="total-row">
+                        <td></td>
+                        <td>Salary (Gross) / PM</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['gross_salary']) ?></td>
+                    </tr>
+
+                </tbody>
+            </table>
+        </div>
+
+        <div class="payslip-table-wrap">
+            <div class="payslip-table-title">Deductions</div>
+
+            <table class="payslip-table">
+                <thead>
+                    <tr>
+                        <th>Serial<br>No.</th>
+                        <th>Salary Head</th>
+                        <th>Amount (<?= payroll_complete_h($payslipCurrency) ?>)</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                    <?php $deductionSerial = 1; ?>
+
+                    <tr>
+                        <td><?= $deductionSerial++ ?></td>
+                        <td>PAYE</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['paye']) ?></td>
+                    </tr>
+
+                    <tr>
+                        <td><?= $deductionSerial++ ?></td>
+                        <td>NAPSA - Employee</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['napsa']) ?></td>
+                    </tr>
+
+                    <tr>
+                        <td><?= $deductionSerial++ ?></td>
+                        <td>NHIMA - Employee</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['nhima']) ?></td>
+                    </tr>
+
+                    <?php
+                    $aggregateNamedDeductions = 0.0;
+                    foreach ($payslipDeductionItems as $deduction):
+                        $aggregateNamedDeductions += (float)$deduction['amount'];
+                    ?>
+                    <tr>
+                        <td><?= $deductionSerial++ ?></td>
+                        <td><?= payroll_complete_h($deduction['name']) ?></td>
+                        <td class="amount"><?= payroll_complete_money((float)$deduction['amount']) ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+
+                    <?php if ((float)$payslip['loan_deduction'] > 0): ?>
+                    <tr>
+                        <td><?= $deductionSerial++ ?></td>
+                        <td>Loan</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['loan_deduction']) ?></td>
+                    </tr>
+                    <?php endif; ?>
+
+                    <?php if ((float)$payslip['salary_advance'] > 0): ?>
+                    <tr>
+                        <td><?= $deductionSerial++ ?></td>
+                        <td>Salary Advance</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['salary_advance']) ?></td>
+                    </tr>
+                    <?php endif; ?>
+
+                    <?php if ((float)$payslip['other_deductions'] > 0): ?>
+                    <tr>
+                        <td><?= $deductionSerial++ ?></td>
+                        <td>Other Deductions</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['other_deductions']) ?></td>
+                    </tr>
+                    <?php endif; ?>
+
+                    <tr class="total-row">
+                        <td></td>
+                        <td>Total Deduction</td>
+                        <td class="amount"><?= payroll_complete_money((float)$payslip['total_deductions']) ?></td>
+                    </tr>
+
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <div class="payslip-summary">
+
+        <div class="payslip-summary-row">
+            <div class="payslip-summary-label">Salary (Gross) / PM</div>
+            <div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['gross_salary']) ?></div>
+        </div>
+
+        <div class="payslip-summary-row">
+            <div class="payslip-summary-label">Total Deduction</div>
+            <div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['total_deductions']) ?></div>
+        </div>
+
+        <div class="payslip-summary-row">
+            <div class="payslip-summary-label">Salary (CTC) / PM</div>
+            <div class="payslip-summary-value">
+                <?= payroll_complete_money(
+                    (float)$payslip['gross_salary']
+                    + (float)$payslip['employer_napsa']
+                    + (float)$payslip['employer_nhima']
+                ) ?>
+            </div>
+        </div>
+
+        <div class="payslip-summary-row">
+            <div class="payslip-summary-label">Payment Status</div>
+            <div class="payslip-summary-value">
+                <?= payroll_complete_h(ucfirst((string)($payslip['status'] ?? 'draft'))) ?>
+            </div>
+        </div>
+
+        <div class="payslip-summary-row full">
+            <div class="payslip-summary-label">Total Number of Days</div>
+            <div class="payslip-summary-value"><?= (int)$payslipDaysInMonth ?></div>
+        </div>
+
+    </div>
+
+    <div class="payslip-net-row">
+        <div class="payslip-summary-label">NET SALARY</div>
+        <div class="payslip-summary-value"><?= payroll_complete_money((float)$payslip['net_salary']) ?></div>
+    </div>
+
+    <div class="payslip-footer">
+        <div>
+            Payment:
+            <strong><?= payroll_complete_h($payslip['payment_method'] ?? 'Not paid') ?></strong>
+        </div>
+        <div>
+            Payment Reference:
+            <strong><?= payroll_complete_h($payslip['payment_reference'] ?? 'â€”') ?></strong>
+        </div>
+        <div>
+            Generated:
+            <strong><?= payroll_complete_h(date('d M Y H:i')) ?></strong>
+        </div>
+    </div>
+
+    <div class="payslip-note">
+        This payslip is generated from the Payroll register for
+        <?= payroll_complete_h($periodLabel) ?>.
+    </div>
+
+</section>
+
+<script>
+(function () {
+    const app = document.querySelector('.app');
+    const sheet = document.getElementById('payslipSheet');
+
+    if (app) {
+        app.style.display = 'none';
+    }
+
+    if (sheet) {
+        sheet.style.display = 'block';
+    }
+
+    window.addEventListener('load', function () {
+        window.setTimeout(function () {
+            window.print();
+        }, 250);
     });
 })();
 </script>
