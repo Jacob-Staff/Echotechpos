@@ -692,13 +692,14 @@ function payroll_render_payslip_sheet(array $data): string {
 
 function payroll_payslip_pdf_content(array $data): string {
     /*
-     * IMPORTANT:
-     * The Admin payslip and the emailed PDF MUST use the same template.
+     * SINGLE SOURCE OF TRUTH:
      *
-     * Do not rebuild the payslip with Dompdf here.  The Admin print view is
-     * rendered by a real browser, so the email attachment is rendered by
-     * Chromium too.  This keeps the layout, fonts, tables, QR area and
-     * spacing consistent with the payslip the administrator sees.
+     * The administrator's printable payslip is produced by
+     * payroll_render_payslip_sheet() + payroll_payslip_css().
+     *
+     * The email attachment MUST use those exact same two functions.
+     * Do not add a second payslip layout, replacement fonts, replacement
+     * dimensions, A4 overrides, or email-specific payslip CSS here.
      */
 
     $chromiumCandidates = [
@@ -718,7 +719,12 @@ function payroll_payslip_pdf_content(array $data): string {
     }
 
     if ($chromium === '') {
-        $which = @shell_exec('command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null || command -v google-chrome 2>/dev/null || command -v google-chrome-stable 2>/dev/null');
+        $which = @shell_exec(
+            'command -v chromium 2>/dev/null || '
+            . 'command -v chromium-browser 2>/dev/null || '
+            . 'command -v google-chrome 2>/dev/null || '
+            . 'command -v google-chrome-stable 2>/dev/null'
+        );
         $which = trim((string)$which);
         if ($which !== '' && is_executable($which)) {
             $chromium = $which;
@@ -726,35 +732,33 @@ function payroll_payslip_pdf_content(array $data): string {
     }
 
     if ($chromium === '') {
-        throw new RuntimeException('The browser PDF engine is not installed on the server. Add Chromium to the Docker image and redeploy.');
+        throw new RuntimeException(
+            'The browser PDF engine is not installed on the server. '
+            . 'Install Chromium in the Docker image and redeploy.'
+        );
     }
 
+    /* EXACT SAME PAYSLIP HTML AND EXACT SAME PAYSLIP CSS AS ADMIN PRINT. */
     $sheet = payroll_render_payslip_sheet($data);
     $css = payroll_payslip_css();
 
     /*
-     * These are the SAME payslip styles already used by the Admin print
-     * screen.  The only additions below are print-environment resets.
+     * No visual overrides are intentionally added here.
+     * payroll_payslip_css() already contains the @media print rules used by
+     * the Admin print view. Chromium is instructed to emulate print media.
      */
-    $printCss = $css . '\n'
-        . '@page{size:A4 portrait;margin:10mm;}'
-        . 'html,body{margin:0!important;padding:0!important;background:#fff!important;}'
-        . 'body{background:#fff!important;}'
-        . 'body.print-payslip .app{display:none!important;}'
-        . 'body.print-payslip .payslip-sheet{display:block!important;visibility:visible!important;width:190mm!important;max-width:190mm!important;margin:0 auto!important;padding:0!important;background:#fff!important;color:#111!important;font-family:Arial,Helvetica,sans-serif!important;font-size:10px!important;}'
-        . 'body.print-payslip .payslip-sheet *{visibility:visible!important;box-sizing:border-box!important;}'
-        . 'body.print-payslip .payslip-tables,body.print-payslip .payslip-summary,body.print-payslip .payslip-footer{page-break-inside:avoid!important;}'
-        . '.payslip-sheet{display:block!important;}';
-
     $html = '<!doctype html>'
-        . '<html><head><meta charset="UTF-8">'
+        . '<html><head>'
+        . '<meta charset="UTF-8">'
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        . '<style>' . $printCss . '</style>'
+        . '<style>' . $css . '</style>'
         . '</head><body class="print-payslip">'
         . $sheet
         . '</body></html>';
 
-    $tmpDir = rtrim((string)sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'echotech_payslip_' . bin2hex(random_bytes(8));
+    $tmpDir = rtrim((string)sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'echotech_payslip_' . bin2hex(random_bytes(8));
 
     if (!@mkdir($tmpDir, 0700, true) && !is_dir($tmpDir)) {
         throw new RuntimeException('Could not create a temporary directory for the payslip PDF.');
@@ -774,16 +778,15 @@ function payroll_payslip_pdf_content(array $data): string {
         }
 
         /*
-         * Use Chromium's native print-to-PDF implementation.  This is the
-         * same browser rendering engine used when the administrator prints
-         * the payslip from /admin/payroll.php.
+         * Chromium uses print media for --print-to-pdf, so the exact
+         * @media print rules from payroll_payslip_css() are applied.
+         * There is deliberately NO second payslip renderer here.
          */
         $command = escapeshellarg($chromium)
             . ' --headless=new'
             . ' --no-sandbox'
             . ' --disable-gpu'
             . ' --disable-dev-shm-usage'
-            . ' --disable-software-rasterizer'
             . ' --no-first-run'
             . ' --no-default-browser-check'
             . ' --user-data-dir=' . escapeshellarg($profileDir)
@@ -814,22 +817,34 @@ function payroll_payslip_pdf_content(array $data): string {
         return $pdf;
     } finally {
         foreach ([$pdfFile, $htmlFile] as $file) {
-            if (is_file($file)) @unlink($file);
+            if (is_file($file)) {
+                @unlink($file);
+            }
         }
 
         if (is_dir($profileDir)) {
             $iterator = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($profileDir, FilesystemIterator::SKIP_DOTS),
+                new RecursiveDirectoryIterator(
+                    $profileDir,
+                    FilesystemIterator::SKIP_DOTS
+                ),
                 RecursiveIteratorIterator::CHILD_FIRST
             );
+
             foreach ($iterator as $item) {
-                if ($item->isDir()) @rmdir($item->getPathname());
-                else @unlink($item->getPathname());
+                if ($item->isDir()) {
+                    @rmdir($item->getPathname());
+                } else {
+                    @unlink($item->getPathname());
+                }
             }
+
             @rmdir($profileDir);
         }
 
-        if (is_dir($tmpDir)) @rmdir($tmpDir);
+        if (is_dir($tmpDir)) {
+            @rmdir($tmpDir);
+        }
     }
 }
 
