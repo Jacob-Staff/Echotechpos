@@ -21,60 +21,39 @@ function verify_log(string $message): void {
 
 /** Load the same connection file that the working Payroll controller uses. */
 function verify_load_connection(): ?mysqli {
-    /*
-     * IMPORTANT:
-     * Do NOT require conn.php inside a scope and then look in $GLOBALS.
-     * PHP variables created by require are local to the calling function.
-     * The previous verifier made exactly that mistake, so it always returned
-     * "database connection unavailable" even though Payroll itself connected.
-     *
-     * Payroll already proves that /includes/conn.php is the application's
-     * central connection file. Load that same file and return its local
-     * $conn variable directly.
-     */
     $candidates = [
+        // Public file at /var/www/html/verify-payslip.php
         __DIR__ . '/includes/conn.php',
-        dirname(__DIR__) . '/includes/conn.php',
+        __DIR__ . '/config.php',
+        __DIR__ . '/db.php',
+
+        // Same paths used by /admin/actions/payroll.php.
         __DIR__ . '/admin/actions/../../includes/conn.php',
+        __DIR__ . '/admin/actions/../../config.php',
+        __DIR__ . '/admin/actions/../../db.php',
     ];
 
     foreach (array_unique($candidates) as $file) {
-        $file = realpath($file);
-
-        if (!$file || !is_file($file)) {
+        if (!is_file($file)) {
             continue;
         }
 
         try {
             require_once $file;
         } catch (Throwable $e) {
-            verify_log(
-                'Connection include failed: ' .
-                $file .
-                ' :: ' .
-                $e->getMessage()
-            );
+            verify_log('Connection include failed: ' . $file . ' :: ' . $e->getMessage());
             continue;
         }
 
         /*
-         * Because this require happens inside this function, $conn is
-         * intentionally checked locally, not through $GLOBALS.
+         * IMPORTANT: require_once() is executed inside this function, so the
+         * included connection variables are local to this function scope.
+         * Read them directly instead of incorrectly looking in $GLOBALS.
          */
-        if (isset($conn) && $conn instanceof mysqli) {
-            return $conn;
-        }
-
-        /*
-         * Also support projects whose connection file names the variable
-         * $db or $mysqli.
-         */
-        if (isset($db) && $db instanceof mysqli) {
-            return $db;
-        }
-
-        if (isset($mysqli) && $mysqli instanceof mysqli) {
-            return $mysqli;
+        foreach (['conn', 'db', 'mysqli'] as $name) {
+            if (isset($$name) && $$name instanceof mysqli) {
+                return $$name;
+            }
         }
     }
 
@@ -123,28 +102,50 @@ function verify_days(string $period): int {
     return (int)date('t', mktime(0, 0, 0, $month, 1, $year));
 }
 
+/**
+ * Canonical numeric representation used by the Payroll fingerprint.
+ *
+ * MySQL returns DECIMAL columns as strings such as "10000.00", while the
+ * issuing Payroll code fingerprinted numeric values as PHP numbers, which
+ * become "10000", "0", "1326", etc.  The verifier must reproduce that exact
+ * canonical form or every legitimate payslip will appear tampered with.
+ */
+function verify_number(mixed $value): string {
+    if ($value === null || $value === '') {
+        return '0';
+    }
+
+    $number = (float)$value;
+
+    if ($number == 0.0) {
+        return '0';
+    }
+
+    return rtrim(rtrim(sprintf('%.14F', $number), '0'), '.');
+}
+
 /** Must exactly match the fingerprint created by Payroll. */
 function verify_hash(array $row, string $token): string {
     $parts = [
         (string)($row['pharmacy_id'] ?? ''),
         (string)($row['staff_id'] ?? ''),
         (string)($row['payroll_period'] ?? ''),
-        (string)($row['basic_salary'] ?? 0),
-        (string)($row['allowances'] ?? 0),
-        (string)($row['bonus'] ?? 0),
-        (string)($row['overtime'] ?? 0),
-        (string)($row['other_earnings'] ?? 0),
-        (string)($row['paye'] ?? 0),
-        (string)($row['napsa'] ?? 0),
-        (string)($row['nhima'] ?? 0),
-        (string)($row['loan_deduction'] ?? 0),
-        (string)($row['salary_advance'] ?? 0),
-        (string)($row['other_deductions'] ?? 0),
-        (string)($row['gross_salary'] ?? 0),
-        (string)($row['total_deductions'] ?? 0),
-        (string)($row['net_salary'] ?? 0),
-        (string)($row['employer_napsa'] ?? 0),
-        (string)($row['employer_nhima'] ?? 0),
+        verify_number($row['basic_salary'] ?? 0),
+        verify_number($row['allowances'] ?? 0),
+        verify_number($row['bonus'] ?? 0),
+        verify_number($row['overtime'] ?? 0),
+        verify_number($row['other_earnings'] ?? 0),
+        verify_number($row['paye'] ?? 0),
+        verify_number($row['napsa'] ?? 0),
+        verify_number($row['nhima'] ?? 0),
+        verify_number($row['loan_deduction'] ?? 0),
+        verify_number($row['salary_advance'] ?? 0),
+        verify_number($row['other_deductions'] ?? 0),
+        verify_number($row['gross_salary'] ?? 0),
+        verify_number($row['total_deductions'] ?? 0),
+        verify_number($row['net_salary'] ?? 0),
+        verify_number($row['employer_napsa'] ?? 0),
+        verify_number($row['employer_nhima'] ?? 0),
         $token,
     ];
 
@@ -397,6 +398,7 @@ if (is_array($record)) {
     $payslipId = 'PS-' . substr($token, 0, 8) . '-' . substr($token, 8, 8);
 }
 ?>
+<?php header('Content-Type: text/html; charset=UTF-8'); ?>
 <!doctype html>
 <html lang="en">
 <head>
@@ -429,7 +431,7 @@ body{margin:0;background:#f3f6f9;color:#17212b;font-family:Arial,Helvetica,sans-
         <h1>Payslip Verification <?= $technicalError ? 'Unavailable' : 'Failed' ?></h1>
         <p><?= verify_h($error) ?></p>
         <?php if (!$technicalError): ?>
-            <div class="badge invalid">âœ• NOT VERIFIED</div>
+            <div class="badge invalid">&#10005; NOT VERIFIED</div>
         <?php endif; ?>
         <?php if ($technicalError): ?>
             <div class="technical">Please contact the payroll administrator if this problem continues.</div>
@@ -438,7 +440,7 @@ body{margin:0;background:#f3f6f9;color:#17212b;font-family:Arial,Helvetica,sans-
 <?php else: ?>
     <div class="head">
         <div><div class="brand"><?= verify_h($companyName) ?></div><div class="sub">Official Payroll Verification</div></div>
-        <div class="badge <?= $valid ? 'valid' : 'invalid' ?>"><?= $valid ? 'âœ“ VERIFIED' : 'âœ• NOT VERIFIED' ?></div>
+        <div class="badge <?= $valid ? 'valid' : 'invalid' ?>"><?= $valid ? '&#10003; VERIFIED' : '&#10005; NOT VERIFIED' ?></div>
     </div>
     <div class="body">
         <h1 class="verify-title">Payslip Verification</h1>
