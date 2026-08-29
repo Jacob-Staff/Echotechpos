@@ -1920,11 +1920,10 @@ if (is_array($payslipTemplate)) {
     }
 }
 
-$payslipDaysInMonth = cal_days_in_month(
-    CAL_GREGORIAN,
-    $selectedMonth,
-    $selectedYear
-);
+// Do not rely on PHP's calendar extension. Render hosting environments may
+// not have ext-calendar enabled. Date format "t" gives the number of days
+// in the selected month and works with the standard PHP date extension.
+$payslipDaysInMonth = (int)date('t', mktime(0, 0, 0, $selectedMonth, 1, $selectedYear));
 
 $payslipCurrency = 'ZMW';
 if (is_array($payslipTemplate) && !empty($payslipTemplate['currency'])) {
