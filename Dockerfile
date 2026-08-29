@@ -1,13 +1,20 @@
 FROM php:8.2-apache
 
-# Install system libraries required by PHP extensions
+# =========================================================
+# SYSTEM PACKAGES + CHROMIUM
+# =========================================================
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libzip-dev \
         unzip \
+        zip \
         libpng-dev \
         libjpeg62-turbo-dev \
         libfreetype6-dev \
+        chromium \
+        ca-certificates \
+        fonts-liberation \
+        fonts-dejavu \
     && docker-php-ext-configure gd \
         --with-freetype \
         --with-jpeg \
@@ -19,25 +26,55 @@ RUN apt-get update \
         gd \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Composer
+
+# =========================================================
+# APACHE CONFIGURATION
+# =========================================================
+RUN a2enmod rewrite
+
+
+# =========================================================
+# COMPOSER
+# =========================================================
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+
+# =========================================================
+# APPLICATION DIRECTORY
+# =========================================================
 WORKDIR /var/www/html
 
-# Copy Composer files first for Docker layer caching
+
+# =========================================================
+# COMPOSER DEPENDENCIES
+# =========================================================
+# Copy these first so Docker can cache Composer installation.
 COPY composer.json composer.lock ./
 
-# Install PHP dependencies including Dompdf
+
+# =========================================================
+# INSTALL DOMPDF AND OTHER PHP DEPENDENCIES
+# =========================================================
 RUN composer install \
     --no-dev \
     --prefer-dist \
     --no-interaction \
     --optimize-autoloader
 
-# Copy the complete application
+
+# =========================================================
+# COPY APPLICATION
+# =========================================================
 COPY . /var/www/html/
 
-# Set correct Apache/application permissions
+
+# =========================================================
+# PERMISSIONS
+# =========================================================
 RUN chown -R www-data:www-data /var/www/html
 
+
+# =========================================================
+# APACHE
+# =========================================================
 EXPOSE 80
