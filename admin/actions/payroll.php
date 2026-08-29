@@ -328,6 +328,62 @@ function payroll_mail_send_html(
     ];
 }
 
+function payroll_ensure_payslip_identity(mysqli $conn, int $pharmacyId, array &$row): bool {
+    // Payslip verification depends on both fields being available in payroll_records.
+    if (!payroll_complete_col($conn, 'payroll_records', 'verification_token')) return false;
+    if (!payroll_complete_col($conn, 'payroll_records', 'document_hash')) return false;
+
+    $token = trim((string)($row['verification_token'] ?? ''));
+    if ($token === '') {
+        $token = payroll_verification_token();
+        $stmt = $conn->prepare(
+            "UPDATE payroll_records SET verification_token=? WHERE id=? AND pharmacy_id=? AND (verification_token IS NULL OR verification_token='')"
+        );
+        if (!$stmt) return false;
+        $id = (int)($row['id'] ?? 0);
+        if ($id <= 0) return false;
+        $stmt->bind_param('sii', $token, $id, $pharmacyId);
+        if (!$stmt->execute()) {
+            $stmt->close();
+            return false;
+        }
+        $stmt->close();
+
+        // Re-read the value in case another request populated it first.
+        $check = $conn->prepare("SELECT verification_token FROM payroll_records WHERE id=? AND pharmacy_id=? LIMIT 1");
+        if ($check) {
+            $check->bind_param('ii', $id, $pharmacyId);
+            if ($check->execute()) {
+                $res = $check->get_result();
+                $saved = $res ? $res->fetch_assoc() : null;
+                if (!empty($saved['verification_token'])) $token = (string)$saved['verification_token'];
+            }
+            $check->close();
+        }
+        $row['verification_token'] = $token;
+    }
+
+    $hash = trim((string)($row['document_hash'] ?? ''));
+    if ($hash === '') {
+        $hash = payroll_verification_hash($row, $token);
+        $stmt = $conn->prepare(
+            "UPDATE payroll_records SET document_hash=? WHERE id=? AND pharmacy_id=? AND (document_hash IS NULL OR document_hash='')"
+        );
+        if (!$stmt) return false;
+        $id = (int)($row['id'] ?? 0);
+        if ($id <= 0) return false;
+        $stmt->bind_param('sii', $hash, $id, $pharmacyId);
+        if (!$stmt->execute()) {
+            $stmt->close();
+            return false;
+        }
+        $stmt->close();
+        $row['document_hash'] = $hash;
+    }
+
+    return $token !== '' && $hash !== '';
+}
+
 function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$row, string $companyName, string $periodLabel): array {
     $email = trim((string)($row['email'] ?? ''));
     if ($email === '') {
