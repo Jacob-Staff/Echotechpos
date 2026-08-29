@@ -691,43 +691,132 @@ function payroll_render_payslip_sheet(array $data): string {
 }
 
 function payroll_payslip_pdf_content(array $data): string {
-    $autoloads = [
-        __DIR__ . '/../../vendor/autoload.php',
-        __DIR__ . '/../../../vendor/autoload.php',
-        dirname(__DIR__, 2) . '/vendor/autoload.php',
+    /*
+     * IMPORTANT:
+     * The Admin payslip is rendered by the browser using the exact HTML/CSS
+     * produced by payroll_render_payslip_sheet(). Do NOT use Dompdf here.
+     *
+     * Dompdf does not render this payslip's CSS Grid layout the same way as
+     * Chrome/Edge, which is why the previous emailed PDF collapsed into a
+     * narrow vertical document.
+     *
+     * We therefore use the same browser engine (Chromium) on the server.
+     * This keeps the email attachment based on the SAME payslip template
+     * that Admin > Payroll > Payslip uses.
+     */
+    $chromeCandidates = [
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
     ];
-    foreach ($autoloads as $autoload) {
-        if (is_file($autoload)) {
-            require_once $autoload;
-            if (class_exists('Dompdf\\Dompdf')) break;
+
+    $chrome = '';
+    foreach ($chromeCandidates as $candidate) {
+        if (is_file($candidate) && is_executable($candidate)) {
+            $chrome = $candidate;
+            break;
         }
     }
 
-    if (!class_exists('Dompdf\\Dompdf')) {
-        throw new RuntimeException('PDF engine is not installed. Run: composer require dompdf/dompdf');
+    if ($chrome === '') {
+        throw new RuntimeException(
+            'The browser PDF engine is not installed on the server. '
+            . 'Add Chromium to the Docker image and redeploy.'
+        );
     }
 
     $sheet = payroll_render_payslip_sheet($data);
     $css = payroll_payslip_css();
-    $html = '<!doctype html><html><head><meta charset="UTF-8"><style>' . $css . '</style>'
-        . '<style>html,body{margin:0!important;padding:0!important;background:#fff!important;} .payslip-sheet{display:block!important;width:190mm!important;max-width:190mm!important;margin:0 auto!important;padding:0!important;background:#fff!important;color:#111!important;font-size:10px!important;} .payslip-sheet *{box-sizing:border-box!important;} @page{size:A4 portrait;margin:10mm;}</style>'
-        . '</head><body class="print-payslip">' . $sheet . '</body></html>';
 
-    $options = new \Dompdf\Options();
-    $options->set('isRemoteEnabled', true);
-    $options->set('defaultFont', 'Arial');
-    $options->set('isHtml5ParserEnabled', true);
+    /*
+     * This is intentionally the SAME payslip sheet and the SAME stylesheet
+     * used by the Admin print page. We only provide a clean document shell
+     * around it for Chromium.
+     *
+     * The print CSS already contains:
+     *   body.print-payslip .payslip-sheet { display:block; ... }
+     * so Chromium prints exactly the Admin payslip rather than the dashboard.
+     */
+    $html = '<!doctype html>'
+        . '<html lang="en"><head>'
+        . '<meta charset="UTF-8">'
+        . '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        . '<style>' . $css . '</style>'
+        . '</head><body class="print-payslip">'
+        . $sheet
+        . '</body></html>';
 
-    $dompdf = new \Dompdf\Dompdf($options);
-    $dompdf->loadHtml($html, 'UTF-8');
-    $dompdf->setPaper('A4', 'portrait');
-    $dompdf->render();
-    $pdf = $dompdf->output();
-
-    if (!is_string($pdf) || strncmp($pdf, '%PDF-', 5) !== 0) {
-        throw new RuntimeException('PDF engine did not return a valid PDF document.');
+    $tmpBase = tempnam(sys_get_temp_dir(), 'echotech_payslip_');
+    if ($tmpBase === false) {
+        throw new RuntimeException('Could not create a temporary payslip file.');
     }
-    return $pdf;
+
+    $htmlFile = $tmpBase . '.html';
+    $pdfFile  = $tmpBase . '.pdf';
+
+    /*
+     * tempnam() creates the base file. Remove it and write the HTML using
+     * UTF-8 so characters such as em-dashes and the check mark remain valid.
+     */
+    @unlink($tmpBase);
+
+    try {
+        if (@file_put_contents($htmlFile, $html) === false) {
+            throw new RuntimeException('Could not write the temporary payslip HTML.');
+        }
+
+        $htmlPath = realpath($htmlFile);
+        if ($htmlPath === false) {
+            throw new RuntimeException('Could not resolve the temporary payslip HTML path.');
+        }
+
+        $pdfPath = $pdfFile;
+
+        /*
+         * The Admin PDF supplied by the current system is Letter portrait
+         * (612 x 792 points). These paper dimensions reproduce that document.
+         *
+         * Chrome uses print media by default for --print-to-pdf, so the
+         * existing @media print rules from the Admin payslip are honoured.
+         */
+        $command =
+            escapeshellarg($chrome)
+            . ' --headless=new'
+            . ' --no-sandbox'
+            . ' --disable-gpu'
+            . ' --disable-dev-shm-usage'
+            . ' --allow-file-access-from-files'
+            . ' --no-pdf-header-footer'
+            . ' --print-to-pdf=' . escapeshellarg($pdfPath)
+            . ' --print-to-pdf-no-header'
+            . ' --run-all-compositor-stages-before-draw'
+            . ' --virtual-time-budget=5000'
+            . ' ' . escapeshellarg('file://' . $htmlPath);
+
+        $output = [];
+        $exitCode = 0;
+        exec($command . ' 2>&1', $output, $exitCode);
+
+        if ($exitCode !== 0 || !is_file($pdfFile) || filesize($pdfFile) < 100) {
+            $detail = trim(implode("\n", $output));
+            throw new RuntimeException(
+                'Chromium could not create the payslip PDF.'
+                . ($detail !== '' ? ' ' . $detail : '')
+            );
+        }
+
+        $pdf = @file_get_contents($pdfFile);
+
+        if (!is_string($pdf) || strncmp($pdf, '%PDF-', 5) !== 0) {
+            throw new RuntimeException('The browser did not return a valid PDF document.');
+        }
+
+        return $pdf;
+    } finally {
+        @unlink($htmlFile);
+        @unlink($pdfFile);
+    }
 }
 
 function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$row, string $companyName, string $periodLabel): array {
@@ -3522,7 +3611,7 @@ tbody tr:hover{background:#fbfcfd}
     .payslip-footer > div{text-align:left!important}
 }@media print{
     @page{
-        size:A4 portrait;
+        size:Letter portrait;
         margin:10mm;
     }
     html,body{
@@ -3886,9 +3975,9 @@ echo payroll_complete_h($initials ?: 'ST');
 <div style="font-size:9px;color:var(--muted);margin-bottom:5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?= payroll_complete_h($row['email']) ?>">
 <i class="fas fa-envelope"></i> <?= payroll_complete_h($row['email']) ?>
 <?php if (($row['payslip_email_status'] ?? 'pending') === 'sent'): ?>
-<span style="color:#08754f;font-weight:700;"> Â· SENT</span>
+<span style="color:#08754f;font-weight:700;"> Ã‚Â· SENT</span>
 <?php elseif (($row['payslip_email_status'] ?? 'pending') === 'failed'): ?>
-<span style="color:#b42318;font-weight:700;"> Â· FAILED</span>
+<span style="color:#b42318;font-weight:700;"> Ã‚Â· FAILED</span>
 <?php endif; ?>
 </div>
 <?php else: ?>
