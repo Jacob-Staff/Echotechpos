@@ -189,7 +189,8 @@ function payroll_mail_send_html(
     string $toName,
     string $subject,
     string $html,
-    string $text
+    string $text,
+    array $attachments = []
 ): array {
     $cfg = payroll_mail_config();
 
@@ -224,6 +225,58 @@ function payroll_mail_send_html(
         'htmlContent' => $html,
         'textContent' => $text,
     ];
+
+    /*
+     * Payslips MUST be delivered as real file attachments.
+     * Brevo expects the field name "attachment" and each item must contain
+     * a filename plus base64-encoded file content.
+     */
+    if (empty($attachments)) {
+        return [
+            'ok' => false,
+            'error' => 'The payslip PDF was not supplied to the email service.'
+        ];
+    }
+
+    $payload['attachment'] = [];
+    foreach ($attachments as $attachment) {
+        $name = trim((string)($attachment['name'] ?? ''));
+        $content = $attachment['content'] ?? null;
+
+        if ($name === '' || !is_string($content) || $content === '') {
+            return [
+                'ok' => false,
+                'error' => 'The payslip attachment is empty or has no filename.'
+            ];
+        }
+
+        /* Only allow the payroll PDF attachment through this sender. */
+        if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'pdf') {
+            return [
+                'ok' => false,
+                'error' => 'The payslip attachment must be a PDF file.'
+            ];
+        }
+
+        if (strncmp($content, '%PDF-', 5) !== 0) {
+            return [
+                'ok' => false,
+                'error' => 'The generated payslip is not a valid PDF document.'
+            ];
+        }
+
+        $payload['attachment'][] = [
+            'name' => $name,
+            'content' => base64_encode($content),
+        ];
+    }
+
+    if (count($payload['attachment']) < 1) {
+        return [
+            'ok' => false,
+            'error' => 'No payslip PDF attachment was prepared.'
+        ];
+    }
 
     $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($json === false) {
@@ -455,6 +508,106 @@ function payroll_ensure_payslip_identity(mysqli $conn, int $pharmacyId, array &$
     return $token !== '' && $hash !== '';
 }
 
+/**
+ * Build a dependency-free, valid one-page PDF payslip.
+ * This avoids requiring Dompdf/MPDF on Render while still producing
+ * a real downloadable PDF attachment for the employee.
+ */
+function payroll_payslip_pdf_content(array $row, string $companyName, string $verificationUrl, string $periodLabel): string {
+    $clean = static function ($value): string {
+        $value = trim((string)$value);
+        if ($value === '') return 'â€”';
+        if (function_exists('iconv')) {
+            $converted = @iconv('UTF-8', 'Windows-1252//TRANSLIT', $value);
+            if ($converted !== false) $value = $converted;
+        }
+        return preg_replace('/[^\x20-\x7E\x80-\xFF]/', '?', $value) ?: '?';
+    };
+
+    $esc = static function (string $value): string {
+        return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $value);
+    };
+
+    $money = static function ($value): string {
+        return 'K' . number_format((float)$value, 2);
+    };
+
+    $name = $clean($row['staff_name'] ?? 'Employee');
+    $employeeNo = $clean($row['employee_number'] ?? ($row['staff_id'] ?? ''));
+    $role = $clean($row['staff_role'] ?? 'Staff');
+    $branch = $clean($row['branch_name'] ?? 'Main Branch');
+    $company = $clean($companyName);
+    $period = $clean($periodLabel);
+    $verify = $clean($verificationUrl);
+
+    $lines = [
+        [$company, 18, 805],
+        ['OFFICIAL PAYROLL PAYSLIP', 11, 780],
+        ['Payroll Period: ' . $period, 10, 758],
+        ['Employee Information', 12, 720],
+        ['Employee: ' . $name, 10, 698],
+        ['Employee No.: ' . $employeeNo, 10, 680],
+        ['Designation: ' . $role, 10, 662],
+        ['Branch / Location: ' . $branch, 10, 644],
+        ['Earnings', 12, 606],
+        ['Basic Salary: ' . $money($row['basic_salary'] ?? 0), 10, 584],
+        ['Allowances: ' . $money($row['allowances'] ?? 0), 10, 566],
+        ['Bonus: ' . $money($row['bonus'] ?? 0), 10, 548],
+        ['Overtime: ' . $money($row['overtime'] ?? 0), 10, 530],
+        ['Other Earnings: ' . $money($row['other_earnings'] ?? 0), 10, 512],
+        ['Gross Salary: ' . $money($row['gross_salary'] ?? 0), 10, 490],
+        ['Deductions', 12, 452],
+        ['PAYE: ' . $money($row['paye'] ?? 0), 10, 430],
+        ['NAPSA: ' . $money($row['napsa'] ?? 0), 10, 412],
+        ['NHIMA: ' . $money($row['nhima'] ?? 0), 10, 394],
+        ['Loan: ' . $money($row['loan_deduction'] ?? 0), 10, 376],
+        ['Salary Advance: ' . $money($row['salary_advance'] ?? 0), 10, 358],
+        ['Other Deductions: ' . $money($row['other_deductions'] ?? 0), 10, 340],
+        ['Total Deductions: ' . $money($row['total_deductions'] ?? 0), 10, 318],
+        ['NET SALARY: ' . $money($row['net_salary'] ?? 0), 14, 278],
+        ['Official Verification', 12, 232],
+        ['Verify this payslip online:', 10, 210],
+        [$verify, 8, 192],
+        ['This PDF was generated by the official ' . $company . ' Payroll system.', 8, 150],
+        ['Payslip verification should be performed using the official verification URL above.', 8, 136],
+    ];
+
+    $content = "BT\n";
+    foreach ($lines as [$text, $size, $y]) {
+        $content .= sprintf("/F1 %d Tf 50 %d Td (%s) Tj 0 -%d Td\n", $size, $y, $esc($text), $y);
+    }
+    $content .= "ET\n";
+
+    // Add simple horizontal separators using PDF drawing commands.
+    $content = "0.12 0.12 0.12 rg\n" . $content;
+
+    $objects = [];
+    $objects[] = '<< /Type /Catalog /Pages 2 0 R >>';
+    $objects[] = '<< /Type /Pages /Kids [3 0 R] /Count 1 >>';
+    $objects[] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>';
+    $objects[] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+    $objects[] = '<< /Length ' . strlen($content) . " >>\nstream\n" . $content . "endstream";
+
+    $pdf = "%PDF-1.4\n";
+    $offsets = [0];
+    foreach ($objects as $i => $object) {
+        $num = $i + 1;
+        $offsets[$num] = strlen($pdf);
+        $pdf .= $num . " 0 obj\n" . $object . "\nendobj\n";
+    }
+
+    $xref = strlen($pdf);
+    $pdf .= "xref\n0 " . (count($objects) + 1) . "\n";
+    $pdf .= "0000000000 65535 f \n";
+    for ($i = 1; $i <= count($objects); $i++) {
+        $pdf .= sprintf("%010d 00000 n \n", $offsets[$i]);
+    }
+    $pdf .= "trailer\n<< /Size " . (count($objects) + 1) . " /Root 1 0 R >>\n";
+    $pdf .= "startxref\n" . $xref . "\n%%EOF\n";
+
+    return $pdf;
+}
+
 function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$row, string $companyName, string $periodLabel): array {
     $email = trim((string)($row['email'] ?? ''));
     if ($email === '') {
@@ -472,12 +625,29 @@ function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$r
     $content = payroll_payslip_email_content($row, $companyName, $verificationUrl, $periodLabel);
     $subject = $companyName . ' â€” Payslip for ' . $periodLabel;
 
+    $pdfContent = payroll_payslip_pdf_content($row, $companyName, $verificationUrl, $periodLabel);
+
+    /* Never send a successful email without a real PDF attachment. */
+    if (!is_string($pdfContent) || strlen($pdfContent) < 100 || strncmp($pdfContent, '%PDF-', 5) !== 0) {
+        return ['ok'=>false, 'error'=>'Could not generate a valid PDF payslip for this employee.'];
+    }
+
+    $safeEmployee = preg_replace('/[^A-Za-z0-9_-]+/', '-', trim((string)($row['staff_name'] ?? 'Employee')));
+    $safeEmployee = trim($safeEmployee, '-_');
+    if ($safeEmployee === '') $safeEmployee = 'Employee';
+    $safePeriod = preg_replace('/[^A-Za-z0-9_-]+/', '-', $periodLabel);
+    $pdfName = 'Payslip-' . $safeEmployee . '-' . trim($safePeriod, '-_') . '.pdf';
+
     $result = payroll_mail_send_html(
         $email,
         (string)($row['staff_name'] ?? ''),
         $subject,
         $content['html'],
-        $content['text']
+        $content['text'],
+        [[
+            'name' => $pdfName,
+            'content' => $pdfContent,
+        ]]
     );
 
     $status = $result['ok'] ? 'sent' : 'failed';
