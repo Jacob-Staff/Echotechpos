@@ -169,6 +169,405 @@ function payroll_public_base_url(): string {
     return ($https ? 'https://' : 'http://') . $host;
 }
 
+function payroll_mail_config(): array {
+    return [
+        'host' => trim((string)(getenv('MAIL_HOST') ?: '')),
+        'port' => (int)(getenv('MAIL_PORT') ?: 587),
+        'username' => trim((string)(getenv('MAIL_USERNAME') ?: '')),
+        'password' => (string)(getenv('MAIL_PASSWORD') ?: ''),
+        'from_email' => trim((string)(getenv('MAIL_FROM_EMAIL') ?: '')),
+        'from_name' => trim((string)(getenv('MAIL_FROM_NAME') ?: 'PHARMANOVA Payroll')),
+        'encryption' => strtolower(trim((string)(getenv('MAIL_ENCRYPTION') ?: 'tls'))),
+        'timeout' => max(5, min(60, (int)(getenv('MAIL_TIMEOUT') ?: 20))),
+    ];
+}
+
+function payroll_mail_read($fp, int $timeout): string {
+    stream_set_timeout($fp, $timeout);
+    $data = '';
+    while (!feof($fp)) {
+        $line = fgets($fp, 515);
+        if ($line === false) break;
+        $data .= $line;
+        if (isset($line[3]) && $line[3] === ' ') break;
+    }
+    return trim($data);
+}
+
+function payroll_mail_expect($fp, array $codes, int $timeout): bool {
+    $response = payroll_mail_read($fp, $timeout);
+    if ($response === '') return false;
+    $code = (int)substr($response, 0, 3);
+    return in_array($code, $codes, true);
+}
+
+function payroll_mail_command($fp, string $command, array $codes, int $timeout): bool {
+    if (fwrite($fp, $command . "\r\n") === false) return false;
+    return payroll_mail_expect($fp, $codes, $timeout);
+}
+
+function payroll_mail_send_html(
+    string $to,
+    string $toName,
+    string $subject,
+    string $html,
+    string $text
+): array {
+    $cfg = payroll_mail_config();
+
+    if ($cfg['host'] === '' || $cfg['username'] === '' || $cfg['password'] === '' || $cfg['from_email'] === '') {
+        return [
+            'ok' => false,
+            'error' => 'Payroll email is not configured. Set MAIL_HOST, MAIL_USERNAME, MAIL_PASSWORD and MAIL_FROM_EMAIL in the server environment.'
+        ];
+    }
+
+    if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+        return ['ok' => false, 'error' => 'Employee email address is invalid.'];
+    }
+
+    $host = $cfg['host'];
+    $port = $cfg['port'];
+    $timeout = $cfg['timeout'];
+    $encryption = $cfg['encryption'];
+
+    $remote = ($encryption === 'ssl' || $port === 465)
+        ? 'ssl://' . $host . ':' . $port
+        : $host . ':' . $port;
+
+    $errno = 0;
+    $errstr = '';
+    $fp = @stream_socket_client(
+        $remote,
+        $errno,
+        $errstr,
+        $timeout,
+        STREAM_CLIENT_CONNECT
+    );
+
+    if (!$fp) {
+        return ['ok' => false, 'error' => 'Could not connect to the configured mail server: ' . ($errstr ?: 'connection failed')];
+    }
+
+    try {
+        if (!payroll_mail_expect($fp, [220], $timeout)) {
+            throw new RuntimeException('Mail server did not accept the connection.');
+        }
+
+        $heloHost = preg_replace('/[^a-zA-Z0-9.-]/', '', (string)($_SERVER['SERVER_NAME'] ?? 'echotechpos.onrender.com'));
+        if ($heloHost === '') $heloHost = 'echotechpos.onrender.com';
+
+        if (!payroll_mail_command($fp, 'EHLO ' . $heloHost, [250], $timeout)) {
+            throw new RuntimeException('SMTP EHLO failed.');
+        }
+
+        if ($encryption === 'tls' && $port !== 465) {
+            if (!payroll_mail_command($fp, 'STARTTLS', [220], $timeout)) {
+                throw new RuntimeException('SMTP STARTTLS was rejected.');
+            }
+
+            if (!@stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                throw new RuntimeException('Could not establish SMTP TLS encryption.');
+            }
+
+            if (!payroll_mail_command($fp, 'EHLO ' . $heloHost, [250], $timeout)) {
+                throw new RuntimeException('SMTP EHLO after STARTTLS failed.');
+            }
+        }
+
+        if (!payroll_mail_command($fp, 'AUTH LOGIN', [334], $timeout)) {
+            throw new RuntimeException('SMTP authentication was not accepted.');
+        }
+
+        if (!payroll_mail_command($fp, base64_encode($cfg['username']), [334], $timeout)) {
+            throw new RuntimeException('SMTP username was rejected.');
+        }
+
+        if (!payroll_mail_command($fp, base64_encode($cfg['password']), [235], $timeout)) {
+            throw new RuntimeException('SMTP password was rejected.');
+        }
+
+        if (!payroll_mail_command($fp, 'MAIL FROM:<' . $cfg['from_email'] . '>', [250], $timeout)) {
+            throw new RuntimeException('SMTP sender address was rejected.');
+        }
+
+        if (!payroll_mail_command($fp, 'RCPT TO:<' . $to . '>', [250,251], $timeout)) {
+            throw new RuntimeException('SMTP recipient address was rejected.');
+        }
+
+        if (!payroll_mail_command($fp, 'DATA', [354], $timeout)) {
+            throw new RuntimeException('SMTP DATA command was rejected.');
+        }
+
+        $safeName = trim(preg_replace('/[\r\n]+/', ' ', $toName));
+        $safeSubject = trim(preg_replace('/[\r\n]+/', ' ', $subject));
+        $boundary = '=_EchoTech_' . bin2hex(random_bytes(12));
+
+        $headers = [
+            'Date: ' . date('r'),
+            'From: ' . mb_encode_mimeheader($cfg['from_name'], 'UTF-8') . ' <' . $cfg['from_email'] . '>',
+            'To: ' . ($safeName !== '' ? mb_encode_mimeheader($safeName, 'UTF-8') . ' <' . $to . '>' : '<' . $to . '>'),
+            'Subject: ' . mb_encode_mimeheader($safeSubject, 'UTF-8'),
+            'MIME-Version: 1.0',
+            'Content-Type: multipart/alternative; boundary="' . $boundary . '"',
+        ];
+
+        $body = implode("\r\n", $headers) . "\r\n\r\n";
+        $body .= '--' . $boundary . "\r\n";
+        $body .= "Content-Type: text/plain; charset=UTF-8\r\n";
+        $body .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+        $body .= str_replace(["\r\n", "\r"], "\n", $text) . "\r\n\r\n";
+        $body .= '--' . $boundary . "\r\n";
+        $body .= "Content-Type: text/html; charset=UTF-8\r\n";
+        $body .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+        $body .= str_replace(["\r\n", "\r"], "\n", $html) . "\r\n\r\n";
+        $body .= '--' . $boundary . "--\r\n";
+
+        $body = preg_replace('/^\./m', '..', $body);
+
+        if (fwrite($fp, $body . "\r\n.\r\n") === false) {
+            throw new RuntimeException('Could not transmit the email body.');
+        }
+
+        if (!payroll_mail_expect($fp, [250], $timeout)) {
+            throw new RuntimeException('Mail server did not accept the message.');
+        }
+
+        @fwrite($fp, "QUIT\r\n");
+        @fclose($fp);
+
+        return ['ok' => true, 'error' => ''];
+    } catch (Throwable $e) {
+        @fwrite($fp, "RSET\r\n");
+        @fwrite($fp, "QUIT\r\n");
+        @fclose($fp);
+        return ['ok' => false, 'error' => $e->getMessage()];
+    }
+}
+
+function payroll_payslip_email_content(
+    array $row,
+    string $companyName,
+    string $verificationUrl,
+    string $periodLabel
+): array {
+    $name = trim((string)($row['staff_name'] ?? 'Employee'));
+    $basic = payroll_complete_money((float)($row['basic_salary'] ?? 0));
+    $allowances = payroll_complete_money((float)($row['allowances'] ?? 0));
+    $bonus = payroll_complete_money((float)($row['bonus'] ?? 0));
+    $overtime = payroll_complete_money((float)($row['overtime'] ?? 0));
+    $otherEarnings = payroll_complete_money((float)($row['other_earnings'] ?? 0));
+    $gross = payroll_complete_money((float)($row['gross_salary'] ?? 0));
+    $paye = payroll_complete_money((float)($row['paye'] ?? 0));
+    $napsa = payroll_complete_money((float)($row['napsa'] ?? 0));
+    $nhima = payroll_complete_money((float)($row['nhima'] ?? 0));
+    $loan = payroll_complete_money((float)($row['loan_deduction'] ?? 0));
+    $advance = payroll_complete_money((float)($row['salary_advance'] ?? 0));
+    $otherDed = payroll_complete_money((float)($row['other_deductions'] ?? 0));
+    $deductions = payroll_complete_money((float)($row['total_deductions'] ?? 0));
+    $net = payroll_complete_money((float)($row['net_salary'] ?? 0));
+
+    $e = static fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+
+    $html = '<!doctype html><html><body style="margin:0;background:#f3f6fa;font-family:Arial,sans-serif;color:#202831;">'
+        . '<div style="max-width:680px;margin:24px auto;background:#fff;border:1px solid #dfe6ee;border-radius:12px;overflow:hidden;">'
+        . '<div style="padding:24px;background:#1f6fff;color:#fff;"><h1 style="margin:0;font-size:22px;">' . $e($companyName) . '</h1><div style="margin-top:6px;font-size:14px;">Official Payroll Payslip</div></div>'
+        . '<div style="padding:24px;">'
+        . '<p style="font-size:16px;">Dear <strong>' . $e($name) . '</strong>,</p>'
+        . '<p>Your official payslip for <strong>' . $e($periodLabel) . '</strong> is now available.</p>'
+        . '<table width="100%" cellpadding="9" cellspacing="0" style="border-collapse:collapse;font-size:14px;">'
+        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Employee No.</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $e($row['employee_number'] ?? $row['staff_id']) . '</strong></td></tr>'
+        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Designation</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $e($row['staff_role'] ?? 'Staff') . '</strong></td></tr>'
+        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Branch</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $e($row['branch_name'] ?? '') . '</strong></td></tr>'
+        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Basic Salary</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $basic . '</strong></td></tr>'
+        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Gross Salary</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $gross . '</strong></td></tr>'
+        . '<tr><td style="border-bottom:1px solid #e5eaf0;">Total Deductions</td><td align="right" style="border-bottom:1px solid #e5eaf0;"><strong>' . $deductions . '</strong></td></tr>'
+        . '<tr><td style="padding-top:14px;font-size:17px;">NET SALARY</td><td align="right" style="padding-top:14px;font-size:19px;"><strong>' . $net . '</strong></td></tr>'
+        . '</table>'
+        . '<div style="margin-top:22px;padding:16px;background:#f5f8fc;border-radius:9px;">'
+        . '<strong>Official verification</strong><p style="margin:8px 0 14px;color:#5d6b79;">Use the official verification page to confirm that this payslip matches the company payroll record.</p>'
+        . '<a href="' . $e($verificationUrl) . '" style="display:inline-block;padding:11px 16px;background:#1f6fff;color:#fff;text-decoration:none;border-radius:7px;font-weight:bold;">Verify Payslip</a>'
+        . '</div>'
+        . '<p style="margin-top:24px;font-size:12px;color:#7a8794;">This email was generated by the official ' . $e($companyName) . ' Payroll system. Please keep this message for your records.</p>'
+        . '</div></div></body></html>';
+
+    $text = $companyName . " - Official Payroll Payslip\n\n"
+        . "Dear " . $name . ",\n\n"
+        . "Your official payslip for " . $periodLabel . " is now available.\n\n"
+        . "Employee No.: " . ($row['employee_number'] ?? $row['staff_id']) . "\n"
+        . "Designation: " . ($row['staff_role'] ?? 'Staff') . "\n"
+        . "Branch: " . ($row['branch_name'] ?? '') . "\n"
+        . "Basic Salary: " . $basic . "\n"
+        . "Allowances: " . $allowances . "\n"
+        . "Bonus: " . $bonus . "\n"
+        . "Overtime: " . $overtime . "\n"
+        . "Other Earnings: " . $otherEarnings . "\n"
+        . "Gross Salary: " . $gross . "\n"
+        . "PAYE: " . $paye . "\n"
+        . "NAPSA: " . $napsa . "\n"
+        . "NHIMA: " . $nhima . "\n"
+        . "Loan: " . $loan . "\n"
+        . "Salary Advance: " . $advance . "\n"
+        . "Other Deductions: " . $otherDed . "\n"
+        . "Total Deductions: " . $deductions . "\n"
+        . "NET SALARY: " . $net . "\n\n"
+        . "Verify this official payslip:\n" . $verificationUrl . "\n";
+
+    return ['html' => $html, 'text' => $text];
+}
+
+function payroll_ensure_payslip_identity(mysqli $conn, int $pharmacyId, array &$row): bool {
+    if (!payroll_complete_col($conn, 'payroll_records', 'verification_token')) return false;
+    if (!payroll_complete_col($conn, 'payroll_records', 'document_hash')) return false;
+
+    $token = trim((string)($row['verification_token'] ?? ''));
+    if ($token === '') {
+        $token = payroll_verification_token();
+        $stmt = $conn->prepare(
+            "UPDATE payroll_records SET verification_token=? WHERE id=? AND pharmacy_id=? AND (verification_token IS NULL OR verification_token='')"
+        );
+        if (!$stmt) return false;
+        $id = (int)$row['id'];
+        $stmt->bind_param('sii', $token, $id, $pharmacyId);
+        $stmt->execute();
+        $stmt->close();
+        $row['verification_token'] = $token;
+    }
+
+    $hash = trim((string)($row['document_hash'] ?? ''));
+    if ($hash === '') {
+        $hash = payroll_verification_hash($row, $token);
+        $stmt = $conn->prepare(
+            "UPDATE payroll_records SET document_hash=? WHERE id=? AND pharmacy_id=? AND (document_hash IS NULL OR document_hash='')"
+        );
+        if (!$stmt) return false;
+        $id = (int)$row['id'];
+        $stmt->bind_param('sii', $hash, $id, $pharmacyId);
+        $stmt->execute();
+        $stmt->close();
+        $row['document_hash'] = $hash;
+    }
+
+    return $token !== '' && $hash !== '';
+}
+
+function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$row, string $companyName, string $periodLabel): array {
+    $email = trim((string)($row['email'] ?? ''));
+    if ($email === '') {
+        return ['ok'=>false, 'error'=>'No email address is recorded for this employee.'];
+    }
+
+    if (!payroll_ensure_payslip_identity($conn, $pharmacyId, $row)) {
+        return ['ok'=>false, 'error'=>'Could not create the official payslip verification identity.'];
+    }
+
+    $verificationUrl = payroll_public_base_url()
+        . '/verify-payslip.php?token='
+        . rawurlencode((string)$row['verification_token']);
+
+    $content = payroll_payslip_email_content($row, $companyName, $verificationUrl, $periodLabel);
+    $subject = $companyName . ' â€” Payslip for ' . $periodLabel;
+
+    $result = payroll_mail_send_html(
+        $email,
+        (string)($row['staff_name'] ?? ''),
+        $subject,
+        $content['html'],
+        $content['text']
+    );
+
+    $status = $result['ok'] ? 'sent' : 'failed';
+    $errorText = $result['ok'] ? null : (string)$result['error'];
+
+    $stmt = $conn->prepare(
+        "UPDATE payroll_records
+         SET payslip_email_status=?,
+             payslip_email_sent_at=CASE WHEN ?='sent' THEN NOW() ELSE payslip_email_sent_at END,
+             payslip_email_error=?
+         WHERE id=? AND pharmacy_id=?"
+    );
+    if ($stmt) {
+        $stmt->bind_param(
+            'sssii',
+            $status,
+            $status,
+            $errorText,
+            $row['id'],
+            $pharmacyId
+        );
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    $row['payslip_email_status'] = $status;
+    $row['payslip_email_error'] = $errorText;
+    if ($result['ok']) $row['payslip_email_sent_at'] = date('Y-m-d H:i:s');
+
+    return $result;
+}
+
+function payroll_send_period_payslips(mysqli $conn, int $pharmacyId, string $period, string $companyName): array {
+    $rows = payroll_complete_rows(
+        $conn,
+        "SELECT p.*, 
+                COALESCE(NULLIF(TRIM(u.full_name),''),NULLIF(TRIM(u.username),''),CONCAT('Staff #',u.id)) AS staff_name,
+                COALESCE(u.role,'Staff') AS staff_role,
+                COALESCE(u.email,'') AS email,
+                u.id AS employee_number
+         FROM payroll_records p
+         INNER JOIN users u ON u.id=p.staff_id AND u.pharmacy_id=p.pharmacy_id
+         WHERE p.pharmacy_id=? AND p.payroll_period=?
+         ORDER BY p.staff_id ASC",
+        'is',
+        [$pharmacyId, $period]
+    );
+
+    $sent = 0;
+    $failed = 0;
+    $details = [];
+
+    foreach ($rows as &$row) {
+        $row['branch_name'] = 'Main Branch';
+        $branchId = (int)($row['branch_id'] ?? 0);
+        if ($branchId > 0 && payroll_complete_table($conn, 'branches')) {
+            $b = payroll_complete_rows(
+                $conn,
+                "SELECT branch_name FROM branches WHERE id=? AND pharmacy_id=? LIMIT 1",
+                'ii',
+                [$branchId, $pharmacyId]
+            );
+            if (!empty($b[0]['branch_name'])) $row['branch_name'] = $b[0]['branch_name'];
+        }
+
+        foreach ([
+            'basic_salary','allowances','bonus','overtime','other_earnings',
+            'paye','napsa','nhima','loan_deduction','salary_advance',
+            'other_deductions','gross_salary','total_deductions','net_salary',
+            'employer_napsa','employer_nhima'
+        ] as $col) {
+            $row[$col] = (float)($row[$col] ?? 0);
+        }
+
+        $result = payroll_send_one_payslip_email(
+            $conn,
+            $pharmacyId,
+            $row,
+            $companyName,
+            date('F Y', strtotime($period . '-01'))
+        );
+
+        if ($result['ok']) {
+            $sent++;
+        } else {
+            $failed++;
+            $details[] = ($row['staff_name'] ?? ('Staff #' . $row['staff_id'])) . ': ' . $result['error'];
+        }
+    }
+    unset($row);
+
+    return ['sent'=>$sent, 'failed'=>$failed, 'details'=>$details];
+}
+
 function payroll_template_components_sum(mixed $json): float {
     $items = is_string($json) ? json_decode($json, true) : $json;
     if (!is_array($items)) return 0.0;
@@ -639,6 +1038,9 @@ if (!payroll_complete_table($conn, 'payroll_records')) {
             `verified_at` DATETIME NULL,
             `revoked_at` DATETIME NULL,
             `revoked_by` VARCHAR(150) NULL,
+            `payslip_email_status` VARCHAR(20) NOT NULL DEFAULT 'pending',
+            `payslip_email_sent_at` DATETIME NULL,
+            `payslip_email_error` TEXT NULL,
             `created_by` VARCHAR(150) NULL,
             `updated_by` VARCHAR(150) NULL,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -686,6 +1088,9 @@ if ($error === '') {
         'verified_at' => 'DATETIME NULL',
         'revoked_at' => 'DATETIME NULL',
         'revoked_by' => 'VARCHAR(150) NULL',
+        'payslip_email_status' => "VARCHAR(20) NOT NULL DEFAULT 'pending'",
+        'payslip_email_sent_at' => 'DATETIME NULL',
+        'payslip_email_error' => 'TEXT NULL',
     ];
 
     foreach ($upgradeColumns as $col => $definition) {
@@ -1337,6 +1742,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
         }
     }
 
+    /* ---------- Payslip email delivery ---------- */
+
+    if ($action === 'send_payslip_email') {
+        $staffId = (int)($_POST['staff_id'] ?? 0);
+
+        $rows = payroll_complete_rows(
+            $conn,
+            "SELECT p.*, 
+                    COALESCE(NULLIF(TRIM(u.full_name),''),NULLIF(TRIM(u.username),''),CONCAT('Staff #',u.id)) AS staff_name,
+                    COALESCE(u.role,'Staff') AS staff_role,
+                    COALESCE(u.email,'') AS email,
+                    u.id AS employee_number
+             FROM payroll_records p
+             INNER JOIN users u ON u.id=p.staff_id AND u.pharmacy_id=p.pharmacy_id
+             WHERE p.id=? AND p.pharmacy_id=? AND p.payroll_period=?
+             LIMIT 1",
+            'iis',
+            [$staffId, $pharmacyId, $period]
+        );
+
+        if (!$rows) {
+            payroll_complete_redirect([
+                'month'=>$selectedMonth,'year'=>$selectedYear,'view'=>'payroll',
+                'error'=>'The selected payroll record could not be found.'
+            ]);
+        }
+
+        $row = $rows[0];
+        if (!in_array((string)$row['status'], ['approved','paid','locked'], true)) {
+            payroll_complete_redirect([
+                'month'=>$selectedMonth,'year'=>$selectedYear,'view'=>'payroll',
+                'error'=>'A payslip can only be emailed after the payroll record has been approved.'
+            ]);
+        }
+
+        $branchName = 'Main Branch';
+        $branchId = (int)($row['branch_id'] ?? 0);
+        if ($branchId > 0 && payroll_complete_table($conn, 'branches')) {
+            $b = payroll_complete_rows($conn, "SELECT branch_name FROM branches WHERE id=? AND pharmacy_id=? LIMIT 1", 'ii', [$branchId,$pharmacyId]);
+            if (!empty($b[0]['branch_name'])) $branchName = $b[0]['branch_name'];
+        }
+        $row['branch_name'] = $branchName;
+
+        foreach ([
+            'basic_salary','allowances','bonus','overtime','other_earnings',
+            'paye','napsa','nhima','loan_deduction','salary_advance',
+            'other_deductions','gross_salary','total_deductions','net_salary',
+            'employer_napsa','employer_nhima'
+        ] as $col) {
+            $row[$col] = (float)($row[$col] ?? 0);
+        }
+
+        $result = payroll_send_one_payslip_email($conn, $pharmacyId, $row, $pharmacyName, $periodLabel);
+
+        payroll_complete_redirect([
+            'month'=>$selectedMonth,'year'=>$selectedYear,'view'=>'payroll',
+            ($result['ok'] ? 'saved' : 'error') =>
+                $result['ok']
+                    ? 'Payslip emailed successfully to ' . $row['email'] . '.'
+                    : 'Payslip email failed: ' . $result['error']
+        ]);
+    }
+
+    if ($action === 'send_all_payslips') {
+        $result = payroll_send_period_payslips($conn, $pharmacyId, $period, $pharmacyName);
+
+        $message = $result['sent'] . ' payslip(s) emailed successfully.';
+        if ($result['failed'] > 0) {
+            $message .= ' ' . $result['failed'] . ' failed.';
+            if (!empty($result['details'])) {
+                $message .= ' ' . implode(' | ', array_slice($result['details'], 0, 3));
+            }
+        }
+
+        payroll_complete_redirect([
+            'month'=>$selectedMonth,'year'=>$selectedYear,'view'=>'payroll',
+            ($result['failed'] > 0 ? 'error' : 'saved') => $message
+        ]);
+    }
+
     /* ---------- Payroll workflow ---------- */
 
     if ($action === 'approve') {
@@ -1479,11 +1964,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
             ]);
         }
 
+        /*
+         * Payroll is now PAID. Automatically issue the official payslip
+         * verification identity and attempt email delivery for every
+         * employee in this period. Email failure does not undo a valid
+         * payroll payment; the administrator can resend from the register.
+         */
+        $mailResult = payroll_send_period_payslips(
+            $conn,
+            $pharmacyId,
+            $period,
+            $pharmacyName
+        );
+
+        $savedMessage = $changed . ' payroll record(s) marked PAID. Payment reference: ' . $paymentReference . '. '
+            . $mailResult['sent'] . ' payslip(s) emailed.';
+
+        if ($mailResult['failed'] > 0) {
+            $savedMessage .= ' ' . $mailResult['failed'] . ' email(s) failed; use Resend to try again.';
+        }
+
         payroll_complete_redirect([
             'month'=>$selectedMonth,
             'year'=>$selectedYear,
             'view'=>'payroll',
-            'saved'=>$changed.' payroll record(s) marked PAID. Payment reference: '.$paymentReference.'.'
+            ($mailResult['failed'] > 0 ? 'error' : 'saved') => $savedMessage
         ]);
     }
 
@@ -1630,6 +2135,9 @@ foreach ($payrollRows as &$row) {
     $row['employee_number'] =
         $staff['employee_number']
         ?? '';
+
+    $row['email'] =
+        trim((string)($staff['email'] ?? ''));
 
     $row['branch_name'] =
         $branchNames[(int)($row['branch_id'] ?? 0)]
@@ -2832,6 +3340,18 @@ Recalculate
 </button>
 </form>
 
+<?php if ($view === 'payroll' && in_array($periodStatus, ['approved','paid','locked'], true)): ?>
+<form method="post" action="/admin/actions/payroll.php" onsubmit="return confirm('Email payslips to all employees with valid email addresses for <?= payroll_complete_h($periodLabel) ?>?');">
+<input type="hidden" name="action" value="send_all_payslips">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+<button class="btn" type="submit">
+<i class="fas fa-envelope"></i>
+Email Payslips
+</button>
+</form>
+<?php endif; ?>
+
 <button class="btn" type="button" onclick="window.print()">
 <i class="fas fa-print"></i>
 Print
@@ -3095,6 +3615,19 @@ echo payroll_complete_h($initials ?: 'ST');
 </td>
 
 <td>
+<?php if (!empty($row['email'])): ?>
+<div style="font-size:9px;color:var(--muted);margin-bottom:5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?= payroll_complete_h($row['email']) ?>">
+<i class="fas fa-envelope"></i> <?= payroll_complete_h($row['email']) ?>
+<?php if (($row['payslip_email_status'] ?? 'pending') === 'sent'): ?>
+<span style="color:#08754f;font-weight:700;"> Â· SENT</span>
+<?php elseif (($row['payslip_email_status'] ?? 'pending') === 'failed'): ?>
+<span style="color:#b42318;font-weight:700;"> Â· FAILED</span>
+<?php endif; ?>
+</div>
+<?php else: ?>
+<div style="font-size:9px;color:#b42318;margin-bottom:5px;">No email on staff record</div>
+<?php endif; ?>
+
 <div class="action-stack">
 
 <?php if (!in_array(
@@ -3121,6 +3654,18 @@ echo payroll_complete_h($initials ?: 'ST');
 >
 <i class="fas fa-receipt"></i>
 </a>
+
+<?php if (in_array((string)$row['status'], ['approved','paid','locked'], true)): ?>
+<form method="post" style="display:inline" onsubmit="return confirm('Email this payslip to <?= payroll_complete_h($row['email'] ?? '') ?>?');">
+<input type="hidden" name="action" value="send_payslip_email">
+<input type="hidden" name="staff_id" value="<?= (int)$row['id'] ?>">
+<input type="hidden" name="month" value="<?= $selectedMonth ?>">
+<input type="hidden" name="year" value="<?= $selectedYear ?>">
+<button class="btn small" type="submit" title="Email Payslip" <?= empty($row['email']) ? 'disabled' : '' ?>>
+<i class="fas fa-envelope"></i>
+</button>
+</form>
+<?php endif; ?>
 
 </div>
 </td>
