@@ -2543,13 +2543,39 @@ tbody tr:hover{background:#fbfcfd}
     .payroll-content{padding:16px 12px 30px}
 }
 @media print{
-    .admin-aside,.admin-header,.payroll-tabs,.filter-panel,
-    .page-actions,.row-form,.action-stack,.notice,.footer-total{
-        display:none!important
+    @page{
+        size:A4 portrait;
+        margin:10mm;
     }
-    .main{margin-left:0}
-    .payroll-content{padding:0;max-width:none}
-    .panel,.summary-card{box-shadow:none}
+
+    html,body{
+        margin:0!important;
+        padding:0!important;
+        background:#fff!important;
+    }
+
+    body.print-payslip .app{
+        display:none!important;
+    }
+
+    body.print-payslip .payslip-sheet{
+        display:block!important;
+        visibility:visible!important;
+        width:100%!important;
+        max-width:none!important;
+        margin:0!important;
+        padding:0!important;
+        background:#fff!important;
+        color:#111!important;
+    }
+
+    body.print-payslip .payslip-sheet *{
+        visibility:visible!important;
+    }
+
+    body.print-payslip .payslip-footer{
+        page-break-inside:avoid;
+    }
 }
 
 /* Salary Template UI */
@@ -2557,7 +2583,7 @@ tbody tr:hover{background:#fbfcfd}
 </style>
 </head>
 
-<body>
+<body class="<?= ($payslip !== null && isset($_GET['print']) && $_GET['print'] === '1') ? 'print-payslip' : '' ?>">
 
 <div class="app">
 
@@ -3794,14 +3820,17 @@ foreach ($ytdRows as $yr) {
 
 <?php endif; ?>
 
+</section><!-- /.payroll-content -->
+</main><!-- /.main -->
+</div><!-- /.app -->
+
 <?php
 /*
 |--------------------------------------------------------------------------
 | Standard printable payslip.
 |
-| This remains inside the single Payroll controller. Monthly payroll values
-| are the source of calculated amounts; the salary template supplies bank
-| and named recurring salary components.
+| This section is intentionally OUTSIDE the application shell so printing
+| cannot hide the payslip together with the dashboard.
 |--------------------------------------------------------------------------
 */
 ?>
@@ -4105,17 +4134,6 @@ foreach ($ytdRows as $yr) {
 
 <script>
 (function () {
-    const app = document.querySelector('.app');
-    const sheet = document.getElementById('payslipSheet');
-
-    if (app) {
-        app.style.display = 'none';
-    }
-
-    if (sheet) {
-        sheet.style.display = 'block';
-    }
-
     window.addEventListener('load', function () {
         window.setTimeout(function () {
             window.print();
