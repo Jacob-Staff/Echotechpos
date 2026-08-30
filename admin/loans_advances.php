@@ -170,7 +170,7 @@ foreach ([
     'salary_advances' => [
         'write_off_amount' => "ALTER TABLE salary_advances ADD COLUMN write_off_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER balance_amount",
         'write_off_reason' => "ALTER TABLE salary_advances ADD COLUMN write_off_reason VARCHAR(255) DEFAULT NULL AFTER write_off_amount",
-        'written_off_by' => "ALTER TABLE salary_advances ADD COLUMN written_off_by VARCHAR(150) DEFAULT NULL AFTER written_off_by",
+        'written_off_by' => "ALTER TABLE salary_advances ADD COLUMN written_off_by VARCHAR(150) DEFAULT NULL AFTER write_off_reason",
         'written_off_at' => "ALTER TABLE salary_advances ADD COLUMN written_off_at DATETIME DEFAULT NULL AFTER written_off_by",
     ],
 ] as $table => $columns) {
@@ -980,7 +980,7 @@ tr:last-child td{border-bottom:0}
                                     <button class="btn danger" type="submit" title="Cancel"><i class="fa-solid fa-xmark"></i></button>
                                 </form>
                             <?php else: ?>
-                                <span class="muted">—</span>
+                                <span class="muted">â€”</span>
                             <?php endif; ?>
                             <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
                                 <a class="btn" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Excuse or lower this month's repayment in Payroll"><i class="fa-solid fa-calculator"></i></a>
@@ -1046,7 +1046,7 @@ tr:last-child td{border-bottom:0}
                                     <button class="btn danger" type="submit" title="Cancel"><i class="fa-solid fa-xmark"></i></button>
                                 </form>
                             <?php else: ?>
-                                <span class="muted">—</span>
+                                <span class="muted">â€”</span>
                             <?php endif; ?>
                             <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
                                 <a class="btn" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Excuse or lower this month's repayment in Payroll"><i class="fa-solid fa-calculator"></i></a>
@@ -1090,7 +1090,7 @@ tr:last-child td{border-bottom:0}
                         <option value="">Select employee</option>
                         <?php foreach ($staff as $s): ?>
                             <option value="<?= (int)$s['id'] ?>">
-                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' — ' . $s['role']) ?>
+                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' â€” ' . $s['role']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -1150,7 +1150,7 @@ tr:last-child td{border-bottom:0}
                         <option value="">Select employee</option>
                         <?php foreach ($staff as $s): ?>
                             <option value="<?= (int)$s['id'] ?>">
-                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' — ' . $s['role']) ?>
+                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' â€” ' . $s['role']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
