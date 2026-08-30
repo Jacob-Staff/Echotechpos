@@ -2,13 +2,47 @@
 session_start();
 require_once '../includes/conn.php';
 require_once '../includes/auth.php';
-require_admin();
+
+/*
+ * Employee Management is an HR portal.
+ * Admin and Manager retain access for oversight, while a Human Resource
+ * account is specifically authorized to manage this portal.
+ */
+require_hr_portal();
 
 $pharmacy_id=(int)($_SESSION['pharmacy_id']??0);
 $user_id=(int)($_SESSION['user_id']??0);
 $user_role=function_exists('current_role')?current_role():(string)($_SESSION['role']??'Admin');
 $user_name=function_exists('current_user')?current_user():'Administrator';
 if($pharmacy_id<=0){http_response_code(403);exit('Pharmacy session is not available.');}
+
+/*
+ * HR scope is the COMPANY / PHARMACY GROUP, never the logged-in user's branch.
+ * Every employee-management query below is filtered by pharmacy_id only.
+ * branch_id is used only where a specific HR operation genuinely needs a
+ * branch (for example, an employee transfer destination).
+ */
+$pharmacy_name='PHARMANOVA';
+try {
+    $cols=[];
+    $c=$conn->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='pharmacies'");
+    if($c){while($r=$c->fetch_assoc())$cols[]=$r['COLUMN_NAME'];$c->free();}
+    $name_col=null;
+    foreach(['name','pharmacy_name','business_name'] as $candidate){
+        if(in_array($candidate,$cols,true)){$name_col=$candidate;break;}
+    }
+    if($name_col){
+        $ps=$conn->prepare("SELECT `{$name_col}` AS pharmacy_name FROM pharmacies WHERE id=? LIMIT 1");
+        if($ps){
+            $ps->bind_param('i',$pharmacy_id);$ps->execute();
+            $pr=$ps->get_result()->fetch_assoc();$ps->close();
+            if(!empty($pr['pharmacy_name']))$pharmacy_name=(string)$pr['pharmacy_name'];
+        }
+    }
+} catch(Throwable $e) {
+    error_log('HR pharmacy lookup: '.$e->getMessage());
+}
+
 function h($v){return htmlspecialchars((string)$v,ENT_QUOTES,'UTF-8');}
 function back($tab='overview',$ok='',$err=''){ $q=['tab'=>$tab]; if($ok)$q['saved']=$ok;if($err)$q['error']=$err;header('Location: employee_management.php?'.http_build_query($q),true,303);exit; }
 if(empty($_SESSION['employee_hr_csrf']))$_SESSION['employee_hr_csrf']=bin2hex(random_bytes(32));
@@ -53,7 +87,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 }
 
 $tab=$_GET['tab']??'overview';$tabs=['overview','leave','payslips','transfers','awards','resignations','complaints','warnings','travel','terminations','holidays'];if(!in_array($tab,$tabs,true))$tab='overview';$saved=$_GET['saved']??'';$error=$_GET['error']??'';
-$employees=[];$s=$conn->prepare('SELECT u.id,u.full_name,u.username,u.email,u.role,u.branch_id,u.status,b.branch_name FROM users u LEFT JOIN branches b ON b.id=u.branch_id WHERE u.pharmacy_id=? ORDER BY u.full_name,u.username');$s->bind_param('i',$pharmacy_id);$s->execute();$r=$s->get_result();while($x=$r->fetch_assoc())$employees[]=$x;$s->close();$emap=[];foreach($employees as $e)$emap[(int)$e['id']]=$e;
+$employees=[];/* Company-wide HR scope: pharmacy_id only; never filter employees by the HR user's branch. */$s=$conn->prepare('SELECT u.id,u.full_name,u.username,u.email,u.role,u.branch_id,u.status,b.branch_name FROM users u LEFT JOIN branches b ON b.id=u.branch_id AND b.pharmacy_id=u.pharmacy_id WHERE u.pharmacy_id=? ORDER BY u.full_name,u.username');$s->bind_param('i',$pharmacy_id);$s->execute();$r=$s->get_result();while($x=$r->fetch_assoc())$employees[]=$x;$s->close();$emap=[];foreach($employees as $e)$emap[(int)$e['id']]=$e;
 $branches=[];$s=$conn->prepare('SELECT id,branch_name FROM branches WHERE pharmacy_id=? ORDER BY branch_name');$s->bind_param('i',$pharmacy_id);$s->execute();$r=$s->get_result();while($x=$r->fetch_assoc())$branches[]=$x;$s->close();
 function ename($id){global $emap;return isset($emap[$id])?($emap[$id]['full_name']?:$emap[$id]['username']):'Employee #'.$id;}
 function rowsq($sql,$types,$params){global $conn;$out=[];$s=$conn->prepare($sql);if(!$s)return $out;$s->bind_param($types,...$params);$s->execute();$r=$s->get_result();while($x=$r->fetch_assoc())$out[]=$x;$s->close();return $out;}
@@ -77,8 +111,28 @@ $labels=['overview'=>['fa-gauge-high','Overview'],'leave'=>['fa-calendar-days','
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Employee Management | EchoTech POS</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet"><style>
 :root{--bg:#f4f6f8;--white:#fff;--ink:#202831;--muted:#71808d;--border:#dfe5ea;--blue:#246bfe;--blue2:#eaf1ff;--green:#159a68;--green2:#e8f7f0;--red:#d94d61;--red2:#fff0f2;--yellow:#e2a327;--yellow2:#fff6df;--side:250px}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px Inter,Arial,sans-serif}.sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--side);background:#202831;padding:17px 14px;overflow:auto;z-index:5}.brand{display:flex;gap:11px;align-items:center;color:#fff;padding:4px 9px 20px}.brand i{background:var(--blue);padding:12px;border-radius:10px}.brand b{display:block}.brand small{font-size:9px;color:#aeb8c2;letter-spacing:1px}.userbox{margin:0 7px 15px;padding:10px;background:#18212a;border:1px solid #35414d;border-radius:9px;color:#fff}.nav{display:flex;flex-direction:column;gap:3px}.nav a{padding:11px 12px;border-radius:8px;color:#bdc6cf;font-weight:700;text-decoration:none;font-size:13px}.nav a:hover,.nav a.active{background:#344253;color:#fff}.nav a i{width:19px;color:#8996a3}.nav a.active i{color:#70a0ff}.logout{position:absolute;bottom:14px;left:14px;right:14px}.main{margin-left:var(--side);min-height:100vh}.top{height:64px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 28px}.top b{font-size:13px}.top span{font-size:10px;color:var(--muted)}.content{padding:26px 28px 45px;max-width:1600px;margin:auto}.head{display:flex;justify-content:space-between;align-items:end;margin-bottom:17px}.head h1{font-size:27px;margin:0;font-weight:800}.eyebrow{font-size:10px;color:var(--blue);font-weight:900;letter-spacing:1px;text-transform:uppercase}.head p{font-size:12px;color:var(--muted);margin:6px 0 0}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:14px}.sum,.card{background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 4px 18px rgba(31,40,49,.06)}.sum{padding:16px}.sum label{font-size:10px;color:#74808b;font-weight:800;text-transform:uppercase}.sum strong{display:block;font-size:25px;margin-top:8px}.sum small{color:var(--muted);font-size:10px}.tabs{display:flex;gap:5px;overflow:auto;padding:10px;background:#fff;border:1px solid var(--border);border-radius:12px;margin-bottom:14px}.tabs a{white-space:nowrap;padding:9px 12px;border-radius:8px;color:#61707d;text-decoration:none;font-size:11px;font-weight:800}.tabs a.active{background:var(--blue2);color:var(--blue)}.card{overflow:hidden}.chead{padding:15px 17px;border-bottom:1px solid var(--border)}.chead h2{font-size:14px;margin:0;font-weight:800}.chead p{font-size:10px;color:var(--muted);margin:3px 0 0}.form{padding:17px;background:#fbfcfd;border-bottom:1px solid var(--border)}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:11px}label{font-size:10px;font-weight:800;color:#596774}input,select,textarea{width:100%;margin-top:5px;border:1px solid var(--border);border-radius:8px;padding:10px 11px;font-size:11px;outline:0;background:#fff}textarea{min-height:72px}.span3{grid-column:span 3}.span2{grid-column:span 2}.btn{border:1px solid var(--border);background:#fff;border-radius:8px;padding:9px 13px;font-size:11px;font-weight:800}.primary{background:var(--blue);border-color:var(--blue);color:#fff}.green{background:var(--green2);border-color:#bce7d3;color:var(--green)}.red{background:var(--red2);border-color:#efc0c8;color:var(--red)}.tablewrap{overflow:auto}.tbl{width:100%;min-width:900px;border-collapse:collapse}.tbl th{background:#f7f9fb;color:#697581;text-transform:uppercase;font-size:9px;padding:12px;text-align:left}.tbl td{padding:12px;border-top:1px solid #edf0f3;font-size:11px;vertical-align:middle}.name{font-weight:800;color:var(--ink)}.pill{display:inline-flex;padding:5px 8px;border-radius:20px;font-size:9px;font-weight:900}.pill.green{background:var(--green2);color:var(--green)}.pill.yellow{background:var(--yellow2);color:#8a6500}.pill.red{background:var(--red2);color:var(--red)}.pill.blue{background:var(--blue2);color:#1658c8}.notice{padding:11px 14px;border-radius:9px;margin-bottom:14px;font-size:11px}.ok{background:var(--green2);color:#13734f;border:1px solid #c7ead9}.err{background:var(--red2);color:#a63247;border:1px solid #f1c6ce}.empty{text-align:center;padding:45px;color:var(--muted)}.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:17px}.tile{border:1px solid var(--border);border-radius:10px;padding:16px;text-decoration:none;color:inherit}.tile:hover{background:#fbfcfd}.tile i{color:var(--blue);font-size:20px;margin-bottom:10px}.tile b{display:block}.tile small{color:var(--muted);font-size:10px}@media(max-width:1000px){.summary{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr 1fr}}@media(max-width:950px){:root{--side:0px}.sidebar{transform:translateX(-100%)}.content{padding:20px 16px}.top{padding:0 16px}}@media(max-width:600px){.summary,.tiles,.grid{grid-template-columns:1fr}.span2,.span3{grid-column:span 1}.head{align-items:start;flex-direction:column}}
 </style></head><body>
-<aside class="sidebar"><div class="brand"><i class="fa-solid fa-user-group"></i><div><b>PHARMACY POS</b><small>HR / EMPLOYEE CONTROL</small></div></div><div class="userbox"><b><?=h($user_name)?></b><small><?=h($user_role)?></small></div><div class="nav"><?php foreach([['admin_dashboard.php','fa-chart-pie','Dashboard'],['staff_management.php','fa-users','Staff Management'],['payroll.php','fa-file-invoice-dollar','Payroll'],['loans_advances.php','fa-hand-holding-dollar','Loans & Advances'],['employee_management.php','fa-user-gear','Employee Management']] as $n):?><a class="<?=$n[2]==='Employee Management'?'active':''?>" href="<?=h($n[0])?>"><i class="fa-solid <?=$n[1]?>"></i> <?=$n[2]?></a><?php endforeach;?></div><a class="nav logout" href="../logout.php"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a></aside>
-<main class="main"><header class="top"><div><b>Admin Control Center</b><span> / Employee Management</span></div><div><span><?=date('d M Y')?></span></div></header><section class="content"><div class="head"><div><div class="eyebrow">Human Resources</div><h1>Employee Management</h1><p>Manage employee HR requests, records and employment events without changing Payroll.</p></div></div>
+<aside class="sidebar">
+<div class="brand"><i class="fa-solid fa-user-group"></i><div><b><?=h($pharmacy_name)?></b><small>HR / EMPLOYEE CONTROL</small></div></div>
+<div class="userbox"><b><?=h($user_name)?></b><small><?=h($user_role)?></small></div>
+<div class="nav">
+    <?php if ($user_role === 'Human Resource'): ?>
+        <!-- HR has company-wide employee access; no POS operations are shown. -->
+        <a href="staff_management.php"><i class="fa-solid fa-users"></i> Staff Management</a>
+        <a href="payroll.php"><i class="fa-solid fa-file-invoice-dollar"></i> Payroll</a>
+        <a href="loans_advances.php"><i class="fa-solid fa-hand-holding-dollar"></i> Loans &amp; Advances</a>
+        <a class="active" href="employee_management.php"><i class="fa-solid fa-user-gear"></i> Employee Management</a>
+    <?php else: ?>
+        <!-- Keep the existing management oversight menu for Admin/Manager. -->
+        <a href="admin_dashboard.php"><i class="fa-solid fa-chart-pie"></i> Dashboard</a>
+        <a href="staff_management.php"><i class="fa-solid fa-users"></i> Staff Management</a>
+        <a href="payroll.php"><i class="fa-solid fa-file-invoice-dollar"></i> Payroll</a>
+        <a href="loans_advances.php"><i class="fa-solid fa-hand-holding-dollar"></i> Loans &amp; Advances</a>
+        <a class="active" href="employee_management.php"><i class="fa-solid fa-user-gear"></i> Employee Management</a>
+    <?php endif; ?>
+</div>
+<a class="nav logout" href="../logout.php"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
+</aside>
+<main class="main"><header class="top"><div><b><?=h($pharmacy_name)?> â€” <?=h($user_role)?> Portal</b><span> / Employee Management</span></div><div><span><?=date('d M Y')?></span></div></header><section class="content"><div class="head"><div><div class="eyebrow">Human Resources</div><h1>Employee Management</h1><p>Human Resource portal for leave, payslips, transfers, awards, complaints, warnings, travel and employment events.</p></div></div>
 <?php if($saved):?><div class="notice ok"><i class="fa-solid fa-circle-check"></i> <?=h($saved)?></div><?php endif;?><?php if($error):?><div class="notice err"><i class="fa-solid fa-circle-exclamation"></i> <?=h($error)?></div><?php endif;?>
 <div class="summary"><div class="sum"><label>Employees</label><strong><?=count($employees)?></strong><small><?=$active?> active</small></div><div class="sum"><label>Pending Leave</label><strong><?=$pending?></strong><small>Awaiting review</small></div><div class="sum"><label>Open Complaints</label><strong><?=$compl?></strong><small>Open / under review</small></div><div class="sum"><label>Upcoming Holidays</label><strong><?=$hol?></strong><small>Future calendar entries</small></div></div>
 <div class="tabs"><?php foreach($labels as $k=>$v):?><a class="<?=$tab===$k?'active':''?>" href="?tab=<?=h($k)?>"><i class="fa-solid <?=$v[0]?>"></i> <?=h($v[1])?></a><?php endforeach;?></div>
