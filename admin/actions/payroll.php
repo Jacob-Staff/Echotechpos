@@ -215,26 +215,6 @@ function payroll_complete_last_day_of_period(string $period): string {
     return $d->modify('last day of this month')->format('Y-m-d');
 }
 
-function payroll_complete_monthly_payment_date(string $period, int $paymentDay): string {
-    if (!payroll_complete_valid_period($period)) {
-        return date('Y-m-d');
-    }
-
-    $paymentDay = max(1, min(31, $paymentDay));
-    $first = DateTimeImmutable::createFromFormat('Y-m-d', $period . '-01');
-    if (!$first) {
-        return date('Y-m-d');
-    }
-
-    $lastDay = (int)$first->modify('last day of this month')->format('j');
-    $day = min($paymentDay, $lastDay);
-    return $first->setDate(
-        (int)$first->format('Y'),
-        (int)$first->format('n'),
-        $day
-    )->format('Y-m-d');
-}
-
 function payroll_complete_repayment_amount(
     mysqli $db,
     int $pharmacyId,
@@ -834,18 +814,6 @@ if ($error === '') {
 /* ---------- Salary payment schedule / deduction override tables ---------- */
 
 if ($error === '') {
-    @$conn->query("CREATE TABLE IF NOT EXISTS payroll_payment_settings (
-        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-        pharmacy_id INT UNSIGNED NOT NULL,
-        payment_day TINYINT UNSIGNED NOT NULL DEFAULT 30,
-        created_by VARCHAR(150) NULL,
-        updated_by VARCHAR(150) NULL,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (id),
-        UNIQUE KEY uq_payroll_payment_setting_pharmacy (pharmacy_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
-
     @$conn->query("CREATE TABLE IF NOT EXISTS payroll_payment_schedules (
         id INT UNSIGNED NOT NULL AUTO_INCREMENT,
         pharmacy_id INT UNSIGNED NOT NULL,
@@ -1143,25 +1111,53 @@ $scheduledSalaryPaymentDate = (string)(
 
 $salaryPaymentDateObject = new DateTimeImmutable($scheduledSalaryPaymentDate);
 $todayForPayroll = new DateTimeImmutable('today');
-$salaryPaymentIsPaid = !empty($salaryPaymentSchedule['payment_date']);
 
 /*
- * Reminder visibility rule:
- * - hidden until one calendar day before the due date
- * - shows "due tomorrow" one day before
- * - shows "due today" on the due date
- * - starts counting late days only after the due date
+ * The payment schedule is the master period record, but older payrolls may
+ * already have been marked PAID before the schedule record was populated.
+ * Therefore also check payroll_records so a paid payroll can never continue
+ * showing an unpaid/late reminder.
  */
+$salaryPaymentIsPaid = !empty($salaryPaymentSchedule['payment_date']);
+$salaryRecordedPaymentDate = !empty($salaryPaymentSchedule['payment_date'])
+    ? (string)$salaryPaymentSchedule['payment_date']
+    : '';
+
+if (!$salaryPaymentIsPaid && payroll_complete_table($conn, 'payroll_records')) {
+    $paidScheduleRows = payroll_complete_rows(
+        $conn,
+        "SELECT payment_date, late_days
+         FROM payroll_records
+         WHERE pharmacy_id = ?
+           AND payroll_period = ?
+           AND status IN ('paid','locked')
+           AND payment_date IS NOT NULL
+         ORDER BY payment_date DESC, id DESC
+         LIMIT 1",
+        'is',
+        [$pharmacyId, $period]
+    );
+
+    if (!empty($paidScheduleRows[0]['payment_date'])) {
+        $salaryPaymentIsPaid = true;
+        $salaryRecordedPaymentDate = (string)$paidScheduleRows[0]['payment_date'];
+        $salaryPaymentSchedule['payment_date'] = $salaryRecordedPaymentDate;
+        $salaryPaymentSchedule['late_days'] = (int)($paidScheduleRows[0]['late_days'] ?? 0);
+    }
+}
+
+/* Reminder starts one day before payday, but late-day counting starts only
+ * after the actual scheduled payday has passed. */
 $salaryReminderStartDate = $salaryPaymentDateObject->modify('-1 day');
 $salaryPaymentReminder = !$salaryPaymentIsPaid && $todayForPayroll >= $salaryReminderStartDate;
-$salaryLateDays = !$salaryPaymentIsPaid && $todayForPayroll > $salaryPaymentDateObject
+$salaryLateDays = (!$salaryPaymentIsPaid && $todayForPayroll > $salaryPaymentDateObject)
     ? payroll_complete_days_late($scheduledSalaryPaymentDate)
     : 0;
 
-if ($salaryPaymentIsPaid && !empty($salaryPaymentSchedule['payment_date'])) {
+if ($salaryPaymentIsPaid && $salaryRecordedPaymentDate !== '') {
     $salaryLateDays = payroll_complete_days_late(
         $scheduledSalaryPaymentDate,
-        (string)$salaryPaymentSchedule['payment_date']
+        $salaryRecordedPaymentDate
     );
 }
 
@@ -1587,140 +1583,158 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
         ]);
     }
 
-    if ($action === 'excuse_deduction') {
+    if ($action === 'override_deduction') {
 
+        /*
+         * Dedicated loan/advance override. This is intentionally separate
+         * from save_row so an APPROVED payroll can have its current
+         * installment excused/lowered without reopening the payroll editor.
+         * Paid/locked payrolls remain immutable.
+         */
         $recordId = (int)($_POST['record_id'] ?? 0);
         $kind = (string)($_POST['deduction_type'] ?? '');
+        $requestedAmount = max(0, (float)($_POST['override_amount'] ?? 0));
 
         if (!in_array($kind, ['loan', 'advance'], true)) {
             payroll_complete_redirect([
-                'month' => $selectedMonth,
-                'year' => $selectedYear,
-                'view' => 'payroll',
-                'error' => 'Invalid deduction type.'
+                'month'=>$selectedMonth,
+                'year'=>$selectedYear,
+                'view'=>'payroll',
+                'error'=>'Invalid deduction type.'
             ]);
         }
 
         $found = payroll_complete_rows(
             $conn,
-            "SELECT id, staff_id, status FROM payroll_records
-             WHERE id = ? AND pharmacy_id = ? AND payroll_period = ?
-             LIMIT 1",
-            'iis',
-            [$recordId, $pharmacyId, $period]
+            "SELECT * FROM payroll_records
+             WHERE id = ? AND pharmacy_id = ? LIMIT 1",
+            'ii',
+            [$recordId, $pharmacyId]
         );
 
         if (!$found) {
             payroll_complete_redirect([
-                'month' => $selectedMonth,
-                'year' => $selectedYear,
-                'view' => 'payroll',
-                'error' => 'Payroll record not found.'
+                'month'=>$selectedMonth,
+                'year'=>$selectedYear,
+                'view'=>'payroll',
+                'error'=>'Payroll record not found.'
             ]);
         }
 
         $record = $found[0];
-        $status = strtolower((string)$record['status']);
+        $recordStatus = strtolower((string)($record['status'] ?? ''));
 
-        if (in_array($status, ['paid', 'locked'], true)) {
+        if (in_array($recordStatus, ['paid','locked'], true)) {
             payroll_complete_redirect([
-                'month' => $selectedMonth,
-                'year' => $selectedYear,
-                'view' => 'payroll',
-                'error' => 'A paid or locked payroll record cannot have its deduction excused.'
+                'month'=>$selectedMonth,
+                'year'=>$selectedYear,
+                'view'=>'payroll',
+                'error'=>'A paid or locked payroll cannot have its deduction changed.'
             ]);
         }
 
-        $autoAmount = payroll_complete_repayment_amount(
-            $conn,
-            $pharmacyId,
-            (int)$record['staff_id'],
-            $period,
-            $kind
+        $staffIdOverride = (int)$record['staff_id'];
+        $scheduledDeduction = payroll_complete_repayment_amount(
+            $conn, $pharmacyId, $staffIdOverride, $period, $kind
         );
 
-        if ($autoAmount <= 0) {
+        if ($scheduledDeduction <= 0) {
             payroll_complete_redirect([
-                'month' => $selectedMonth,
-                'year' => $selectedYear,
-                'view' => 'payroll',
-                'error' => 'There is no active ' . ($kind === 'loan' ? 'loan' : 'salary advance') . ' installment to excuse for this payroll period.'
+                'month'=>$selectedMonth,
+                'year'=>$selectedYear,
+                'view'=>'payroll',
+                'error'=>'There is no active '.$kind.' installment due for this employee in '.$periodLabel.'.'
             ]);
         }
 
+        $overrideAmount = min($requestedAmount, $scheduledDeduction);
         $user = payroll_complete_user();
-        $saved = payroll_complete_save_deduction_override(
-            $conn,
-            $pharmacyId,
-            (int)$record['staff_id'],
-            $period,
-            $kind,
-            $autoAmount,
-            0.0,
-            $kind === 'loan'
-                ? 'Loan installment excused for this payroll period.'
-                : 'Salary advance installment excused for this payroll period.',
-            $user
-        );
+        $reason = $overrideAmount <= 0
+            ? ucfirst($kind).' installment excused for this payroll period.'
+            : ucfirst($kind).' installment lowered for this payroll period.';
 
-        if (!$saved) {
+        if (!payroll_complete_save_deduction_override(
+            $conn, $pharmacyId, $staffIdOverride, $period, $kind,
+            $scheduledDeduction, $overrideAmount, $reason, $user
+        )) {
             payroll_complete_redirect([
-                'month' => $selectedMonth,
-                'year' => $selectedYear,
-                'view' => 'payroll',
-                'error' => 'Could not save the deduction excuse.'
+                'month'=>$selectedMonth,
+                'year'=>$selectedYear,
+                'view'=>'payroll',
+                'error'=>'Could not save the '.$kind.' deduction override.'
             ]);
         }
 
-        /* Recalculate this record while preserving its workflow status. */
-        $full = payroll_complete_rows(
-            $conn,
-            "SELECT * FROM payroll_records WHERE id = ? AND pharmacy_id = ? LIMIT 1",
-            'ii',
-            [$recordId, $pharmacyId]
+        /* Recalculate this payroll row while preserving its current status. */
+        $loanAmount = $kind === 'loan'
+            ? $overrideAmount
+            : max(0, (float)$record['loan_deduction']);
+        $advanceAmount = $kind === 'advance'
+            ? $overrideAmount
+            : max(0, (float)$record['salary_advance']);
+
+        $calc = payroll_complete_calculate(
+            max(0, (float)$record['basic_salary']),
+            max(0, (float)$record['allowances']),
+            max(0, (float)$record['bonus']),
+            max(0, (float)$record['overtime']),
+            max(0, (float)$record['other_earnings']),
+            $loanAmount,
+            $advanceAmount,
+            max(0, (float)$record['other_deductions'])
         );
-        $fullRecord = $full[0] ?? null;
 
-        if ($fullRecord) {
-            $loanValue = (float)$fullRecord['loan_deduction'];
-            $advanceValue = (float)$fullRecord['salary_advance'];
-            if ($kind === 'loan') $loanValue = 0.0;
-            if ($kind === 'advance') $advanceValue = 0.0;
+        $stmt = $conn->prepare(
+            "UPDATE payroll_records
+             SET loan_deduction=?, salary_advance=?, paye=?, napsa=?, nhima=?,
+                 gross_salary=?, total_deductions=?, net_salary=?,
+                 employer_napsa=?, employer_nhima=?, updated_by=?
+             WHERE id=? AND pharmacy_id=?"
+        );
 
-            $calc = payroll_complete_calculate(
-                (float)$fullRecord['basic_salary'],
-                (float)$fullRecord['allowances'],
-                (float)$fullRecord['bonus'],
-                (float)$fullRecord['overtime'],
-                (float)$fullRecord['other_earnings'],
-                $loanValue,
-                $advanceValue,
-                (float)$fullRecord['other_deductions']
-            );
+        if (!$stmt) {
+            payroll_complete_redirect([
+                'month'=>$selectedMonth,
+                'year'=>$selectedYear,
+                'view'=>'payroll',
+                'error'=>'Could not update the payroll deduction: '.$conn->error
+            ]);
+        }
 
-            $stmt = $conn->prepare("UPDATE payroll_records
-                SET paye=?, napsa=?, nhima=?, loan_deduction=?, salary_advance=?,
-                    gross_salary=?, total_deductions=?, net_salary=?,
-                    employer_napsa=?, employer_nhima=?, statutory_calculated_at=NOW(), updated_by=?
-                WHERE id=? AND pharmacy_id=?");
+        $stmt->bind_param(
+            'ddddddddddsii',
+            $loanAmount,
+            $advanceAmount,
+            $calc['paye'],
+            $calc['napsa'],
+            $calc['nhima'],
+            $calc['gross'],
+            $calc['total'],
+            $calc['net'],
+            $calc['employer_napsa'],
+            $calc['employer_nhima'],
+            $user,
+            $recordId,
+            $pharmacyId
+        );
+        $ok = $stmt->execute();
+        $msg = $stmt->error;
+        $stmt->close();
 
-            if ($stmt) {
-                $stmt->bind_param(
-                    'dddddddddsii',
-                    $calc['paye'], $calc['napsa'], $calc['nhima'],
-                    $loanValue, $advanceValue, $calc['gross'], $calc['total'], $calc['net'],
-                    $calc['employer_napsa'], $calc['employer_nhima'], $user, $recordId, $pharmacyId
-                );
-                $stmt->execute();
-                $stmt->close();
-            }
+        if (!$ok) {
+            payroll_complete_redirect([
+                'month'=>$selectedMonth,
+                'year'=>$selectedYear,
+                'view'=>'payroll',
+                'error'=>'Could not update the payroll deduction: '.$msg
+            ]);
         }
 
         payroll_complete_redirect([
-            'month' => $selectedMonth,
-            'year' => $selectedYear,
-            'view' => 'payroll',
-            'saved' => ($kind === 'loan' ? 'Loan' : 'Salary advance') . ' installment excused for ' . $periodLabel . '. The unpaid balance will carry forward.'
+            'month'=>$selectedMonth,
+            'year'=>$selectedYear,
+            'view'=>'payroll',
+            'saved'=>ucfirst($kind).' installment updated for '.$periodLabel.'. The unpaid amount will carry forward.'
         ]);
     }
 
@@ -3239,9 +3253,15 @@ Print
         <div class="payroll-date-title"><i class="fas fa-calendar-check"></i> Salary Payment Schedule</div>
         <div class="payroll-date-sub">Set the company's normal salary payment day once. For example, choosing <strong>10</strong> means salaries are due every 10th of every month until this setting is changed.</div>
         <?php if ($salaryPaymentReminder): ?>
-            <div class="salary-late-alert"><i class="fas fa-triangle-exclamation"></i> SALARY PAYMENT REMINDER: <?php if ($salaryLateDays > 0): ?><strong><?= $salaryLateDays ?> late day<?= $salaryLateDays === 1 ? '' : 's' ?></strong> counted so far.<?php elseif ($todayForPayroll == $salaryPaymentDateObject): ?><strong>Payment is due today.</strong><?php else: ?><strong>Payment is due tomorrow.</strong><?php endif; ?></div>
+            <?php if ($todayForPayroll < $salaryPaymentDateObject): ?>
+                <div class="salary-late-alert"><i class="fas fa-bell"></i> SALARY PAYMENT REMINDER: <strong>Payment is due tomorrow.</strong></div>
+            <?php elseif ($todayForPayroll->format('Y-m-d') === $salaryPaymentDateObject->format('Y-m-d')): ?>
+                <div class="salary-late-alert"><i class="fas fa-triangle-exclamation"></i> SALARY PAYMENT REMINDER: <strong>Payment is due today.</strong></div>
+            <?php else: ?>
+                <div class="salary-late-alert"><i class="fas fa-triangle-exclamation"></i> SALARY PAYMENT REMINDER: <strong><?= (int)$salaryLateDays ?> late day<?= $salaryLateDays === 1 ? '' : 's' ?></strong> counted so far.</div>
+            <?php endif; ?>
         <?php elseif ($salaryPaymentIsPaid): ?>
-            <div class="salary-paid-note"><i class="fas fa-circle-check"></i> Paid on <strong><?= payroll_complete_h(date('d M Y', strtotime((string)$salaryPaymentSchedule['payment_date']))) ?></strong>. Late days recorded: <strong><?= (int)$salaryLateDays ?></strong>. Monthly payment rule: <strong>every <?= (int)$salaryPaymentDay ?><?= ($salaryPaymentDay % 100 >= 11 && $salaryPaymentDay % 100 <= 13) ? 'th' : (($salaryPaymentDay % 10 === 1) ? 'st' : (($salaryPaymentDay % 10 === 2) ? 'nd' : (($salaryPaymentDay % 10 === 3) ? 'rd' : 'th'))) ?>.</strong></div>
+            <div class="salary-paid-note"><i class="fas fa-circle-check"></i> Paid on <strong><?= payroll_complete_h(date('d M Y', strtotime((string)$salaryRecordedPaymentDate))) ?></strong>. Late days recorded: <strong><?= (int)$salaryLateDays ?></strong>. Monthly payment rule: <strong>every <?= (int)$salaryPaymentDay ?><?= ($salaryPaymentDay % 100 >= 11 && $salaryPaymentDay % 100 <= 13) ? 'th' : (($salaryPaymentDay % 10 === 1) ? 'st' : (($salaryPaymentDay % 10 === 2) ? 'nd' : (($salaryPaymentDay % 10 === 3) ? 'rd' : 'th'))) ?>.</strong></div>
         <?php else: ?>
             <div class="salary-schedule-note">Monthly rule: salaries are scheduled for the <strong><?= (int)$salaryPaymentDay ?><?= ($salaryPaymentDay % 100 >= 11 && $salaryPaymentDay % 100 <= 13) ? 'th' : (($salaryPaymentDay % 10 === 1) ? 'st' : (($salaryPaymentDay % 10 === 2) ? 'nd' : (($salaryPaymentDay % 10 === 3) ? 'rd' : 'th'))) ?> of every month</strong>. <?= $salaryPaymentDay > (int)$salaryPaymentDateObject->format('j') ? 'For months shorter than that day, the last calendar day is used.' : 'This month is scheduled for <strong>'.$salaryPaymentDateObject->format('d M Y').'</strong>.' ?></div>
         <?php endif; ?>
@@ -3525,11 +3545,9 @@ echo payroll_complete_h($initials ?: 'ST');
 
 <?php if (!in_array(
     $row['status'],
-    ['paid','locked'],
+    ['approved','paid','locked'],
     true
 )): ?>
-
-<?php if (in_array((string)$row['status'], ['draft','calculated'], true)): ?>
 <button
     class="btn small"
     type="button"
@@ -3545,28 +3563,28 @@ $mainAutoLoan = payroll_complete_repayment_amount($conn, $pharmacyId, (int)$row[
 $mainAutoAdvance = payroll_complete_repayment_amount($conn, $pharmacyId, (int)$row['staff_id'], $period, 'advance');
 ?>
 
-<?php if ($mainAutoLoan > 0): ?>
-<form method="post" action="/admin/actions/payroll.php" style="display:inline" onsubmit="return confirm('Excuse this loan installment for <?= payroll_complete_h($periodLabel) ?>? The unpaid balance will carry forward.');">
-<input type="hidden" name="action" value="excuse_deduction">
+<?php if (!in_array($row['status'], ['paid','locked'], true) && $mainAutoLoan > 0): ?>
+<form method="post" action="/admin/actions/payroll.php" style="display:inline" onsubmit="return confirm('Excuse this loan installment for this payroll month? The unpaid amount will carry forward.');">
+<input type="hidden" name="action" value="override_deduction">
 <input type="hidden" name="record_id" value="<?= (int)$row['id'] ?>">
 <input type="hidden" name="deduction_type" value="loan">
+<input type="hidden" name="override_amount" value="0">
 <input type="hidden" name="month" value="<?= $selectedMonth ?>">
 <input type="hidden" name="year" value="<?= $selectedYear ?>">
 <button class="btn small deduction-excuse" type="submit" title="Excuse this month's loan installment"><i class="fas fa-ban"></i> Excuse Loan</button>
 </form>
 <?php endif; ?>
 
-<?php if ($mainAutoAdvance > 0): ?>
-<form method="post" action="/admin/actions/payroll.php" style="display:inline" onsubmit="return confirm('Excuse this salary advance installment for <?= payroll_complete_h($periodLabel) ?>? The unpaid balance will carry forward.');">
-<input type="hidden" name="action" value="excuse_deduction">
+<?php if (!in_array($row['status'], ['paid','locked'], true) && $mainAutoAdvance > 0): ?>
+<form method="post" action="/admin/actions/payroll.php" style="display:inline" onsubmit="return confirm('Excuse this salary advance installment for this payroll month? The unpaid amount will carry forward.');">
+<input type="hidden" name="action" value="override_deduction">
 <input type="hidden" name="record_id" value="<?= (int)$row['id'] ?>">
 <input type="hidden" name="deduction_type" value="advance">
+<input type="hidden" name="override_amount" value="0">
 <input type="hidden" name="month" value="<?= $selectedMonth ?>">
 <input type="hidden" name="year" value="<?= $selectedYear ?>">
 <button class="btn small deduction-excuse" type="submit" title="Excuse this month's salary advance installment"><i class="fas fa-ban"></i> Excuse Advance</button>
 </form>
-<?php endif; ?>
-
 <?php endif; ?>
 
 <a
