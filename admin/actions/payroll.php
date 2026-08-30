@@ -848,6 +848,90 @@ function payroll_payslip_pdf_content(array $data): string {
     }
 }
 
+function payroll_get_official_payslip_pdf(mysqli $conn, int $pharmacyId, array &$row, array $data): string {
+    $recordId = (int)($row['id'] ?? 0);
+    if ($recordId <= 0 || $pharmacyId <= 0) {
+        throw new RuntimeException('Invalid payroll record for official payslip generation.');
+    }
+
+    if (!payroll_complete_table($conn, 'payroll_payslip_documents')) {
+        throw new RuntimeException('Official payslip document table is unavailable.');
+    }
+
+    /* Once approved/paid/locked, the issued PDF must never be silently rebuilt. */
+    $status = strtolower(trim((string)($row['status'] ?? '')));
+    if (!in_array($status, ['approved', 'paid', 'locked'], true)) {
+        throw new RuntimeException('An official payslip can only be issued after payroll approval.');
+    }
+
+    $existing = payroll_complete_rows(
+        $conn,
+        "SELECT pdf_hash, pdf_blob
+         FROM payroll_payslip_documents
+         WHERE payroll_record_id=? AND pharmacy_id=?
+         LIMIT 1",
+        'ii',
+        [$recordId, $pharmacyId]
+    );
+
+    if (!empty($existing)) {
+        $blob = $existing[0]['pdf_blob'] ?? null;
+        if (is_string($blob) && strncmp($blob, '%PDF-', 5) === 0) {
+            return $blob;
+        }
+        /* Never attach corrupt stored bytes. Remove the bad artifact and rebuild once. */
+        @$conn->query(
+            "DELETE FROM payroll_payslip_documents
+             WHERE payroll_record_id=" . $recordId . " AND pharmacy_id=" . $pharmacyId
+        );
+    }
+
+    $pdf = payroll_payslip_pdf_content($data);
+    if (strncmp($pdf, '%PDF-', 5) !== 0) {
+        throw new RuntimeException('The generated official payslip is not a valid PDF document.');
+    }
+
+    $pdfHash = hash('sha256', $pdf);
+
+    /* INSERT IGNORE makes the first issued PDF authoritative under concurrency. */
+    $stmt = $conn->prepare(
+        "INSERT IGNORE INTO payroll_payslip_documents
+            (payroll_record_id, pharmacy_id, pdf_hash, pdf_blob)
+         VALUES (?, ?, ?, ?)"
+    );
+
+    if (!$stmt) {
+        throw new RuntimeException('Could not prepare official payslip storage.');
+    }
+
+    $stmt->bind_param('iisb', $recordId, $pharmacyId, $pdfHash, $pdf);
+    $stmt->send_long_data(3, $pdf);
+    if (!$stmt->execute()) {
+        $stmt->close();
+        throw new RuntimeException('Could not save the official payslip PDF.');
+    }
+    $inserted = ($stmt->affected_rows === 1);
+    $stmt->close();
+
+    /* If another request won the race, always return the already-issued PDF. */
+    if (!$inserted) {
+        $existing = payroll_complete_rows(
+            $conn,
+            "SELECT pdf_blob FROM payroll_payslip_documents
+             WHERE payroll_record_id=? AND pharmacy_id=? LIMIT 1",
+            'ii',
+            [$recordId, $pharmacyId]
+        );
+        if (!empty($existing) && is_string($existing[0]['pdf_blob'] ?? null)
+            && strncmp($existing[0]['pdf_blob'], '%PDF-', 5) === 0) {
+            return $existing[0]['pdf_blob'];
+        }
+        throw new RuntimeException('The official payslip PDF could not be retrieved after storage.');
+    }
+
+    return $pdf;
+}
+
 function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$row, string $companyName, string $periodLabel): array {
     $email = trim((string)($row['email'] ?? ''));
     if ($email === '') return ['ok'=>false, 'error'=>'No email address is recorded for this employee.'];
@@ -856,7 +940,8 @@ function payroll_send_one_payslip_email(mysqli $conn, int $pharmacyId, array &$r
         $data = payroll_prepare_payslip_view_data($conn, $row, $companyName, $periodLabel);
         $verificationUrl = (string)($data['payslipVerificationUrl'] ?? '');
         $content = payroll_payslip_email_message($row, $companyName, $verificationUrl, $periodLabel);
-        $pdf = payroll_payslip_pdf_content($data);
+        /* Email MUST attach the already-issued official PDF, never render a second copy. */
+        $pdf = payroll_get_official_payslip_pdf($conn, $pharmacyId, $row, $data);
 
         $safeName = preg_replace('/[^A-Za-z0-9._-]+/', '_', trim((string)($row['staff_name'] ?? 'Employee')));
         $safeName = trim((string)$safeName, '._-');
@@ -1485,6 +1570,35 @@ if ($error === '') {
                  ADD COLUMN `{$col}` {$definition}"
             );
         }
+    }
+}
+
+/* ---------- Official payslip document archive ---------- */
+
+/*
+ * The official payslip is a durable PDF artifact, not a fresh rendering every
+ * time somebody clicks Print or Send Email. The binary PDF is stored in its
+ * own table so Admin Download and Email can use the exact same bytes.
+ */
+if ($error === '' && !payroll_complete_table($conn, 'payroll_payslip_documents')) {
+    $create = "
+        CREATE TABLE `payroll_payslip_documents` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `payroll_record_id` INT UNSIGNED NOT NULL,
+            `pharmacy_id` INT UNSIGNED NOT NULL,
+            `pdf_hash` CHAR(64) NOT NULL,
+            `pdf_blob` LONGBLOB NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_payslip_document_record` (`payroll_record_id`,`pharmacy_id`),
+            KEY `idx_payslip_document_pharmacy` (`pharmacy_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ";
+
+    if (!$conn->query($create)) {
+        $error = 'Could not create official payslip document table: ' . $conn->error;
     }
 }
 
@@ -2956,6 +3070,67 @@ $payslipGrade = is_array($payslipTemplate)
     ? trim((string)($payslipTemplate['grade_name'] ?? ''))
     : '';
 
+/* ---------- Official payslip PDF endpoint ---------- */
+
+/*
+ * /admin/payslip_pdf.php sets official_pdf=1 and includes this controller.
+ * Keeping the endpoint here means it uses the exact same payroll data,
+ * template and CSS as the Admin payslip without duplicating the renderer.
+ */
+if (isset($_GET['official_pdf']) && $_GET['official_pdf'] === '1') {
+    if (!is_array($payslip)) {
+        http_response_code(404);
+        exit('Payslip not found.');
+    }
+
+    $status = strtolower(trim((string)($payslip['status'] ?? '')));
+    if (!in_array($status, ['approved', 'paid', 'locked'], true)) {
+        http_response_code(403);
+        exit('This payslip is not approved for official issuance.');
+    }
+
+    try {
+        $officialData = payroll_prepare_payslip_view_data(
+            $conn,
+            $payslip,
+            $pharmacyName,
+            $periodLabel
+        );
+        $pdf = payroll_get_official_payslip_pdf(
+            $conn,
+            $pharmacyId,
+            $payslip,
+            $officialData
+        );
+
+        $safeName = preg_replace(
+            '/[^A-Za-z0-9._-]+/',
+            '_',
+            trim((string)($payslip['staff_name'] ?? 'Employee'))
+        );
+        $safeName = trim((string)$safeName, '._-');
+        if ($safeName === '') $safeName = 'Employee';
+
+        $filename = 'Payslip-' . $safeName . '-' . preg_replace('/[^0-9-]/', '', $period) . '.pdf';
+        $download = isset($_GET['download']) && $_GET['download'] === '1';
+
+        while (ob_get_level() > 0) {
+            @ob_end_clean();
+        }
+
+        header('Content-Type: application/pdf');
+        header('Content-Length: ' . strlen($pdf));
+        header('Content-Disposition: ' . ($download ? 'attachment' : 'inline') . '; filename="' . $filename . '"');
+        header('Cache-Control: private, no-store, max-age=0');
+        header('Pragma: no-cache');
+        echo $pdf;
+        exit;
+    } catch (Throwable $e) {
+        http_response_code(500);
+        exit('Could not generate the official payslip PDF: ' . $e->getMessage());
+    }
+}
+
 /* ---------- Shared shell ---------- */
 
 ?>
@@ -3737,10 +3912,17 @@ Email Payslips
 </form>
 <?php endif; ?>
 
+<?php if ($payslip !== null && in_array((string)($payslip['status'] ?? ''), ['approved','paid','locked'], true)): ?>
+<a class="btn" href="/admin/payslip_pdf.php?staff_id=<?= (int)$payslip['staff_id'] ?>&month=<?= $selectedMonth ?>&year=<?= $selectedYear ?>&download=1">
+<i class="fas fa-file-pdf"></i>
+Download Official PDF
+</a>
+<?php else: ?>
 <button class="btn" type="button" onclick="window.print()">
 <i class="fas fa-print"></i>
 Print
 </button>
+<?php endif; ?>
 
 </div>
 </div>
@@ -4033,9 +4215,9 @@ echo payroll_complete_h($initials ?: 'ST');
 
 <a
     class="btn small"
-    href="?view=payroll&month=<?= $selectedMonth ?>&year=<?= $selectedYear ?>&payslip=<?= (int)$row['staff_id'] ?>&print=1"
+    href="/admin/payslip_pdf.php?staff_id=<?= (int)$row['staff_id'] ?>&month=<?= $selectedMonth ?>&year=<?= $selectedYear ?>"
     target="_self"
-    title="Payslip"
+    title="Official Payslip PDF"
 >
 <i class="fas fa-receipt"></i>
 </a>
