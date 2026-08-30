@@ -215,6 +215,23 @@ function payroll_complete_last_day_of_period(string $period): string {
     return $d->modify('last day of this month')->format('Y-m-d');
 }
 
+function payroll_complete_monthly_payment_date(string $period, int $paymentDay): string {
+    $firstDay = DateTimeImmutable::createFromFormat('Y-m-d', $period . '-01');
+    if (!$firstDay) {
+        return date('Y-m-d');
+    }
+
+    $paymentDay = max(1, min(31, $paymentDay));
+    $lastDay = (int)$firstDay->format('t');
+    $actualDay = min($paymentDay, $lastDay);
+
+    return $firstDay->setDate(
+        (int)$firstDay->format('Y'),
+        (int)$firstDay->format('m'),
+        $actualDay
+    )->format('Y-m-d');
+}
+
 function payroll_complete_repayment_amount(
     mysqli $db,
     int $pharmacyId,
@@ -3334,9 +3351,9 @@ echo payroll_complete_h($initials ?: 'ST');
 <div style="font-size:9px;color:var(--muted);margin-bottom:5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?= payroll_complete_h($row['email']) ?>">
 <i class="fas fa-envelope"></i> <?= payroll_complete_h($row['email']) ?>
 <?php if (($row['payslip_email_status'] ?? 'pending') === 'sent'): ?>
-<span style="color:#08754f;font-weight:700;"> ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· SENT</span>
+<span style="color:#08754f;font-weight:700;"> ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· SENT</span>
 <?php elseif (($row['payslip_email_status'] ?? 'pending') === 'failed'): ?>
-<span style="color:#b42318;font-weight:700;"> ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· FAILED</span>
+<span style="color:#b42318;font-weight:700;"> ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· FAILED</span>
 <?php endif; ?>
 </div>
 <?php else: ?>
@@ -4028,7 +4045,7 @@ Recalculate
 <?= payroll_complete_h(
     $remit['payment_reference']
     ?: $remit['return_reference']
-    ?: 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'
+    ?: 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'
 ) ?>
 </td>
 
