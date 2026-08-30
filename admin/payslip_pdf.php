@@ -1,12 +1,12 @@
 <?php
 /**
- * EchoTech POS - Official Payslip PDF endpoint
+ * EchoTech POS â€” Official Payslip PDF endpoint
  *
- * This is intentionally a thin endpoint. The actual payslip renderer, CSS,
- * payroll data preparation and official PDF archive all live in:
- *     /admin/actions/payroll.php
+ * This endpoint deliberately contains NO payslip rendering code.
+ * The complete payslip module lives in:
+ *     /admin/actions/payslip.php
  *
- * Admin Download and Email therefore use the exact same stored PDF artifact.
+ * Both Admin download and email use the official PDF produced by that module.
  */
 
 declare(strict_types=1);
@@ -23,10 +23,14 @@ if ($staffId <= 0) {
 $month = max(1, min(12, $month));
 $year  = max(2020, min(2100, $year));
 
-/* payroll.php uses these exact query variables to load the selected record. */
-$_GET['payslip'] = (string)$staffId;
+/*
+ * Tell the dedicated payslip controller that this request is the official
+ * PDF request. payslip.php will load the payroll record, render the
+ * payslip, archive the exact PDF, and return those bytes.
+ */
+$_GET['official_pdf'] = '1';
+$_GET['staff_id'] = (string)$staffId;
 $_GET['month'] = (string)$month;
 $_GET['year'] = (string)$year;
-$_GET['official_pdf'] = '1';
 
-require __DIR__ . '/actions/payroll.php';
+require __DIR__ . '/actions/payslip.php';
