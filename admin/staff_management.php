@@ -648,6 +648,12 @@ if ($stmt) {
 }
 
 $currentAdminPage = basename((string)($_SERVER['PHP_SELF'] ?? ''));
+
+/* Safe display values used by the Admin sidebar. */
+$userDisplayName = (string)(current_user() ?? 'Administrator');
+if ($userDisplayName === '') {
+    $userDisplayName = 'Administrator';
+}
 ?>
 <!doctype html>
 <html lang="en">
