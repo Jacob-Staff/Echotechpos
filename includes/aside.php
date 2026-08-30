@@ -109,7 +109,6 @@ function echotech_sidebar_link(string $route, string $page): string
                     </div>
                 </div>
 
-                <i class="fas fa-chevron-down user-profile-chevron" aria-hidden="true"></i>
             </button>
 
             <div class="staff-profile-menu" id="staffProfileMenu">
