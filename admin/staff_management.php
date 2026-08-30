@@ -10,8 +10,13 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../includes/conn.php';
 require_once __DIR__ . '/../includes/auth.php';
 
-require_admin();
 require_pharmacy();
+
+$userRole = (string)(current_role() ?? '');
+if (!in_array($userRole, ['Admin', 'Human Resource'], true)) {
+    http_response_code(403);
+    exit('Access denied. Staff Management is available to Admin and Human Resource.');
+}
 
 $pharmacyId = current_pharmacy();
 $currentUserId = current_user_id();
@@ -20,6 +25,9 @@ if (!$pharmacyId || !$currentUserId) {
     http_response_code(403);
     exit('Invalid staff session.');
 }
+
+$isAdmin = ($userRole === 'Admin');
+$isHR = ($userRole === 'Human Resource');
 
 $roles = echotech_staff_roles();
 $pages = echotech_pages();
@@ -190,8 +198,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $postAction = (string)($_POST['form_action'] ?? '');
 
-    /* Permission: one cell */
+    /* Permission matrix is an Admin-only control. HR manages staff accounts,
+       but cannot change application-wide role/page permissions. */
     if ($postAction === 'permission') {
+        if (!$isAdmin) {
+            staff_fail('Only Admin can change role/page permissions.');
+        }
         $role = trim((string)($_POST['role'] ?? ''));
         $page = trim((string)($_POST['page'] ?? ''));
         $kind = trim((string)($_POST['kind'] ?? ''));
@@ -290,8 +302,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ok ? staff_redirect('Permission updated.') : staff_fail('Permission update failed.');
     }
 
-    /* Quick matrix controls */
+    /* Quick matrix controls are Admin-only. */
     if ($postAction === 'matrix_bulk') {
+        if (!$isAdmin) {
+            staff_fail('Only Admin can change role/page permissions.');
+        }
         $role = trim((string)($_POST['role'] ?? ''));
         $mode = trim((string)($_POST['mode'] ?? ''));
 
@@ -638,6 +653,10 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
         <a href="admin_dashboard.php"><i class="fa-solid fa-chart-pie"></i>Dashboard</a>
         <a class="active" href="staff_management.php"><i class="fa-solid fa-user-shield"></i>Staff Management</a>
         <a href="payroll.php"><i class="fa-solid fa-file-invoice-dollar"></i>Payroll</a>
+        <?php if ($isHR): ?>
+        <a href="employee_management.php"><i class="fa-solid fa-user-gear"></i>Employee Management</a>
+        <a href="loans_advances.php"><i class="fa-solid fa-hand-holding-dollar"></i>Loans &amp; Advances</a>
+        <?php endif; ?>
         <a href="customers.php"><i class="fa-solid fa-users"></i>Customers</a>
         <a href="sales_report.php"><i class="fa-solid fa-chart-line"></i>Sales Reports</a>
         <a href="pharmacy_stock.php"><i class="fa-solid fa-boxes-stacked"></i>Pharmacy Stock</a>
@@ -655,7 +674,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <header class="top">
     <div class="top-title">
         <b>Staff & Access Control</b>
-        <span>Accounts, roles, page access and functions</span>
+        <span><?= $isHR ? 'Employee accounts and staff administration' : 'Accounts, roles, page access and functions' ?></span>
     </div>
     <div class="top-right">
         <input id="globalSearch" class="search" placeholder="Search staff...">
@@ -667,9 +686,9 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <section class="content">
 <div class="head">
     <div>
-        <div class="eyebrow">Administration</div>
+        <div class="eyebrow"><?= $isHR ? 'Human Resources' : 'Administration' ?></div>
         <h1>Staff Management</h1>
-        <p>Every POS page is available by default. You can restrict access or functions at any time.</p>
+        <p><?= $isHR ? 'Manage employee accounts, roles, branches and staff security without changing system-wide page permissions.' : 'Every POS page is available by default. You can restrict access or functions at any time.' ?></p>
     </div>
     <div class="actions">
         <button class="btnx" type="button" onclick="window.print()"><i class="fa-solid fa-print me-1"></i>Print</button>
@@ -704,7 +723,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
  $search=strtolower(($u['full_name']??'').' '.($u['username']??'').' '.($u['email']??'').' '.($u['role']??''));
 ?>
 <tr class="staffrow" data-search="<?=eh($search)?>" data-role="<?=eh($u['role'])?>" data-branch="<?=eh($u['branch_id'])?>">
-<td><div class="staff-name"><?=eh($u['full_name'] ?: $u['username'])?></div><div class="muted"><?=eh($u['username'])?> Ã‚Â· <?=eh($u['email'])?></div></td>
+<td><div class="staff-name"><?=eh($u['full_name'] ?: $u['username'])?></div><div class="muted"><?=eh($u['username'])?> Ãƒâ€šÃ‚Â· <?=eh($u['email'])?></div></td>
 <td><span class="badge-role"><?=eh($u['role'] ?: 'General')?></span></td>
 <td><?=eh($u['branch_name'] ?: 'Unassigned')?></td>
 <td><?php if(strcasecmp((string)$u['status'],'Active')===0):?><span class="badge-role badge-green">Active</span><?php else:?><span class="badge-role badge-red"><?=eh($u['status'])?></span><?php endif;?></td>
@@ -741,6 +760,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 </div>
 </section>
 
+<?php if ($isAdmin): ?>
 <section class="panel permission-panel">
 <div class="panel-head">
     <div>
@@ -791,6 +811,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 </table>
 </div>
 </section>
+<?php endif; ?>
 </section>
 </main>
 
@@ -812,7 +833,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <div class="col-12">
     <div class="alert alert-light border mb-0 small">
         <i class="fa-solid fa-circle-info text-primary me-1"></i>
-        Staff salary is managed exclusively from <strong>Payroll â†’ Salary Setup</strong>.
+        Staff salary is managed exclusively from <strong>Payroll Ã¢â€ â€™ Salary Setup</strong>.
         New staff accounts start with a salary of <strong>K0.00</strong> until Payroll sets the salary.
     </div>
 </div>
