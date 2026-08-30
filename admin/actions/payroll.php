@@ -203,6 +203,155 @@ function payroll_complete_rows(
     return $rows;
 }
 
+/* ---------- Payroll date / loan & advance helpers ---------- */
+
+function payroll_complete_valid_period(string $period): bool {
+    return (bool)preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period);
+}
+
+function payroll_complete_last_day_of_period(string $period): string {
+    $d = DateTimeImmutable::createFromFormat('Y-m-d', $period . '-01');
+    if (!$d) return date('Y-m-d');
+    return $d->modify('last day of this month')->format('Y-m-d');
+}
+
+function payroll_complete_repayment_amount(
+    mysqli $db,
+    int $pharmacyId,
+    int $staffId,
+    string $period,
+    string $kind
+): float {
+    $table = $kind === 'advance' ? 'salary_advances' : 'employee_loans';
+    $monthColumn = $kind === 'advance' ? 'repayment_month' : 'first_repayment_month';
+
+    if (!payroll_complete_table($db, $table)) return 0.0;
+
+    $sql = "SELECT id, installment_amount, balance_amount
+            FROM `{$table}`
+            WHERE pharmacy_id = ?
+              AND staff_id = ?
+              AND status = 'Active'
+              AND `{$monthColumn}` <= ?
+              AND balance_amount > 0
+            ORDER BY id ASC
+            LIMIT 1";
+
+    $stmt = @$db->prepare($sql);
+    if (!$stmt) return 0.0;
+    $stmt->bind_param('iis', $pharmacyId, $staffId, $period);
+    if (!@$stmt->execute()) {
+        $stmt->close();
+        return 0.0;
+    }
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$row) return 0.0;
+    return round(min(max(0, (float)$row['installment_amount']), max(0, (float)$row['balance_amount'])), 2);
+}
+
+function payroll_complete_repayment_record(
+    mysqli $db,
+    int $pharmacyId,
+    int $staffId,
+    string $period,
+    string $kind
+): ?array {
+    $table = $kind === 'advance' ? 'salary_advances' : 'employee_loans';
+    $monthColumn = $kind === 'advance' ? 'repayment_month' : 'first_repayment_month';
+
+    if (!payroll_complete_table($db, $table)) return null;
+
+    $stmt = @$db->prepare("SELECT id, installment_amount, balance_amount, status
+                           FROM `{$table}`
+                           WHERE pharmacy_id = ?
+                             AND staff_id = ?
+                             AND status = 'Active'
+                             AND `{$monthColumn}` <= ?
+                             AND balance_amount > 0
+                           ORDER BY id ASC
+                           LIMIT 1");
+    if (!$stmt) return null;
+    $stmt->bind_param('iis', $pharmacyId, $staffId, $period);
+    if (!@$stmt->execute()) {
+        $stmt->close();
+        return null;
+    }
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row ?: null;
+}
+
+function payroll_complete_override_amount(
+    mysqli $db,
+    int $pharmacyId,
+    int $staffId,
+    string $period,
+    string $kind,
+    float $defaultAmount
+): float {
+    if (!payroll_complete_table($db, 'payroll_deduction_overrides')) return $defaultAmount;
+
+    $stmt = @$db->prepare("SELECT override_amount
+                           FROM payroll_deduction_overrides
+                           WHERE pharmacy_id = ?
+                             AND staff_id = ?
+                             AND payroll_period = ?
+                             AND deduction_type = ?
+                           LIMIT 1");
+    if (!$stmt) return $defaultAmount;
+    $stmt->bind_param('iiss', $pharmacyId, $staffId, $period, $kind);
+    if (!@$stmt->execute()) {
+        $stmt->close();
+        return $defaultAmount;
+    }
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row ? round(max(0, (float)$row['override_amount']), 2) : $defaultAmount;
+}
+
+function payroll_complete_save_deduction_override(
+    mysqli $db,
+    int $pharmacyId,
+    int $staffId,
+    string $period,
+    string $kind,
+    float $scheduledAmount,
+    float $overrideAmount,
+    string $reason,
+    string $user
+): bool {
+    if (!payroll_complete_table($db, 'payroll_deduction_overrides')) return false;
+
+    $stmt = @$db->prepare("INSERT INTO payroll_deduction_overrides
+                           (pharmacy_id, staff_id, payroll_period, deduction_type, scheduled_amount, override_amount, reason, created_by, updated_by)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           ON DUPLICATE KEY UPDATE
+                               scheduled_amount=VALUES(scheduled_amount),
+                               override_amount=VALUES(override_amount),
+                               reason=VALUES(reason),
+                               updated_by=VALUES(updated_by)");
+    if (!$stmt) return false;
+    $stmt->bind_param('iissddsss', $pharmacyId, $staffId, $period, $kind, $scheduledAmount, $overrideAmount, $reason, $user, $user);
+    $ok = @$stmt->execute();
+    $stmt->close();
+    return $ok;
+}
+
+function payroll_complete_days_late(string $scheduledDate, ?string $paymentDate = null): int {
+    try {
+        $due = new DateTimeImmutable($scheduledDate);
+        $actual = $paymentDate !== null && $paymentDate !== ''
+            ? new DateTimeImmutable($paymentDate)
+            : new DateTimeImmutable('today');
+        if ($actual <= $due) return 0;
+        return (int)$due->diff($actual)->days;
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
 function payroll_complete_user(): string {
     return (string)(
         $_SESSION['full_name']
@@ -662,6 +811,48 @@ if ($error === '') {
     }
 }
 
+/* ---------- Salary payment schedule / deduction override tables ---------- */
+
+if ($error === '') {
+    @$conn->query("CREATE TABLE IF NOT EXISTS payroll_payment_schedules (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+        pharmacy_id INT UNSIGNED NOT NULL,
+        payroll_period CHAR(7) NOT NULL,
+        scheduled_payment_date DATE NOT NULL,
+        reminder_enabled TINYINT(1) NOT NULL DEFAULT 0,
+        payment_date DATE NULL,
+        late_days INT NOT NULL DEFAULT 0,
+        created_by VARCHAR(150) NULL,
+        updated_by VARCHAR(150) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uq_payroll_payment_schedule (pharmacy_id, payroll_period),
+        KEY idx_payroll_schedule_date (pharmacy_id, scheduled_payment_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
+
+    @$conn->query("CREATE TABLE IF NOT EXISTS payroll_deduction_overrides (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+        pharmacy_id INT UNSIGNED NOT NULL,
+        staff_id INT UNSIGNED NOT NULL,
+        payroll_period CHAR(7) NOT NULL,
+        deduction_type ENUM('loan','advance') NOT NULL,
+        scheduled_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+        override_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+        reason VARCHAR(255) NULL,
+        created_by VARCHAR(150) NULL,
+        updated_by VARCHAR(150) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uq_payroll_deduction_override (pharmacy_id, staff_id, payroll_period, deduction_type),
+        KEY idx_payroll_deduction_staff (pharmacy_id, staff_id, payroll_period)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
+
+    payroll_complete_ensure_column($conn, 'payroll_records', 'scheduled_payment_date', 'DATE NULL');
+    payroll_complete_ensure_column($conn, 'payroll_records', 'late_days', 'INT NOT NULL DEFAULT 0');
+}
+
 /* ---------- Remittance table ---------- */
 
 if ($error === '' && !payroll_complete_table($conn, 'payroll_remittances')) {
@@ -773,11 +964,83 @@ if ($error === '' && payroll_complete_table($conn, 'payroll_salary_templates')) 
     }
 }
 
+/* ---------- Salary payment schedule for the selected month ---------- */
+
+$defaultSalaryPaymentDate = payroll_complete_last_day_of_period($period);
+$salaryPaymentSchedule = null;
+
+if ($error === '' && payroll_complete_table($conn, 'payroll_payment_schedules')) {
+    $stmt = $conn->prepare("SELECT * FROM payroll_payment_schedules WHERE pharmacy_id = ? AND payroll_period = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param('is', $pharmacyId, $period);
+        $stmt->execute();
+        $salaryPaymentSchedule = $stmt->get_result()->fetch_assoc() ?: null;
+        $stmt->close();
+    }
+
+    if (!$salaryPaymentSchedule) {
+        $user = payroll_complete_user();
+        $stmt = $conn->prepare("INSERT INTO payroll_payment_schedules
+            (pharmacy_id, payroll_period, scheduled_payment_date, created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?)");
+        if ($stmt) {
+            $stmt->bind_param('issss', $pharmacyId, $period, $defaultSalaryPaymentDate, $user, $user);
+            $stmt->execute();
+            $stmt->close();
+        }
+        $salaryPaymentSchedule = [
+            'scheduled_payment_date' => $defaultSalaryPaymentDate,
+            'reminder_enabled' => 0,
+            'payment_date' => null,
+            'late_days' => 0,
+        ];
+    }
+}
+
+$scheduledSalaryPaymentDate = (string)($salaryPaymentSchedule['scheduled_payment_date'] ?? $defaultSalaryPaymentDate);
+$salaryPaymentDateObject = new DateTimeImmutable($scheduledSalaryPaymentDate);
+$todayForPayroll = new DateTimeImmutable('today');
+$salaryPaymentIsPaid = !empty($salaryPaymentSchedule['payment_date']);
+$salaryPaymentReminder = !$salaryPaymentIsPaid && $todayForPayroll >= $salaryPaymentDateObject;
+$salaryLateDays = $salaryPaymentReminder ? payroll_complete_days_late($scheduledSalaryPaymentDate) : 0;
+if ($salaryPaymentIsPaid && !empty($salaryPaymentSchedule['payment_date'])) {
+    $salaryLateDays = payroll_complete_days_late($scheduledSalaryPaymentDate, (string)$salaryPaymentSchedule['payment_date']);
+}
+
 /* ---------- POST actions ---------- */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
 
     $action = (string)($_POST['action'] ?? '');
+
+    if ($action === 'save_salary_payment_date') {
+        $paymentScheduleDate = trim((string)($_POST['scheduled_payment_date'] ?? ''));
+        $dateObject = DateTime::createFromFormat('Y-m-d', $paymentScheduleDate);
+        if (!$dateObject || $dateObject->format('Y-m-d') !== $paymentScheduleDate) {
+            payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'error'=>'Please enter a valid salary payment date.']);
+        }
+
+        $existing = payroll_complete_rows($conn,
+            "SELECT payment_date FROM payroll_payment_schedules WHERE pharmacy_id = ? AND payroll_period = ? LIMIT 1",
+            'is', [$pharmacyId, $period]);
+        if (!empty($existing[0]['payment_date'])) {
+            payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'error'=>'The salary payment date cannot be changed after this payroll has been paid.']);
+        }
+
+        $user = payroll_complete_user();
+        $stmt = $conn->prepare("INSERT INTO payroll_payment_schedules
+            (pharmacy_id, payroll_period, scheduled_payment_date, created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE scheduled_payment_date=VALUES(scheduled_payment_date), updated_by=VALUES(updated_by)");
+        if (!$stmt) payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'error'=>'Could not save the salary payment date: '.$conn->error]);
+        $stmt->bind_param('issss', $pharmacyId, $period, $paymentScheduleDate, $user, $user);
+        $ok = $stmt->execute();
+        $msg = $stmt->error;
+        $stmt->close();
+        if (!$ok) payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'error'=>'Could not save the salary payment date: '.$msg]);
+
+        payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'saved'=>'Salary payment date for '.$periodLabel.' set to '.date('d M Y', strtotime($paymentScheduleDate)).'.']);
+    }
 
     /*
      * Salary Template:
@@ -962,9 +1225,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
                 allowances, bonus, overtime, other_earnings, paye, napsa, nhima,
                 loan_deduction, salary_advance, other_deductions, gross_salary,
                 total_deductions, net_salary, employer_napsa, employer_nhima,
-                statutory_year, statutory_calculated_at, status, created_by, updated_by
+                statutory_year, statutory_calculated_at, status, scheduled_payment_date, late_days, created_by, updated_by
             )
-            VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, NOW(), 'calculated', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'calculated', ?, 0, ?, ?)
             ON DUPLICATE KEY UPDATE
                 branch_id = VALUES(branch_id),
                 basic_salary = VALUES(basic_salary),
@@ -1010,6 +1273,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
             $templateDeductions = $template ? payroll_template_components_sum($template['deductions_json'] ?? '[]') : 0.0;
 
             /*
+             * Approved/Active loans and advances automatically become deductions
+             * from the configured first repayment month onward. The amount is
+             * the installment entered on the loan/advance, capped at the balance.
+             * An administrator can excuse/lower the current month's deduction;
+             * that choice is stored only for this payroll period and the unpaid
+             * balance automatically carries forward to the following month.
+             */
+            $autoLoan = payroll_complete_repayment_amount($conn, $pharmacyId, $staffId, $period, 'loan');
+            $autoAdvance = payroll_complete_repayment_amount($conn, $pharmacyId, $staffId, $period, 'advance');
+            $loanDeduction = payroll_complete_override_amount($conn, $pharmacyId, $staffId, $period, 'loan', $autoLoan);
+            $advanceDeduction = payroll_complete_override_amount($conn, $pharmacyId, $staffId, $period, 'advance', $autoAdvance);
+
+            /*
              * Phase 2: preparing payroll also performs the base calculation.
              * Salary Template recurring allowances/deductions are carried into
              * the monthly payroll automatically.
@@ -1024,8 +1300,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
                 0.0,
                 0.0,
                 0.0,
-                0.0,
-                0.0,
+                $loanDeduction,
+                $advanceDeduction,
                 $templateDeductions
             );
 
@@ -1040,7 +1316,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
             $employerNhima = $calc['employer_nhima'];
 
             $stmt->bind_param(
-                'iiisdddddddddddiss',
+                'iiisdddddddddddddisss',
                 $pharmacyId,
                 $branchId,
                 $staffId,
@@ -1050,6 +1326,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
                 $paye,
                 $napsa,
                 $nhima,
+                $loanDeduction,
+                $advanceDeduction,
                 $templateDeductions,
                 $gross,
                 $total,
@@ -1057,6 +1335,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
                 $employerNapsa,
                 $employerNhima,
                 $yearValue,
+                $scheduledSalaryPaymentDate,
                 $user,
                 $user
             );
@@ -1120,6 +1399,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
         $advance = max(0, (float)($_POST['salary_advance'] ?? 0));
         $otherDeductions = max(0, (float)($_POST['other_deductions'] ?? 0));
 
+        $autoLoanForRow = payroll_complete_repayment_amount($conn, $pharmacyId, (int)$record['staff_id'], $period, 'loan');
+        $autoAdvanceForRow = payroll_complete_repayment_amount($conn, $pharmacyId, (int)$record['staff_id'], $period, 'advance');
+        $user = payroll_complete_user();
+
+        if ($autoLoanForRow > 0) {
+            $loan = min($loan, $autoLoanForRow);
+        }
+        if ($autoAdvanceForRow > 0) {
+            $advance = min($advance, $autoAdvanceForRow);
+        }
+
+        if ($autoLoanForRow > 0 && abs($loan - $autoLoanForRow) > 0.009) {
+            payroll_complete_save_deduction_override(
+                $conn, $pharmacyId, (int)$record['staff_id'], $period, 'loan',
+                $autoLoanForRow, min($loan, $autoLoanForRow),
+                $loan <= 0 ? 'Loan installment excused for this payroll period.' : 'Loan installment lowered for this payroll period.',
+                $user
+            );
+        }
+        if ($autoAdvanceForRow > 0 && abs($advance - $autoAdvanceForRow) > 0.009) {
+            payroll_complete_save_deduction_override(
+                $conn, $pharmacyId, (int)$record['staff_id'], $period, 'advance',
+                $autoAdvanceForRow, min($advance, $autoAdvanceForRow),
+                $advance <= 0 ? 'Salary advance installment excused for this payroll period.' : 'Salary advance installment lowered for this payroll period.',
+                $user
+            );
+        }
+
         $calc = payroll_complete_calculate(
             $basic,
             $allowances,
@@ -1133,7 +1440,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
 
         $yearValue = $selectedYear;
         $status = 'calculated';
-        $user = payroll_complete_user();
 
         $stmt = $conn->prepare("
             UPDATE payroll_records
@@ -1414,11 +1720,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
             $paymentMethod = 'Other';
         }
 
+        $scheduledDateForPayment = $scheduledSalaryPaymentDate;
+        $lateDaysForPayment = payroll_complete_days_late($scheduledDateForPayment, $paymentDate);
+
+        $conn->begin_transaction();
+
         $stmt = $conn->prepare("UPDATE payroll_records
-            SET status='paid', payment_date=?, payment_reference=?, payment_method=?, updated_by=?
+            SET status='paid', payment_date=?, payment_reference=?, payment_method=?, scheduled_payment_date=?, late_days=?, updated_by=?
             WHERE pharmacy_id=? AND payroll_period=? AND status='approved'");
 
         if (!$stmt) {
+            $conn->rollback();
             payroll_complete_redirect([
                 'month'=>$selectedMonth,
                 'year'=>$selectedYear,
@@ -1429,10 +1741,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
 
         $user = payroll_complete_user();
         $stmt->bind_param(
-    'ssssis',
+    'ssssisis',
     $paymentDate,
     $paymentReference,
     $paymentMethod,
+    $scheduledDateForPayment,
+    $lateDaysForPayment,
     $user,
     $pharmacyId,
     $period
@@ -1443,6 +1757,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
         $stmt->close();
 
         if (!$ok) {
+            $conn->rollback();
             payroll_complete_redirect([
                 'month'=>$selectedMonth,
                 'year'=>$selectedYear,
@@ -1450,6 +1765,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
                 'error'=>'Could not record payroll payment: '.$msg
             ]);
         }
+
+        /* Record the scheduled/actual payment date and late days for the period. */
+        $scheduleStmt = $conn->prepare("UPDATE payroll_payment_schedules
+            SET reminder_enabled=0, payment_date=?, late_days=?, updated_by=?
+            WHERE pharmacy_id=? AND payroll_period=?");
+        if (!$scheduleStmt) {
+            $conn->rollback();
+            payroll_complete_redirect(['month'=>$selectedMonth,'year'=>$selectedYear,'view'=>'payroll','error'=>'Payroll was not finalized because the salary payment record could not be prepared.']);
+        }
+        $scheduleStmt->bind_param('sisis', $paymentDate, $lateDaysForPayment, $user, $pharmacyId, $period);
+        if (!$scheduleStmt->execute()) {
+            $scheduleStmt->close();
+            $conn->rollback();
+            payroll_complete_redirect(['month'=>$selectedMonth,'year'=>$selectedYear,'view'=>'payroll','error'=>'Payroll was not finalized because the salary payment record could not be saved.']);
+        }
+        $scheduleStmt->close();
+
+        /*
+         * Apply only the deductions that were actually included in this paid payroll.
+         * If an admin excused/lowered a deduction, the unpaid balance remains and is
+         * picked up automatically in the next eligible payroll month.
+         */
+        $paidRows = payroll_complete_rows($conn,
+            "SELECT staff_id, loan_deduction, salary_advance
+             FROM payroll_records
+             WHERE pharmacy_id = ? AND payroll_period = ? AND status='paid'",
+            'is', [$pharmacyId, $period]);
+
+        foreach ($paidRows as $paidRow) {
+            $staffIdPaid = (int)$paidRow['staff_id'];
+            $loanPaid = max(0, (float)$paidRow['loan_deduction']);
+            $advancePaid = max(0, (float)$paidRow['salary_advance']);
+
+            if ($loanPaid > 0) {
+                $loanSource = payroll_complete_repayment_record($conn, $pharmacyId, $staffIdPaid, $period, 'loan');
+                if ($loanSource) {
+                    $loanId = (int)$loanSource['id'];
+                    $loanBalance = max(0, (float)$loanSource['balance_amount']);
+                    $applied = min($loanPaid, $loanBalance);
+                    $loanUpdate = $conn->prepare("UPDATE employee_loans
+                        SET amount_paid = amount_paid + ?,
+                            balance_amount = GREATEST(0, balance_amount - ?),
+                            status = CASE WHEN balance_amount - ? <= 0 THEN 'Completed' ELSE 'Active' END
+                        WHERE id=? AND pharmacy_id=? AND status='Active'");
+                    if (!$loanUpdate || !$loanUpdate->bind_param('dddii', $applied, $applied, $applied, $loanId, $pharmacyId) || !$loanUpdate->execute()) {
+                        if ($loanUpdate) $loanUpdate->close();
+                        $conn->rollback();
+                        payroll_complete_redirect(['month'=>$selectedMonth,'year'=>$selectedYear,'view'=>'payroll','error'=>'Payroll was not finalized because the loan repayment could not be recorded.']);
+                    }
+                    $loanUpdate->close();
+                }
+            }
+
+            if ($advancePaid > 0) {
+                $advanceSource = payroll_complete_repayment_record($conn, $pharmacyId, $staffIdPaid, $period, 'advance');
+                if ($advanceSource) {
+                    $advanceId = (int)$advanceSource['id'];
+                    $advanceBalance = max(0, (float)$advanceSource['balance_amount']);
+                    $applied = min($advancePaid, $advanceBalance);
+                    $advanceUpdate = $conn->prepare("UPDATE salary_advances
+                        SET amount_paid = amount_paid + ?,
+                            balance_amount = GREATEST(0, balance_amount - ?),
+                            status = CASE WHEN balance_amount - ? <= 0 THEN 'Completed' ELSE 'Active' END
+                        WHERE id=? AND pharmacy_id=? AND status='Active'");
+                    if (!$advanceUpdate || !$advanceUpdate->bind_param('dddii', $applied, $applied, $applied, $advanceId, $pharmacyId) || !$advanceUpdate->execute()) {
+                        if ($advanceUpdate) $advanceUpdate->close();
+                        $conn->rollback();
+                        payroll_complete_redirect(['month'=>$selectedMonth,'year'=>$selectedYear,'view'=>'payroll','error'=>'Payroll was not finalized because the salary advance repayment could not be recorded.']);
+                    }
+                    $advanceUpdate->close();
+                }
+            }
+        }
+
+        $conn->commit();
 
         /*
          * Payroll is now PAID. Automatically issue the official payslip
@@ -1849,7 +2239,8 @@ if ($view === 'history') {
             SUM(net_salary) AS net,
             SUM(paye) AS paye,
             SUM(napsa) AS napsa,
-            SUM(nhima) AS nhima
+            SUM(nhima) AS nhima,
+            MAX(late_days) AS late_days
          FROM payroll_records
          WHERE pharmacy_id = ?
          GROUP BY payroll_period
@@ -2325,7 +2716,7 @@ tbody tr:hover{background:#fbfcfd}
 
 .stat-grid{
     display:grid;
-    grid-template-columns:repeat(5,1fr);
+    grid-template-columns:repeat(7,1fr);
     gap:12px;
     padding:16px
 }
@@ -2373,8 +2764,13 @@ tbody tr:hover{background:#fbfcfd}
 }
 .net{color:var(--green);font-weight:800}
 
+/* Salary payment schedule / automatic deduction UI */
+.payroll-date-panel{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:center;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;margin-bottom:16px}
+.payroll-date-title{font-size:13px;font-weight:800;color:var(--charcoal);display:flex;align-items:center;gap:8px}.payroll-date-title i{color:var(--blue)}.payroll-date-sub{font-size:10px;color:var(--muted);line-height:1.55;margin-top:5px}.salary-date-form{border-left:1px solid var(--border);padding-left:18px}.salary-date-form label{display:block;font-size:10px;font-weight:800;color:var(--muted);margin-bottom:5px}.salary-date-form-row{display:flex;gap:7px}.salary-date-form input{height:38px;min-width:0;flex:1;border:1px solid var(--border);border-radius:8px;padding:0 9px;font:inherit;font-size:12px}.salary-late-alert{margin-top:9px;padding:8px 10px;border:1px solid #efc0c8;background:var(--red-soft);color:#b4233b;border-radius:8px;font-size:10px;font-weight:700}.salary-paid-note{margin-top:9px;padding:8px 10px;border:1px solid #b9e8d1;background:var(--green-soft);color:#08754f;border-radius:8px;font-size:10px}.salary-schedule-note{margin-top:9px;font-size:10px;color:#53616d}.mandatory-deduction-field>span{display:flex;align-items:center;gap:6px}.must-badge{display:inline-flex;align-items:center;padding:2px 5px;border-radius:4px;background:var(--red);color:#fff;font-size:8px;letter-spacing:.4px}.mandatory-help{color:#b4233b}.deduction-actions{display:flex;gap:5px;margin-top:4px}.deduction-excuse{color:#b4233b;border-color:#efc0c8;background:#fff6f7}.deduction-lower{color:#a36d00;border-color:#ecd79b;background:#fffaf0}
+@media(max-width:850px){.payroll-date-panel{grid-template-columns:1fr}.salary-date-form{border-left:0;border-top:1px solid var(--border);padding-left:0;padding-top:13px}}
+
 /* Salary Template UI */
-.salary-template-intro{display:flex;justify-content:space-between;gap:20px;align-items:center;padding:16px 18px;border-bottom:1px solid #e6ebf1;background:#fbfcfe}.salary-template-intro>div:first-child{display:flex;flex-direction:column;gap:4px}.salary-template-intro span{font-size:12px;color:#718096}.template-note{font-size:11px;color:#4d6b8a;background:#eef5ff;border:1px solid #d9e7ff;border-radius:10px;padding:10px 12px}.template-list th,.template-list td{white-space:nowrap}.salary-modal{position:fixed;inset:0;display:none;z-index:9999}.salary-modal.open{display:block}.salary-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.48)}.salary-modal-card{position:relative;width:min(1050px,calc(100% - 30px));max-height:92vh;overflow:auto;margin:4vh auto;background:#fff;border-radius:16px;box-shadow:0 25px 70px rgba(15,23,42,.25)}.salary-modal-head{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid #e7edf4}.salary-modal-head strong{display:block;font-size:18px}.salary-modal-head span{display:block;font-size:12px;color:#718096;margin-top:3px}.modal-close{border:0;background:#f1f5f9;width:34px;height:34px;border-radius:9px;font-size:22px;cursor:pointer}.template-grid,.component-columns{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 22px}.template-section{border:1px solid #e1e8f0;border-radius:12px;padding:16px;background:#fff}.template-section h3{margin:0 0 14px;font-size:14px;color:#243447}.template-section label{display:block;font-size:11px;font-weight:700;color:#607086;margin:10px 0 5px}.template-section input,.template-section select{width:100%;border:1px solid #d5dee8;border-radius:9px;padding:10px 11px;font:inherit;font-size:13px;outline:none;background:#fff}.template-section input:focus,.template-section select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}.readonly-field{background:#f5f7fa!important;color:#526174}.template-preview{display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding:10px 12px;background:#f7f9fc;border-radius:9px;font-size:11px;color:#66758a}.template-preview strong{font-size:13px;color:#172437}.component-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.component-head h3{margin:0}.component-row{display:grid;grid-template-columns:1fr 120px 34px;gap:7px;margin-bottom:8px}.component-row input{min-width:0}.remove-component{border:1px solid #e1e7ef;background:#fff;border-radius:8px;color:#dc4c64;cursor:pointer}.salary-modal-foot{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:16px 22px;border-top:1px solid #e7edf4;background:#fbfcfe;font-size:11px;color:#718096}.salary-modal-foot>div{display:flex;gap:8px}.template-list .btn{white-space:nowrap}@media(max-width:800px){.salary-template-intro,.salary-modal-foot{flex-direction:column;align-items:stretch}.template-grid,.component-columns{grid-template-columns:1fr}.salary-modal-card{margin:2vh auto;max-height:96vh}.two-col{grid-template-columns:1fr}.component-row{grid-template-columns:1fr 100px 34px}}
+.salary-template-intro{display:flex;justify-content:space-between;gap:20px;align-items:center;padding:16px 18px;border-bottom:1px solid #e6ebf1;background:#fbfcfe}.salary-template-intro>div:first-child{display:flex;flex-direction:column;gap:4px}.salary-template-intro span{font-size:12px;color:#718096}.template-note{font-size:11px;color:#4d6b8a;background:#eef5ff;border:1px solid #d9e7ff;border-radius:10px;padding:10px 12px}.template-list th,.template-list td{white-space:nowrap}.salary-modal{position:fixed;inset:0;display:none;z-index:9999}.salary-modal.open{display:block}.salary-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.48)}.salary-modal-card{position:relative;width:min(1050px,calc(100% - 30px));max-height:92vh;overflow:auto;margin:4vh auto;background:#fff;border-radius:16px;box-shadow:0 25px 70px rgba(15,23,42,.25)}.salary-modal-head{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid #e7edf4}.salary-modal-head strong{display:block;font-size:18px}.salary-modal-head span{display:block;font-size:12px;color:#718096;margin-top:3px}.modal-close{border:0;background:#f1f5f9;width:34px;height:34px;border-radius:9px;font-size:22px;cursor:pointer}.template-grid,.component-columns{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 22px}.template-section{border:1px solid #e1e8f0;border-radius:12px;padding:16px;background:#fff}.template-section h3{margin:0 0 14px;font-size:14px;color:#243447}.template-section label{display:block;font-size:11px;font-weight:700;color:#607086;margin:10px 0 5px}.template-section input,.template-section select{width:100%;border:1px solid #d5dee8;border-radius:9px;padding:10px 11px;font:inherit;font-size:13px;outline:none;background:#fff}.template-section input:focus,.template-section select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}.readonly-field{background:#f5f7fa!important;color:#526174}.template-preview{display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding:10px 12px;background:#f7f9fc;border-radius:9px;font-size:11px;color:#66758a}.template-preview strong{font-size:13px;color:#172437}.auto-loan-box{margin-top:10px;padding:10px 12px;border:1px solid #efc0c8;background:#fff7f8;border-radius:9px}.auto-loan-box>div{display:flex;justify-content:space-between;gap:10px;font-size:10px;padding:2px 0}.auto-loan-box span{color:#718096}.auto-loan-box strong{color:#b4233b}.auto-loan-box small{display:block;margin-top:7px;color:#8a4a54;line-height:1.45}.muted-auto{color:#94a3b8;font-weight:500}.auto-deduction-cell{white-space:nowrap}.component-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.component-head h3{margin:0}.component-row{display:grid;grid-template-columns:1fr 120px 34px;gap:7px;margin-bottom:8px}.component-row input{min-width:0}.remove-component{border:1px solid #e1e7ef;background:#fff;border-radius:8px;color:#dc4c64;cursor:pointer}.salary-modal-foot{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:16px 22px;border-top:1px solid #e7edf4;background:#fbfcfe;font-size:11px;color:#718096}.salary-modal-foot>div{display:flex;gap:8px}.template-list .btn{white-space:nowrap}@media(max-width:800px){.salary-template-intro,.salary-modal-foot{flex-direction:column;align-items:stretch}.template-grid,.component-columns{grid-template-columns:1fr}.salary-modal-card{margin:2vh auto;max-height:96vh}.two-col{grid-template-columns:1fr}.component-row{grid-template-columns:1fr 100px 34px}}
 </style>
 </head>
 
@@ -2467,12 +2863,39 @@ Print
 </div>
 <?php endif; ?>
 
+<section class="payroll-date-panel">
+    <div class="payroll-date-copy">
+        <div class="payroll-date-title"><i class="fas fa-calendar-check"></i> Salary Payment Schedule</div>
+        <div class="payroll-date-sub">Set the date salaries for <?= payroll_complete_h($periodLabel) ?> are expected to be paid. The system will remind you on that date and count unpaid days until the actual payment is recorded.</div>
+        <?php if ($salaryPaymentReminder): ?>
+            <div class="salary-late-alert"><i class="fas fa-triangle-exclamation"></i> SALARY PAYMENT REMINDER: Payment is due. <?= $salaryLateDays > 0 ? '<strong>'.$salaryLateDays.' late day'.($salaryLateDays === 1 ? '' : 's').'</strong> counted so far.' : '<strong>Due today</strong>.' ?></div>
+        <?php elseif ($salaryPaymentIsPaid): ?>
+            <div class="salary-paid-note"><i class="fas fa-circle-check"></i> Paid on <strong><?= payroll_complete_h(date('d M Y', strtotime((string)$salaryPaymentSchedule['payment_date']))) ?></strong>. Late days recorded: <strong><?= (int)$salaryLateDays ?></strong>.</div>
+        <?php else: ?>
+            <div class="salary-schedule-note">Scheduled for <strong><?= payroll_complete_h($salaryPaymentDateObject->format('d M Y')) ?></strong>.</div>
+        <?php endif; ?>
+    </div>
+    <?php if (!$salaryPaymentIsPaid): ?>
+    <form method="post" class="salary-date-form">
+        <input type="hidden" name="action" value="save_salary_payment_date">
+        <input type="hidden" name="month" value="<?= $selectedMonth ?>">
+        <input type="hidden" name="year" value="<?= $selectedYear ?>">
+        <label>Expected Salary Payment Date</label>
+        <div class="salary-date-form-row">
+            <input type="date" name="scheduled_payment_date" value="<?= payroll_complete_h($scheduledSalaryPaymentDate) ?>" required>
+            <button class="btn primary" type="submit"><i class="fas fa-save"></i> Save Date</button>
+        </div>
+    </form>
+    <?php endif; ?>
+</section>
+
 <nav class="payroll-tabs">
 
 <?php
 $tabs = [
     'payroll' => ['fa-file-invoice-dollar','Payroll'],
     'salary' => ['fa-money-bill-wave','Salary Setup'],
+    'loans_advances' => ['fa-hand-holding-dollar','Loans & Advances'],
     'statutory' => ['fa-landmark','Statutory'],
     'remittance' => ['fa-money-check-dollar','Remittance'],
     'history' => ['fa-clock-rotate-left','History'],
@@ -2483,7 +2906,7 @@ $tabs = [
 <?php foreach ($tabs as $key => $tab): ?>
 <a
     class="payroll-tab <?= $view === $key ? 'active' : '' ?>"
-    href="?view=<?= payroll_complete_h($key) ?>&month=<?= $selectedMonth ?>&year=<?= $selectedYear ?>"
+    href="<?= $key === 'loans_advances' ? '/admin/loans_advances.php' : '?view=' . payroll_complete_h($key) . '&month=' . $selectedMonth . '&year=' . $selectedYear ?>"
 >
 <i class="fas <?= payroll_complete_h($tab[0]) ?>"></i>
 <?= payroll_complete_h($tab[1]) ?>
@@ -2702,6 +3125,7 @@ echo payroll_complete_h($initials ?: 'ST');
 <div style="font-size:10px"><strong><?= payroll_complete_h($row['payment_method'] ?? 'Paid') ?></strong></div>
 <div style="font-size:9px;color:var(--muted)"><?= payroll_complete_h($row['payment_reference'] ?? '') ?></div>
 <div style="font-size:9px;color:var(--muted)"><?= !empty($row['payment_date']) ? payroll_complete_h(date('d M Y', strtotime($row['payment_date']))) : '' ?></div>
+<?php if ((int)($row['late_days'] ?? 0) > 0): ?><div style="font-size:9px;color:#b4233b;font-weight:700"><?= (int)$row['late_days'] ?> late day<?= (int)$row['late_days'] === 1 ? '' : 's' ?></div><?php endif; ?>
 <?php else: ?>
 <span style="font-size:10px;color:var(--muted)">Not paid</span>
 <?php endif; ?>
@@ -2712,9 +3136,9 @@ echo payroll_complete_h($initials ?: 'ST');
 <div style="font-size:9px;color:var(--muted);margin-bottom:5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?= payroll_complete_h($row['email']) ?>">
 <i class="fas fa-envelope"></i> <?= payroll_complete_h($row['email']) ?>
 <?php if (($row['payslip_email_status'] ?? 'pending') === 'sent'): ?>
-<span style="color:#08754f;font-weight:700;"> Ãƒâ€šÃ‚Â· SENT</span>
+<span style="color:#08754f;font-weight:700;"> ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· SENT</span>
 <?php elseif (($row['payslip_email_status'] ?? 'pending') === 'failed'): ?>
-<span style="color:#b42318;font-weight:700;"> Ãƒâ€šÃ‚Â· FAILED</span>
+<span style="color:#b42318;font-weight:700;"> ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· FAILED</span>
 <?php endif; ?>
 </div>
 <?php else: ?>
@@ -2840,26 +3264,41 @@ Other Earnings
 >
 </label>
 
-<label>
-Loan
+<?php
+$autoLoanDisplay = payroll_complete_repayment_amount($conn, $pharmacyId, (int)$row['staff_id'], $period, 'loan');
+$autoAdvanceDisplay = payroll_complete_repayment_amount($conn, $pharmacyId, (int)$row['staff_id'], $period, 'advance');
+?>
+
+<label class="mandatory-deduction-field">
+<span>Loan <?php if ($autoLoanDisplay > 0): ?><b class="must-badge">MUST</b><?php endif; ?></span>
 <input
     type="number"
     step="0.01"
     min="0"
     name="loan_deduction"
     value="<?= payroll_complete_h($row['loan_deduction']) ?>"
+    data-auto-deduction="<?= $autoLoanDisplay > 0 ? '1' : '0' ?>"
 >
+<?php if ($autoLoanDisplay > 0): ?>
+<small class="field-help mandatory-help">Automatic installment: <?= payroll_complete_money($autoLoanDisplay) ?>. Excusing/lowering this month carries the unpaid balance forward.</small>
+<div class="deduction-actions"><button type="button" class="btn small deduction-excuse" onclick="excuseDeduction(this,'loan')">Excuse</button><button type="button" class="btn small deduction-lower" onclick="lowerDeduction(this,'loan')">Lower</button></div>
+<?php endif; ?>
 </label>
 
-<label>
-Advance
+<label class="mandatory-deduction-field">
+<span>Advance <?php if ($autoAdvanceDisplay > 0): ?><b class="must-badge">MUST</b><?php endif; ?></span>
 <input
     type="number"
     step="0.01"
     min="0"
     name="salary_advance"
     value="<?= payroll_complete_h($row['salary_advance']) ?>"
+    data-auto-deduction="<?= $autoAdvanceDisplay > 0 ? '1' : '0' ?>"
 >
+<?php if ($autoAdvanceDisplay > 0): ?>
+<small class="field-help mandatory-help">Automatic installment: <?= payroll_complete_money($autoAdvanceDisplay) ?>. Excusing/lowering this month carries the unpaid balance forward.</small>
+<div class="deduction-actions"><button type="button" class="btn small deduction-excuse" onclick="excuseDeduction(this,'advance')">Excuse</button><button type="button" class="btn small deduction-lower" onclick="lowerDeduction(this,'advance')">Lower</button></div>
+<?php endif; ?>
 </label>
 
 <label>
@@ -3008,6 +3447,16 @@ Lock Payroll
 <div class="stat-grid">
 
 <div class="stat-card">
+<span>Salary Due Date</span>
+<strong><?= payroll_complete_h(date('d M Y', strtotime($scheduledSalaryPaymentDate))) ?></strong>
+</div>
+
+<div class="stat-card <?= $salaryPaymentReminder ? 'red' : ($salaryPaymentIsPaid ? 'green' : '') ?>">
+<span><?= $salaryPaymentIsPaid ? 'Late Days Recorded' : 'Late Days' ?></span>
+<strong><?= (int)$salaryLateDays ?></strong>
+</div>
+
+<div class="stat-card">
 <span>Current Status</span>
 <strong><?= payroll_complete_h(ucfirst($periodStatus)) ?></strong>
 </div>
@@ -3060,11 +3509,11 @@ Lock Payroll
 <div class="table-wrap">
 <table class="salary-table template-list">
 <thead><tr>
-<th>Employee</th><th>Grade</th><th>Currency</th><th class="money">Basic</th><th class="money">Recurring Allowances</th><th class="money">Recurring Deductions</th><th>Overtime Rate</th><th>Template</th>
+<th>Employee</th><th>Grade</th><th>Currency</th><th class="money">Basic</th><th class="money">Recurring Allowances</th><th class="money">Recurring Deductions</th><th class="money">Loan MUST</th><th class="money">Advance MUST</th><th>Overtime Rate</th><th>Template</th>
 </tr></thead>
 <tbody>
 <?php if (!$staffRows): ?>
-<tr><td colspan="8" class="empty"><i class="fas fa-users-slash" style="font-size:30px;margin-bottom:10px"></i><div><strong>No staff members found.</strong></div></td></tr>
+<tr><td colspan="10" class="empty"><i class="fas fa-users-slash" style="font-size:30px;margin-bottom:10px"></i><div><strong>No staff members found.</strong></div></td></tr>
 <?php else: foreach ($staffRows as $staff):
     $sid = (int)$staff['staff_id'];
     $tpl = $salaryTemplates[$sid] ?? null;
@@ -3074,6 +3523,10 @@ Lock Payroll
     $currency = $tpl['currency'] ?? 'ZMW';
     $basic = $tpl ? (float)$tpl['basic_salary'] : (float)$staff['basic_salary'];
     $overtimeRate = $tpl ? (float)$tpl['overtime_rate'] : 0;
+    $autoLoanSetup = payroll_complete_repayment_amount($conn, $pharmacyId, $sid, $period, 'loan');
+    $autoAdvanceSetup = payroll_complete_repayment_amount($conn, $pharmacyId, $sid, $period, 'advance');
+    $autoLoanSetup = payroll_complete_override_amount($conn, $pharmacyId, $sid, $period, 'loan', $autoLoanSetup);
+    $autoAdvanceSetup = payroll_complete_override_amount($conn, $pharmacyId, $sid, $period, 'advance', $autoAdvanceSetup);
     $name = (string)$staff['staff_name'];
     $initials = '';
     foreach (preg_split('/\s+/', trim($name)) ?: [] as $part) { if ($part !== '') { $initials .= strtoupper($part[0]); } if (strlen($initials) >= 2) break; }
@@ -3086,6 +3539,8 @@ Lock Payroll
 <td class="money salary-master"><?= payroll_complete_h($currency) ?> <?= number_format($basic,2) ?></td>
 <td class="money"><?= payroll_complete_h($currency) ?> <?= number_format($allowanceTotal,2) ?></td>
 <td class="money"><?= payroll_complete_h($currency) ?> <?= number_format($deductionTotal,2) ?></td>
+<td class="money auto-deduction-cell"><?= $autoLoanSetup > 0 ? '<b class="must-badge">MUST</b> '.payroll_complete_h($currency).' '.number_format($autoLoanSetup,2) : '<span class="muted-auto">None</span>' ?></td>
+<td class="money auto-deduction-cell"><?= $autoAdvanceSetup > 0 ? '<b class="must-badge">MUST</b> '.payroll_complete_h($currency).' '.number_format($autoAdvanceSetup,2) : '<span class="muted-auto">None</span>' ?></td>
 <td><?= payroll_complete_h($currency) ?> <?= number_format($overtimeRate,2) ?>/hr</td>
 <td><button type="button" class="btn small <?= $tpl ? 'green' : 'primary' ?>" onclick="openSalaryTemplate(<?= $sid ?>)"><i class="fas <?= $tpl ? 'fa-pen-to-square' : 'fa-plus' ?>"></i> <?= $tpl ? 'Edit' : 'Create' ?></button></td>
 </tr>
@@ -3117,6 +3572,7 @@ Lock Payroll
 <label>Account Number</label><input name="account_number" id="tpl_account_number" placeholder="Account number">
 <div class="template-preview"><span>Calculated Monthly Gross</span><strong id="tpl_gross">K0.00</strong></div>
 <div class="template-preview"><span>Recurring Deductions</span><strong id="tpl_deduction_total">K0.00</strong></div>
+<div class="auto-loan-box" id="tpl_auto_deductions"><div><span>Loan repayment</span><strong id="tpl_auto_loan">None</strong></div><div><span>Salary advance</span><strong id="tpl_auto_advance">None</strong></div><small><b class="must-badge">MUST</b> Automatic deductions are included in the selected month's payroll. Excused/lowered amounts carry forward.</small></div>
 </div>
 </div>
 <div class="component-columns">
@@ -3129,12 +3585,12 @@ Lock Payroll
 </div>
 
 <script>
-const salaryTemplateData = <?= json_encode(array_map(function($staff) use ($salaryTemplates) {
+const salaryTemplateData = <?= json_encode(array_map(function($staff) use ($salaryTemplates, $conn, $pharmacyId, $period) {
     $sid=(int)$staff['staff_id']; $tpl=$salaryTemplates[$sid]??null;
-    return ['id'=>$sid,'name'=>(string)$staff['staff_name'],'grade'=>(string)($tpl['grade_name']??''),'currency'=>(string)($tpl['currency']??'ZMW'),'basic'=>(float)($tpl['basic_salary']??$staff['basic_salary']??0),'gratuity'=>(float)($tpl['gratuity_amount']??0),'overtime'=>(float)($tpl['overtime_rate']??0),'leaves'=>(float)($tpl['monthly_allowed_leaves']??0),'bank'=>(string)($tpl['bank_name']??''),'accountName'=>(string)($tpl['account_name']??''),'accountNumber'=>(string)($tpl['account_number']??''),'effective'=>(string)($tpl['effective_from']??date('Y-m-d')),'allowances'=>payroll_template_components_decode($tpl['allowances_json']??'[]'),'deductions'=>payroll_template_components_decode($tpl['deductions_json']??'[]')];
+    return ['id'=>$sid,'name'=>(string)$staff['staff_name'],'grade'=>(string)($tpl['grade_name']??''),'currency'=>(string)($tpl['currency']??'ZMW'),'basic'=>(float)($tpl['basic_salary']??$staff['basic_salary']??0),'gratuity'=>(float)($tpl['gratuity_amount']??0),'overtime'=>(float)($tpl['overtime_rate']??0),'leaves'=>(float)($tpl['monthly_allowed_leaves']??0),'bank'=>(string)($tpl['bank_name']??''),'accountName'=>(string)($tpl['account_name']??''),'accountNumber'=>(string)($tpl['account_number']??''),'effective'=>(string)($tpl['effective_from']??date('Y-m-d')),'autoLoan'=>(float)payroll_complete_override_amount($conn, $pharmacyId, $sid, $period, 'loan', payroll_complete_repayment_amount($conn, $pharmacyId, $sid, $period, 'loan')),'autoAdvance'=>(float)payroll_complete_override_amount($conn, $pharmacyId, $sid, $period, 'advance', payroll_complete_repayment_amount($conn, $pharmacyId, $sid, $period, 'advance')),'allowances'=>payroll_template_components_decode($tpl['allowances_json']??'[]'),'deductions'=>payroll_template_components_decode($tpl['deductions_json']??'[]')];
 }, $staffRows)) ?>;
 function tplMoney(v,c='ZMW'){return c+' '+Number(v||0).toLocaleString('en-ZM',{minimumFractionDigits:2,maximumFractionDigits:2});}
-function openSalaryTemplate(id){const d=salaryTemplateData.find(x=>Number(x.id)===Number(id));if(!d)return;document.getElementById('tpl_staff_id').value=d.id;document.getElementById('tpl_employee').value=d.name;document.getElementById('tpl_grade').value=d.grade;document.getElementById('tpl_currency').value=d.currency;document.getElementById('tpl_basic').value=d.basic;document.getElementById('tpl_gratuity').value=d.gratuity;document.getElementById('tpl_overtime').value=d.overtime;document.getElementById('tpl_leaves').value=d.leaves;document.getElementById('tpl_bank').value=d.bank;document.getElementById('tpl_account_name').value=d.accountName;document.getElementById('tpl_account_number').value=d.accountNumber;document.getElementById('tpl_effective').value=d.effective||new Date().toISOString().slice(0,10);document.getElementById('allowanceRows').innerHTML='';document.getElementById('deductionRows').innerHTML='';(d.allowances||[]).forEach(x=>addTemplateComponent('allowance',x.name,x.amount));(d.deductions||[]).forEach(x=>addTemplateComponent('deduction',x.name,x.amount));if(!(d.allowances||[]).length)addTemplateComponent('allowance');if(!(d.deductions||[]).length)addTemplateComponent('deduction');document.getElementById('salaryTemplateModal').classList.add('open');document.getElementById('salaryTemplateModal').setAttribute('aria-hidden','false');updateTemplatePreview();}
+function openSalaryTemplate(id){const d=salaryTemplateData.find(x=>Number(x.id)===Number(id));if(!d)return;document.getElementById('tpl_staff_id').value=d.id;document.getElementById('tpl_employee').value=d.name;document.getElementById('tpl_grade').value=d.grade;document.getElementById('tpl_currency').value=d.currency;document.getElementById('tpl_basic').value=d.basic;document.getElementById('tpl_gratuity').value=d.gratuity;document.getElementById('tpl_overtime').value=d.overtime;document.getElementById('tpl_leaves').value=d.leaves;document.getElementById('tpl_bank').value=d.bank;document.getElementById('tpl_account_name').value=d.accountName;document.getElementById('tpl_account_number').value=d.accountNumber;document.getElementById('tpl_effective').value=d.effective||new Date().toISOString().slice(0,10);document.getElementById('tpl_auto_loan').textContent=d.autoLoan>0?tplMoney(d.autoLoan,d.currency):'None';document.getElementById('tpl_auto_advance').textContent=d.autoAdvance>0?tplMoney(d.autoAdvance,d.currency):'None';document.getElementById('allowanceRows').innerHTML='';document.getElementById('deductionRows').innerHTML='';(d.allowances||[]).forEach(x=>addTemplateComponent('allowance',x.name,x.amount));(d.deductions||[]).forEach(x=>addTemplateComponent('deduction',x.name,x.amount));if(!(d.allowances||[]).length)addTemplateComponent('allowance');if(!(d.deductions||[]).length)addTemplateComponent('deduction');document.getElementById('salaryTemplateModal').classList.add('open');document.getElementById('salaryTemplateModal').setAttribute('aria-hidden','false');updateTemplatePreview();}
 function closeSalaryTemplate(){const m=document.getElementById('salaryTemplateModal');m.classList.remove('open');m.setAttribute('aria-hidden','true');}
 function addTemplateComponent(type,name='',amount=''){const box=document.getElementById(type==='allowance'?'allowanceRows':'deductionRows');const row=document.createElement('div');row.className='component-row';const n=type==='allowance'?'allowance_name[]':'deduction_name[]';const a=type==='allowance'?'allowance_amount[]':'deduction_amount[]';row.innerHTML='<input name="'+n+'" placeholder="Component name" value="'+String(name).replace(/"/g,'&quot;')+'"><input type="number" min="0" step="0.01" name="'+a+'" placeholder="Amount" value="'+Number(amount||0)+'"><button type="button" class="remove-component" onclick="this.parentElement.remove();updateTemplatePreview()"><i class="fas fa-xmark"></i></button>';box.appendChild(row);updateTemplatePreview();}
 function updateTemplatePreview(){const basic=Number(document.getElementById('tpl_basic')?.value||0);let a=0,d=0;document.querySelectorAll('#allowanceRows input[name="allowance_amount[]"]').forEach(x=>a+=Number(x.value||0));document.querySelectorAll('#deductionRows input[name="deduction_amount[]"]').forEach(x=>d+=Number(x.value||0));const c=document.getElementById('tpl_currency')?.value||'ZMW';document.getElementById('tpl_gross').textContent=tplMoney(basic+a,c);document.getElementById('tpl_deduction_total').textContent=tplMoney(d,c);}
@@ -3346,7 +3802,7 @@ Recalculate
 <?= payroll_complete_h(
     $remit['payment_reference']
     ?: $remit['return_reference']
-    ?: 'Ã¢â‚¬â€'
+    ?: 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'
 ) ?>
 </td>
 
@@ -3490,6 +3946,7 @@ Outstanding:
 <th class="money">NHIMA</th>
 <th class="money">Deductions</th>
 <th class="money">Net</th>
+<th>Late Days</th>
 <th>Open</th>
 </tr>
 </thead>
@@ -3498,7 +3955,7 @@ Outstanding:
 
 <?php if (!$history): ?>
 
-<tr><td colspan="9" class="empty">No payroll history found.</td></tr>
+<tr><td colspan="10" class="empty">No payroll history found.</td></tr>
 
 <?php else: ?>
 
@@ -3520,6 +3977,7 @@ $hy = (int)date('Y',strtotime($historyDate));
 <td class="money"><?= payroll_complete_money((float)$item['nhima']) ?></td>
 <td class="money"><?= payroll_complete_money((float)$item['deductions']) ?></td>
 <td class="money net"><?= payroll_complete_money((float)$item['net']) ?></td>
+<td><?= (int)($item['late_days'] ?? 0) ?></td>
 
 <td>
 <a
@@ -3683,6 +4141,29 @@ function toggleRemittance(id){
 
 function money(v){
     return 'K' + Number(v || 0).toLocaleString('en-ZM',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+function excuseDeduction(button,type){
+    const label=button.closest('label');
+    const input=label ? label.querySelector('input[name="'+(type==='loan'?'loan_deduction':'salary_advance')+'"]') : null;
+    if(!input) return;
+    if(!confirm('Excuse this '+(type==='loan'?'loan':'salary advance')+' installment for '+<?= json_encode($periodLabel) ?>+'? The unpaid balance will carry forward to the following month.')) return;
+    input.value='0';
+    const row=button.closest('tr');
+    calculatePayrollPreview(row);
+}
+function lowerDeduction(button,type){
+    const label=button.closest('label');
+    const input=label ? label.querySelector('input[name="'+(type==='loan'?'loan_deduction':'salary_advance')+'"]') : null;
+    if(!input) return;
+    const current=Number(input.value||0);
+    const amount=prompt('Enter the reduced '+(type==='loan'?'loan':'salary advance')+' deduction for this payroll period:', current.toFixed(2));
+    if(amount===null) return;
+    const value=Number(amount);
+    if(!Number.isFinite(value) || value<0 || value>current){alert('Enter a valid amount not greater than the current installment.');return;}
+    input.value=value.toFixed(2);
+    const row=button.closest('tr');
+    calculatePayrollPreview(row);
 }
 
 function calculatePayrollPreview(row){
