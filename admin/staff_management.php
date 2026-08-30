@@ -414,7 +414,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
              VALUES (?,?,?,?,?,?,?,0,?,'Active',0,1)"
         );
         $stmt->bind_param(
-            'issssis',
+            'isssssis',
             $pharmacyId,$username,$fullName,$email,$passwordHash,$role,
             $branchId,$profilePic
         );
