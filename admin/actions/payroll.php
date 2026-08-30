@@ -74,12 +74,13 @@ if (function_exists('require_login')) {
     require_login();
 }
 
-if (function_exists('require_admin')) {
-    require_admin();
-} elseif (($_SESSION['role'] ?? '') !== 'Admin') {
+$payrollRole = (string)($_SESSION['role'] ?? '');
+if (!in_array($payrollRole, ['Admin', 'Human Resource'], true)) {
     http_response_code(403);
-    exit('Access denied.');
+    exit('Access denied. Payroll is restricted to Admin and Human Resource.');
 }
+$isPayrollAdmin = ($payrollRole === 'Admin');
+$isPayrollHR = ($payrollRole === 'Human Resource');
 
 if (!isset($conn) || !($conn instanceof mysqli)) {
     http_response_code(500);
@@ -2041,6 +2042,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
 
     if ($action === 'approve') {
 
+        /* Final payroll approval is an ADMIN-only action. HR prepares and submits payroll. */
+        if (!$isPayrollAdmin) {
+            payroll_complete_redirect([
+                'month'=>$selectedMonth,
+                'year'=>$selectedYear,
+                'view'=>'payroll',
+                'error'=>'Only an Admin can give final payroll approval.'
+            ]);
+        }
+
         $records = payroll_complete_rows(
             $conn,
             "SELECT id, status FROM payroll_records
@@ -3575,9 +3586,9 @@ echo payroll_complete_h($initials ?: 'ST');
 <div style="font-size:9px;color:var(--muted);margin-bottom:5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?= payroll_complete_h($row['email']) ?>">
 <i class="fas fa-envelope"></i> <?= payroll_complete_h($row['email']) ?>
 <?php if (($row['payslip_email_status'] ?? 'pending') === 'sent'): ?>
-<span style="color:#08754f;font-weight:700;"> ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· SENT</span>
+<span style="color:#08754f;font-weight:700;"> ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· SENT</span>
 <?php elseif (($row['payslip_email_status'] ?? 'pending') === 'failed'): ?>
-<span style="color:#b42318;font-weight:700;"> ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· FAILED</span>
+<span style="color:#b42318;font-weight:700;"> ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· FAILED</span>
 <?php endif; ?>
 </div>
 <?php else: ?>
@@ -3831,7 +3842,7 @@ Employer cost:
 
 <div class="action-stack">
 
-<?php if ($periodStatus === 'calculated'): ?>
+<?php if ($periodStatus === 'calculated' && $isPayrollAdmin): ?>
 
 <form method="post" action="/admin/actions/payroll.php">
 <input type="hidden" name="action" value="approve">
@@ -4269,7 +4280,7 @@ Recalculate
 <?= payroll_complete_h(
     $remit['payment_reference']
     ?: $remit['return_reference']
-    ?: 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â'
+    ?: 'ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â'
 ) ?>
 </td>
 
