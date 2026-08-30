@@ -4,6 +4,7 @@ $user_role = $user_role ?? 'Admin';
 $user_display_name = $user_display_name ?? 'Administrator';
 $branch_count = (int)($branch_count ?? 0);
 $total_orders = (int)($total_orders ?? 0);
+$current_admin_page = basename((string)($_SERVER['PHP_SELF'] ?? ''));
 ?>
 <style>
 :root{
@@ -67,18 +68,18 @@ a{text-decoration:none;color:inherit}
     color:#8f9ba7;font-weight:800;padding:12px 11px 7px
 }
 .admin-aside .nav{display:flex;flex-direction:column;gap:3px}
-.admin-aside .nav a{
+.admin-aside .nav a,.admin-aside .nav .nav-parent{
     min-height:42px;border-radius:8px;color:#bdc6cf;display:flex;
     align-items:center;gap:11px;padding:0 12px;font-size:13px;
     font-weight:600;border:1px solid transparent
 }
-.admin-aside .nav a i{width:18px;text-align:center;color:#8996a3;font-size:13px}
-.admin-aside .nav a:hover{background:#2a3541;color:#fff}
-.admin-aside .nav a.active{
+.admin-aside .nav a i,.admin-aside .nav .nav-parent>i:first-child{width:18px;text-align:center;color:#8996a3;font-size:13px}
+.admin-aside .nav a:hover,.admin-aside .nav .nav-parent:hover{background:#2a3541;color:#fff}
+.admin-aside .nav a.active,.admin-aside .nav .nav-parent.active{
     background:#344253;border-color:#405166;color:#fff;
     box-shadow:inset 3px 0 var(--blue)
 }
-.admin-aside .nav a.active i{color:#70a0ff}
+.admin-aside .nav a.active i,.admin-aside .nav .nav-parent.active>i:first-child{color:#70a0ff}
 .admin-aside .nav-badge{
     margin-left:auto;background:#465363;color:#e5eaf0;
     border-radius:12px;padding:3px 7px;font-size:10px
@@ -116,6 +117,14 @@ a{text-decoration:none;color:inherit}
     display:flex;align-items:center;gap:9px;color:#f17a8b;
     font-size:11px;font-weight:700;padding:9px
 }
+.admin-aside .nav-group{display:flex;flex-direction:column;gap:2px}
+.admin-aside .nav-parent{width:100%;border:1px solid transparent;background:transparent;font:inherit;text-align:left;cursor:pointer}
+.admin-aside .nav-parent .nav-chevron{margin-left:auto;width:auto!important;color:#8996a3;font-size:10px;transition:transform .18s ease}
+.admin-aside .nav-parent.open .nav-chevron{transform:rotate(180deg)}
+.admin-aside .nav-subnav{display:flex;flex-direction:column;gap:2px;margin:0 0 3px 29px;padding-left:9px;border-left:1px solid #3a4652}
+.admin-aside .nav-subnav a{min-height:35px;padding:0 10px;font-size:11px;border-radius:7px}
+.admin-aside .nav-subnav a i{font-size:11px;width:15px}
+.admin-aside .nav-subnav a.active{background:#2c3947;border-color:#3b4a5a;box-shadow:inset 2px 0 var(--blue)}
 @media(max-width:900px){
     .admin-aside{
         width:250px;transform:translateX(-100%);transition:.22s;
@@ -137,11 +146,25 @@ a{text-decoration:none;color:inherit}
 
     <div class="side-caption">Workspace</div>
     <nav class="nav">
-        <a class="active" href="admin_dashboard.php"><i class="fas fa-chart-pie"></i>Dashboard</a>
+        <a class="<?= $current_admin_page === 'admin_dashboard.php' ? 'active' : '' ?>" href="admin_dashboard.php"><i class="fas fa-chart-pie"></i>Dashboard</a>
         <?php if ($user_role === 'Admin'): ?>
         <a href="staff_management.php"><i class="fas fa-users"></i>Staff Management</a>
         <a href="manage_setup.php"><i class="fas fa-sliders"></i>System Setup</a>
         <?php endif; ?>
+
+        <?php $payrollNavOpen = in_array($current_admin_page, ['payroll.php','loans_advances.php'], true); ?>
+        <div class="nav-group">
+            <button type="button" class="nav-parent <?= $payrollNavOpen ? 'open active' : '' ?>" id="payrollNavParent" aria-expanded="<?= $payrollNavOpen ? 'true' : 'false' ?>">
+                <i class="fas fa-file-invoice-dollar"></i>
+                <span>Payroll</span>
+                <i class="fas fa-chevron-down nav-chevron"></i>
+            </button>
+            <div class="nav-subnav" id="payrollNavSubnav" style="<?= $payrollNavOpen ? '' : 'display:none;' ?>">
+                <a class="<?= $current_admin_page === 'payroll.php' ? 'active' : '' ?>" href="payroll.php"><i class="fas fa-file-invoice"></i>Payroll Register</a>
+                <a class="<?= $current_admin_page === 'loans_advances.php' ? 'active' : '' ?>" href="loans_advances.php"><i class="fas fa-hand-holding-dollar"></i>Loans &amp; Advances</a>
+            </div>
+        </div>
+
         <a href="sales_report.php"><i class="fas fa-chart-line"></i>Sales Analytics</a>
         <a href="today_transactions.php"><i class="fas fa-receipt"></i>Transactions <span class="nav-badge"><?php echo (int)$total_orders; ?></span></a>
         <a href="online_orders.php"><i class="fas fa-bag-shopping"></i>Online Orders</a>
@@ -174,7 +197,7 @@ a{text-decoration:none;color:inherit}
             <div class="avatar"><?php echo strtoupper(substr($user_display_name ?: 'A', 0, 1)); ?></div>
             <div class="user-copy">
                 <b><?php echo htmlspecialchars($user_display_name); ?></b>
-                <span><?php echo htmlspecialchars($user_role); ?> · Administrator</span>
+                <span><?php echo htmlspecialchars($user_role); ?> Â· Administrator</span>
             </div>
             <i class="fas fa-ellipsis"></i>
         </div>
@@ -183,3 +206,16 @@ a{text-decoration:none;color:inherit}
         </a>
     </div>
 </aside>
+<script>
+(function(){
+    var parent=document.getElementById('payrollNavParent');
+    var sub=document.getElementById('payrollNavSubnav');
+    if(!parent || !sub) return;
+    parent.addEventListener('click',function(){
+        var open=sub.style.display!=='none';
+        sub.style.display=open?'none':'flex';
+        parent.classList.toggle('open',!open);
+        parent.setAttribute('aria-expanded',!open?'true':'false');
+    });
+})();
+</script>
