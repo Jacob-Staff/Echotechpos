@@ -75,8 +75,12 @@ CREATE TABLE IF NOT EXISTS employee_loans (
     first_repayment_month CHAR(7) NOT NULL,
     purpose VARCHAR(255) DEFAULT NULL,
     notes TEXT DEFAULT NULL,
-    status ENUM('Draft','Pending','Approved','Active','Completed','Rejected','Cancelled')
+    status ENUM('Draft','Pending','Approved','Active','Completed','Rejected','Cancelled','Written Off')
         NOT NULL DEFAULT 'Pending',
+    write_off_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    write_off_reason VARCHAR(255) DEFAULT NULL,
+    written_off_by VARCHAR(150) DEFAULT NULL,
+    written_off_at DATETIME DEFAULT NULL,
     approved_by VARCHAR(150) DEFAULT NULL,
     approved_at DATETIME DEFAULT NULL,
     created_by VARCHAR(150) DEFAULT NULL,
@@ -105,8 +109,12 @@ CREATE TABLE IF NOT EXISTS salary_advances (
     installment_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
     reason VARCHAR(255) DEFAULT NULL,
     notes TEXT DEFAULT NULL,
-    status ENUM('Draft','Pending','Approved','Active','Completed','Rejected','Cancelled')
+    status ENUM('Draft','Pending','Approved','Active','Completed','Rejected','Cancelled','Written Off')
         NOT NULL DEFAULT 'Pending',
+    write_off_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    write_off_reason VARCHAR(255) DEFAULT NULL,
+    written_off_by VARCHAR(150) DEFAULT NULL,
+    written_off_at DATETIME DEFAULT NULL,
     approved_by VARCHAR(150) DEFAULT NULL,
     approved_at DATETIME DEFAULT NULL,
     created_by VARCHAR(150) DEFAULT NULL,
@@ -144,6 +152,80 @@ if ($stmt) {
     $stmt->close();
 }
 
+
+/*
+|--------------------------------------------------------------------------
+| Write-off fields for existing installations
+|--------------------------------------------------------------------------
+| These ALTER statements only add missing columns / status value.
+| Existing loan and advance records are not recreated or deleted.
+*/
+foreach ([
+    'employee_loans' => [
+        'write_off_amount' => "ALTER TABLE employee_loans ADD COLUMN write_off_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER balance_amount",
+        'write_off_reason' => "ALTER TABLE employee_loans ADD COLUMN write_off_reason VARCHAR(255) DEFAULT NULL AFTER write_off_amount",
+        'written_off_by' => "ALTER TABLE employee_loans ADD COLUMN written_off_by VARCHAR(150) DEFAULT NULL AFTER write_off_reason",
+        'written_off_at' => "ALTER TABLE employee_loans ADD COLUMN written_off_at DATETIME DEFAULT NULL AFTER written_off_by",
+    ],
+    'salary_advances' => [
+        'write_off_amount' => "ALTER TABLE salary_advances ADD COLUMN write_off_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER balance_amount",
+        'write_off_reason' => "ALTER TABLE salary_advances ADD COLUMN write_off_reason VARCHAR(255) DEFAULT NULL AFTER write_off_amount",
+        'written_off_by' => "ALTER TABLE salary_advances ADD COLUMN written_off_by VARCHAR(150) DEFAULT NULL AFTER written_off_by",
+        'written_off_at' => "ALTER TABLE salary_advances ADD COLUMN written_off_at DATETIME DEFAULT NULL AFTER written_off_by",
+    ],
+] as $table => $columns) {
+    foreach ($columns as $column => $alterSql) {
+        $existsStmt = $conn->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+        ");
+        if ($existsStmt) {
+            $existsStmt->bind_param('ss', $table, $column);
+            $existsStmt->execute();
+            $existsStmt->bind_result($columnCount);
+            $existsStmt->fetch();
+            $existsStmt->close();
+
+            if ((int)$columnCount === 0) {
+                @$conn->query($alterSql);
+            }
+        }
+    }
+}
+
+/* Add Written Off to the existing ENUM only if it is not already present. */
+foreach (['employee_loans', 'salary_advances'] as $table) {
+    $statusStmt = $conn->prepare("
+        SELECT COLUMN_TYPE
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?
+          AND COLUMN_NAME = 'status'
+        LIMIT 1
+    ");
+
+    if ($statusStmt) {
+        $statusStmt->bind_param('s', $table);
+        $statusStmt->execute();
+        $statusStmt->bind_result($columnType);
+        $statusStmt->fetch();
+        $statusStmt->close();
+
+        if (strpos((string)$columnType, "'Written Off'") === false && strpos((string)$columnType, 'enum(') === 0) {
+            $newEnum = str_replace(
+                "enum(",
+                "ENUM(",
+                (string)$columnType
+            );
+            $newEnum = rtrim($newEnum, ')') . ",'Written Off')";
+            @$conn->query("ALTER TABLE {$table} MODIFY status {$newEnum} NOT NULL DEFAULT 'Pending'");
+        }
+    }
+}
+
 /*
 |--------------------------------------------------------------------------
 | POST actions
@@ -151,6 +233,137 @@ if ($stmt) {
 */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
+    /* ============================================================
+       WRITE OFF LOAN
+       Clears ONLY the remaining balance and records who/why.
+    ============================================================ */
+    if ($action === 'write_off_loan') {
+        $id = (int)($_POST['id'] ?? 0);
+        $reason = trim((string)($_POST['reason'] ?? ''));
+
+        if ($id <= 0 || $reason === '') {
+            la_redirect('', 'A valid loan and a write-off reason are required.');
+        }
+
+        $stmt = $conn->prepare("
+            SELECT balance_amount, status
+            FROM employee_loans
+            WHERE id = ? AND pharmacy_id = ?
+            LIMIT 1
+        ");
+        if (!$stmt) {
+            la_redirect('', 'Could not read the loan.');
+        }
+
+        $stmt->bind_param('ii', $id, $pharmacyId);
+        $stmt->execute();
+        $loan = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$loan) {
+            la_redirect('', 'Loan not found.');
+        }
+
+        if (!in_array($loan['status'], ['Approved','Active'], true)) {
+            la_redirect('', 'Only an Approved or Active loan can be written off.');
+        }
+
+        $balance = max(0.00, (float)$loan['balance_amount']);
+
+        $stmt = $conn->prepare("
+            UPDATE employee_loans
+            SET
+                write_off_amount = ?,
+                write_off_reason = ?,
+                written_off_by = ?,
+                written_off_at = NOW(),
+                balance_amount = 0.00,
+                status = 'Written Off'
+            WHERE id = ?
+              AND pharmacy_id = ?
+              AND status IN ('Approved','Active')
+        ");
+
+        if (!$stmt) {
+            la_redirect('', 'Could not write off the loan.');
+        }
+
+        $stmt->bind_param('dssii', $balance, $reason, $userName, $id, $pharmacyId);
+        $ok = $stmt->execute();
+        $changed = $stmt->affected_rows;
+        $stmt->close();
+
+        la_redirect(
+            ($ok && $changed > 0) ? 'Loan written off successfully. The remaining balance has been cleared.' : '',
+            ($ok && $changed > 0) ? '' : 'The loan could not be written off. It may already have been processed.'
+        );
+    }
+
+    /* ============================================================
+       WRITE OFF SALARY ADVANCE
+    ============================================================ */
+    if ($action === 'write_off_advance') {
+        $id = (int)($_POST['id'] ?? 0);
+        $reason = trim((string)($_POST['reason'] ?? ''));
+
+        if ($id <= 0 || $reason === '') {
+            la_redirect('', 'A valid salary advance and a write-off reason are required.');
+        }
+
+        $stmt = $conn->prepare("
+            SELECT balance_amount, status
+            FROM salary_advances
+            WHERE id = ? AND pharmacy_id = ?
+            LIMIT 1
+        ");
+        if (!$stmt) {
+            la_redirect('', 'Could not read the salary advance.');
+        }
+
+        $stmt->bind_param('ii', $id, $pharmacyId);
+        $stmt->execute();
+        $advance = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$advance) {
+            la_redirect('', 'Salary advance not found.');
+        }
+
+        if (!in_array($advance['status'], ['Approved','Active'], true)) {
+            la_redirect('', 'Only an Approved or Active salary advance can be written off.');
+        }
+
+        $balance = max(0.00, (float)$advance['balance_amount']);
+
+        $stmt = $conn->prepare("
+            UPDATE salary_advances
+            SET
+                write_off_amount = ?,
+                write_off_reason = ?,
+                written_off_by = ?,
+                written_off_at = NOW(),
+                balance_amount = 0.00,
+                status = 'Written Off'
+            WHERE id = ?
+              AND pharmacy_id = ?
+              AND status IN ('Approved','Active')
+        ");
+
+        if (!$stmt) {
+            la_redirect('', 'Could not write off the salary advance.');
+        }
+
+        $stmt->bind_param('dssii', $balance, $reason, $userName, $id, $pharmacyId);
+        $ok = $stmt->execute();
+        $changed = $stmt->affected_rows;
+        $stmt->close();
+
+        la_redirect(
+            ($ok && $changed > 0) ? 'Salary advance written off successfully. The remaining balance has been cleared.' : '',
+            ($ok && $changed > 0) ? '' : 'The salary advance could not be written off. It may already have been processed.'
+        );
+    }
+
 
     if ($action === 'create_loan') {
         $staffId = (int)($_POST['staff_id'] ?? 0);
@@ -638,6 +851,8 @@ tr:last-child td{border-bottom:0}
 .modal-foot{padding:14px 20px;border-top:1px solid #e7ebee;display:flex;justify-content:flex-end;gap:8px}
 @media(max-width:1100px){.cards{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:800px){.main{margin-left:0}.page{padding:18px}.heading{flex-direction:column}.cards{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.toolbar{flex-direction:column;align-items:stretch}.search{max-width:none}}
+
+.badge.Written-Off{background:#eef0f3;color:#58636d}
 </style>
 </head>
 <body>
@@ -697,13 +912,18 @@ tr:last-child td{border-bottom:0}
         <a class="tab <?= $tab === 'advances' ? 'active' : '' ?>" href="?tab=advances"><i class="fa-solid fa-hand-holding-dollar"></i> Salary Advances</a>
     </div>
 
-    <div class="toolbar">
+    <div style="margin:0 0 12px;padding:10px 12px;border:1px solid #dfe6ec;border-radius:8px;background:#fff;font-size:11px;color:#65727d;line-height:1.5;">
+    <strong>Repayment controls:</strong> Use <strong>Payroll</strong> to excuse or lower the current month's scheduled installment.
+    Use <strong>Write Off</strong> only when Admin decides the remaining debt should be permanently cleared.
+</div>
+
+<div class="toolbar">
         <form class="search" method="get">
             <input type="hidden" name="tab" value="<?= la_esc($tab) ?>">
             <input type="text" name="q" value="<?= la_esc($search) ?>" placeholder="Search employee or reference...">
             <select name="status">
                 <option value="">All Statuses</option>
-                <?php foreach (['Pending','Approved','Active','Completed','Cancelled','Rejected','Draft'] as $s): ?>
+                <?php foreach (['Pending','Approved','Active','Completed','Written Off','Cancelled','Rejected','Draft'] as $s): ?>
                     <option value="<?= $s ?>" <?= $statusFilter === $s ? 'selected' : '' ?>><?= $s ?></option>
                 <?php endforeach; ?>
             </select>
@@ -760,10 +980,19 @@ tr:last-child td{border-bottom:0}
                                     <button class="btn danger" type="submit" title="Cancel"><i class="fa-solid fa-xmark"></i></button>
                                 </form>
                             <?php else: ?>
-                                <span class="muted">â€”</span>
+                                <span class="muted">—</span>
                             <?php endif; ?>
                             <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
-                                <a class="btn" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Manage current payroll deduction"><i class="fa-solid fa-calculator"></i></a>
+                                <a class="btn" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Excuse or lower this month's repayment in Payroll"><i class="fa-solid fa-calculator"></i></a>
+                            <?php endif; ?>
+
+                            <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
+                                <button class="btn danger"
+                                        type="button"
+                                        title="Write off remaining loan balance"
+                                        onclick="openWriteOff('write_off_loan', <?= (int)$row['id'] ?>, 'Loan <?= la_esc($row['loan_number']) ?>')">
+                                    <i class="fa-solid fa-file-circle-xmark"></i>
+                                </button>
                             <?php endif; ?>
                             </div>
                         </td>
@@ -817,10 +1046,19 @@ tr:last-child td{border-bottom:0}
                                     <button class="btn danger" type="submit" title="Cancel"><i class="fa-solid fa-xmark"></i></button>
                                 </form>
                             <?php else: ?>
-                                <span class="muted">â€”</span>
+                                <span class="muted">—</span>
                             <?php endif; ?>
                             <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
-                                <a class="btn" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Manage current payroll deduction"><i class="fa-solid fa-calculator"></i></a>
+                                <a class="btn" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Excuse or lower this month's repayment in Payroll"><i class="fa-solid fa-calculator"></i></a>
+                            <?php endif; ?>
+
+                            <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
+                                <button class="btn danger"
+                                        type="button"
+                                        title="Write off remaining salary advance balance"
+                                        onclick="openWriteOff('write_off_advance', <?= (int)$row['id'] ?>, 'Advance <?= la_esc($row['advance_number']) ?>')">
+                                    <i class="fa-solid fa-file-circle-xmark"></i>
+                                </button>
                             <?php endif; ?>
                             </div>
                         </td>
@@ -852,7 +1090,7 @@ tr:last-child td{border-bottom:0}
                         <option value="">Select employee</option>
                         <?php foreach ($staff as $s): ?>
                             <option value="<?= (int)$s['id'] ?>">
-                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' â€” ' . $s['role']) ?>
+                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' — ' . $s['role']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -912,7 +1150,7 @@ tr:last-child td{border-bottom:0}
                         <option value="">Select employee</option>
                         <?php foreach ($staff as $s): ?>
                             <option value="<?= (int)$s['id'] ?>">
-                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' â€” ' . $s['role']) ?>
+                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' — ' . $s['role']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -958,5 +1196,100 @@ window.addEventListener('click',function(e){
     if(e.target.classList.contains('modal')) e.target.classList.remove('show');
 });
 </script>
+
+<!-- ============================================================
+     ADMIN WRITE-OFF MODAL
+============================================================ -->
+<div class="modal" id="writeOffModal">
+    <div class="modal-box" style="max-width:520px;">
+        <div class="modal-head">
+            <h2><i class="fa-solid fa-file-circle-xmark"></i> Write Off</h2>
+            <button class="close" type="button" onclick="closeWriteOff()">&times;</button>
+        </div>
+
+        <form method="post" onsubmit="return confirmWriteOff();">
+            <input type="hidden" name="action" id="writeOffAction">
+            <input type="hidden" name="id" id="writeOffId">
+
+            <div style="padding:18px 20px;">
+                <div id="writeOffTarget"
+                     style="margin-bottom:13px;padding:10px 12px;background:#f7f9fb;border:1px solid #e0e6eb;border-radius:7px;font-size:12px;font-weight:700;color:#293641;">
+                </div>
+
+                <label style="display:block;font-size:10px;font-weight:800;color:#66737d;margin-bottom:5px;">
+                    REASON FOR WRITE-OFF
+                </label>
+
+                <textarea name="reason"
+                          id="writeOffReason"
+                          required
+                          maxlength="255"
+                          style="width:100%;min-height:90px;border:1px solid #d6dee5;border-radius:7px;padding:10px;font:inherit;font-size:12px;resize:vertical;"
+                          placeholder="Enter the reason for writing off the remaining balance..."></textarea>
+
+                <div style="margin-top:8px;font-size:10px;color:#7b8790;line-height:1.5;">
+                    <strong>Important:</strong> Writing off clears the remaining balance permanently and marks the record
+                    <strong>Written Off</strong>. The amount, reason, administrator and date are recorded.
+                </div>
+            </div>
+
+            <div class="modal-foot">
+                <button class="btn" type="button" onclick="closeWriteOff()">Cancel</button>
+                <button class="btn danger" type="submit">
+                    <i class="fa-solid fa-file-circle-xmark"></i> Confirm Write-Off
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openWriteOff(action, id, label) {
+    const modal = document.getElementById('writeOffModal');
+    const actionInput = document.getElementById('writeOffAction');
+    const idInput = document.getElementById('writeOffId');
+    const target = document.getElementById('writeOffTarget');
+    const reason = document.getElementById('writeOffReason');
+
+    if (!modal || !actionInput || !idInput) return;
+
+    actionInput.value = action;
+    idInput.value = id;
+    target.textContent = label;
+    reason.value = '';
+
+    modal.classList.add('show');
+
+    setTimeout(function () {
+        reason.focus();
+    }, 50);
+}
+
+function closeWriteOff() {
+    const modal = document.getElementById('writeOffModal');
+    if (modal) modal.classList.remove('show');
+}
+
+function confirmWriteOff() {
+    return confirm(
+        'Are you sure you want to write off this remaining balance? This action will permanently clear the outstanding balance.'
+    );
+}
+
+document.addEventListener('click', function (event) {
+    const modal = document.getElementById('writeOffModal');
+
+    if (modal && event.target === modal) {
+        closeWriteOff();
+    }
+});
+
+document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+        closeWriteOff();
+    }
+});
+</script>
+
 </body>
 </html>
