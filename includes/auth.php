@@ -267,6 +267,28 @@ function require_admin(): void
     }
 }
 
+/**
+ * Human Resource / Management portal access.
+ *
+ * IMPORTANT:
+ * This is intentionally separate from require_admin().
+ * HR is allowed into HR/Employee Management without receiving
+ * unrestricted Admin-only access.
+ */
+function require_hr_portal(): void
+{
+    require_login();
+
+    $role = trim((string)(current_role() ?? ''));
+
+    if (!in_array($role, ['Admin', 'Manager', 'Human Resource'], true)) {
+        http_response_code(403);
+        render_denied_message(
+            'This area is restricted to Human Resource, Administrative and Management staff.'
+        );
+    }
+}
+
 function require_user(): void
 {
     require_login();
