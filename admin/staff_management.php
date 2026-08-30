@@ -85,6 +85,78 @@ function ensure_column(mysqli $conn, string $table, string $column, string $defi
 ensure_column($conn, 'users', 'is_frozen', 'TINYINT(1) NOT NULL DEFAULT 0');
 ensure_column($conn, 'users', 'is_online_visible', 'TINYINT(1) NOT NULL DEFAULT 1');
 
+/*
+ * Human Resource role compatibility.
+ * Some older EchoTech databases use ENUM for users.role and do not yet
+ * contain 'Human Resource'. Do not replace the role column blindly.
+ * If it is an ENUM, preserve every existing value and append the HR role.
+ */
+(function () use ($conn): void {
+    $result = $conn->query(
+        "SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, CHARACTER_SET_NAME, COLLATION_NAME
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA=DATABASE()
+           AND TABLE_NAME='users'
+           AND COLUMN_NAME='role'
+         LIMIT 1"
+    );
+
+    if (!$result || !$row = $result->fetch_assoc()) {
+        return;
+    }
+
+    $columnType = (string)($row['COLUMN_TYPE'] ?? '');
+
+    if (stripos($columnType, 'enum(') !== 0) {
+        return;
+    }
+
+    /* Parse existing ENUM values without losing any legacy roles. */
+    preg_match_all("/'((?:[^'\\\\]|\\\\.)*)'/", $columnType, $matches);
+    $enumValues = $matches[1] ?? [];
+
+    $decoded = [];
+    foreach ($enumValues as $value) {
+        $decoded[] = str_replace(["\\\\'", "\\\\\\\\"], ["'", "\\"], $value);
+    }
+
+    if (in_array('Human Resource', $decoded, true)) {
+        return;
+    }
+
+    $decoded[] = 'Human Resource';
+
+    $quoted = [];
+    foreach ($decoded as $value) {
+        $quoted[] = "'" . $conn->real_escape_string($value) . "'";
+    }
+
+    $nullable = strtoupper((string)$row['IS_NULLABLE']) === 'YES' ? 'NULL' : 'NOT NULL';
+
+    $defaultSql = '';
+    if ($row['COLUMN_DEFAULT'] !== null) {
+        $defaultSql = " DEFAULT '" . $conn->real_escape_string((string)$row['COLUMN_DEFAULT']) . "'";
+    }
+
+    $charsetSql = '';
+    if (!empty($row['CHARACTER_SET_NAME'])) {
+        $charsetSql = " CHARACTER SET " . preg_replace('/[^a-zA-Z0-9_]/', '', (string)$row['CHARACTER_SET_NAME']);
+    }
+
+    $collationSql = '';
+    if (!empty($row['COLLATION_NAME'])) {
+        $collationSql = " COLLATE " . preg_replace('/[^a-zA-Z0-9_]/', '', (string)$row['COLLATION_NAME']);
+    }
+
+    $alterSql =
+        "ALTER TABLE `users` MODIFY COLUMN `role` ENUM(" .
+        implode(',', $quoted) .
+        "){$charsetSql}{$collationSql} {$nullable}{$defaultSql}";
+
+    $conn->query($alterSql);
+})();
+
+
 /* ------------------------- CSRF ------------------------- */
 
 if (empty($_SESSION['staff_csrf'])) {
