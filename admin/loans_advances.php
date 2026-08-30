@@ -130,6 +130,33 @@ CREATE TABLE IF NOT EXISTS salary_advances (
 
 /*
 |--------------------------------------------------------------------------
+| Payroll deduction overrides
+|--------------------------------------------------------------------------
+| Period-specific override. An excuse sets only that payroll period to zero;
+| the outstanding balance remains and is collected in a later eligible month.
+*/
+$conn->query("
+CREATE TABLE IF NOT EXISTS payroll_deduction_overrides (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pharmacy_id INT UNSIGNED NOT NULL,
+    staff_id INT UNSIGNED NOT NULL,
+    payroll_period CHAR(7) NOT NULL,
+    deduction_type ENUM('loan','advance') NOT NULL,
+    scheduled_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    override_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    reason VARCHAR(255) DEFAULT NULL,
+    created_by VARCHAR(150) DEFAULT NULL,
+    updated_by VARCHAR(150) DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_payroll_deduction_override (pharmacy_id, staff_id, payroll_period, deduction_type),
+    KEY idx_payroll_deduction_staff (pharmacy_id, staff_id, payroll_period)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+");
+
+/*
+|--------------------------------------------------------------------------
 | Staff source
 |--------------------------------------------------------------------------
 | The current POS database uses users as the staff/employee source.
@@ -233,6 +260,139 @@ foreach (['employee_loans', 'salary_advances'] as $table) {
 */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
+    /* ============================================================
+       EXCUSE / LOWER NEXT INSTALLMENT
+       This is available directly from Loans & Advances.
+       It targets the next eligible payroll period and never changes a
+       payroll period that has already been paid/locked.
+    ============================================================ */
+    if ($action === 'override_next_repayment') {
+        $id = (int)($_POST['id'] ?? 0);
+        $kind = (string)($_POST['deduction_type'] ?? '');
+        $requestedAmount = max(0, (float)($_POST['override_amount'] ?? 0));
+
+        if ($id <= 0 || !in_array($kind, ['loan', 'advance'], true)) {
+            la_redirect('', 'Invalid repayment override request.');
+        }
+
+        $table = $kind === 'loan' ? 'employee_loans' : 'salary_advances';
+        $monthColumn = $kind === 'loan' ? 'first_repayment_month' : 'repayment_month';
+
+        $stmt = $conn->prepare("
+            SELECT staff_id, installment_amount, balance_amount, status, {$monthColumn} AS first_period
+            FROM {$table}
+            WHERE id = ? AND pharmacy_id = ?
+            LIMIT 1
+        ");
+        if (!$stmt) la_redirect('', 'Could not read the repayment record.');
+
+        $stmt->bind_param('ii', $id, $pharmacyId);
+        $stmt->execute();
+        $record = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$record) {
+            la_redirect('', 'Repayment record not found.');
+        }
+
+        if (!in_array((string)$record['status'], ['Approved', 'Active'], true)) {
+            la_redirect('', 'Only an Approved or Active repayment can be excused or lowered.');
+        }
+
+        $scheduledAmount = min(
+            max(0, (float)$record['installment_amount']),
+            max(0, (float)$record['balance_amount'])
+        );
+
+        if ($scheduledAmount <= 0) {
+            la_redirect('', 'There is no outstanding installment to override.');
+        }
+
+        $currentPeriod = date('Y-m');
+        $firstPeriod = preg_match('/^\d{4}-\d{2}$/', (string)$record['first_period'])
+            ? (string)$record['first_period']
+            : $currentPeriod;
+
+        $targetPeriod = max($firstPeriod, $currentPeriod);
+
+        // If this employee's target payroll has already been paid/locked,
+        // target the following month instead.
+        if (la_table_exists($conn, 'payroll_records')) {
+            $paidStmt = $conn->prepare("
+                SELECT status
+                FROM payroll_records
+                WHERE pharmacy_id = ? AND staff_id = ? AND payroll_period = ?
+                ORDER BY id DESC
+                LIMIT 1
+            ");
+            if ($paidStmt) {
+                $staffId = (int)$record['staff_id'];
+                $paidStmt->bind_param('iis', $pharmacyId, $staffId, $targetPeriod);
+                $paidStmt->execute();
+                $paidRow = $paidStmt->get_result()->fetch_assoc();
+                $paidStmt->close();
+
+                if ($paidRow && in_array(strtolower((string)$paidRow['status']), ['paid', 'locked'], true)) {
+                    $next = DateTimeImmutable::createFromFormat('Y-m-d', $targetPeriod . '-01');
+                    if ($next) {
+                        $targetPeriod = $next->modify('+1 month')->format('Y-m');
+                    }
+                }
+            }
+        }
+
+        $overrideAmount = min($requestedAmount, $scheduledAmount);
+        $reason = $overrideAmount <= 0
+            ? ucfirst($kind) . ' installment excused for ' . $targetPeriod . '.'
+            : ucfirst($kind) . ' installment lowered for ' . $targetPeriod . '.';
+
+        $stmt = $conn->prepare("
+            INSERT INTO payroll_deduction_overrides
+                (pharmacy_id, staff_id, payroll_period, deduction_type,
+                 scheduled_amount, override_amount, reason, created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                scheduled_amount = VALUES(scheduled_amount),
+                override_amount = VALUES(override_amount),
+                reason = VALUES(reason),
+                updated_by = VALUES(updated_by),
+                updated_at = CURRENT_TIMESTAMP
+        ");
+        if (!$stmt) {
+            la_redirect('', 'Could not prepare the repayment override: ' . $conn->error);
+        }
+
+        $staffId = (int)$record['staff_id'];
+        $stmt->bind_param(
+            'iissddsss',
+            $pharmacyId,
+            $staffId,
+            $targetPeriod,
+            $kind,
+            $scheduledAmount,
+            $overrideAmount,
+            $reason,
+            $userName,
+            $userName
+        );
+
+        $ok = $stmt->execute();
+        $msg = $stmt->error;
+        $stmt->close();
+
+        if (!$ok) {
+            la_redirect('', 'Could not save the repayment override: ' . $msg);
+        }
+
+        $label = $kind === 'loan' ? 'Loan' : 'Salary advance';
+
+        if ($overrideAmount <= 0) {
+            la_redirect($label . ' installment for ' . $targetPeriod . ' has been excused. The unpaid balance will carry forward.');
+        }
+
+        la_redirect($label . ' installment for ' . $targetPeriod . ' lowered to ' . la_money($overrideAmount) . '. The unpaid balance will carry forward.');
+    }
+
     /* ============================================================
        WRITE OFF LOAN
        Clears ONLY the remaining balance and records who/why.
@@ -853,6 +1013,8 @@ tr:last-child td{border-bottom:0}
 @media(max-width:800px){.main{margin-left:0}.page{padding:18px}.heading{flex-direction:column}.cards{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.toolbar{flex-direction:column;align-items:stretch}.search{max-width:none}}
 
 .badge.Written-Off{background:#eef0f3;color:#58636d}
+
+.repayment-control{white-space:nowrap;font-size:11px!important;font-weight:700;}
 </style>
 </head>
 <body>
@@ -982,8 +1144,20 @@ tr:last-child td{border-bottom:0}
                             <?php else: ?>
                                 <span class="muted">â€”</span>
                             <?php endif; ?>
-                            <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
-                                <a class="btn" href="payroll.php?view=payroll&month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>&search=<?= urlencode((string)$row['staff_name']) ?>" title="Open this employee's payroll to excuse or lower the current repayment"><i class="fa-solid fa-ban"></i> Excuse / Lower</a>
+                            <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
+                                <form class="inline" method="post" onsubmit="return confirm('Excuse the next loan installment? The unpaid amount will carry forward to the following payroll.');">
+                                    <input type="hidden" name="action" value="override_next_repayment">
+                                    <input type="hidden" name="id" value="<?= (int)$row['id'] ?>">
+                                    <input type="hidden" name="deduction_type" value="loan">
+                                    <input type="hidden" name="override_amount" value="0">
+                                    <button class="btn repayment-control" type="submit" title="Excuse the next loan installment">
+                                        <i class="fa-solid fa-ban"></i> Excuse Loan
+                                    </button>
+                                </form>
+                                <button class="btn repayment-control" type="button" title="Lower the next loan installment"
+                                        onclick="lowerNextRepayment(<?= (int)$row['id'] ?>,'loan',<?= (float)$row['installment_amount'] ?>)">
+                                    <i class="fa-solid fa-arrow-down"></i> Lower
+                                </button>
                             <?php endif; ?>
 
                             <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
@@ -1048,8 +1222,20 @@ tr:last-child td{border-bottom:0}
                             <?php else: ?>
                                 <span class="muted">â€”</span>
                             <?php endif; ?>
-                            <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
-                                <a class="btn" href="payroll.php?view=payroll&month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>&search=<?= urlencode((string)$row['staff_name']) ?>" title="Open this employee's payroll to excuse or lower the current repayment"><i class="fa-solid fa-ban"></i> Excuse / Lower</a>
+                            <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
+                                <form class="inline" method="post" onsubmit="return confirm('Excuse the next salary advance installment? The unpaid amount will carry forward to the following payroll.');">
+                                    <input type="hidden" name="action" value="override_next_repayment">
+                                    <input type="hidden" name="id" value="<?= (int)$row['id'] ?>">
+                                    <input type="hidden" name="deduction_type" value="advance">
+                                    <input type="hidden" name="override_amount" value="0">
+                                    <button class="btn repayment-control" type="submit" title="Excuse the next salary advance installment">
+                                        <i class="fa-solid fa-ban"></i> Excuse Advance
+                                    </button>
+                                </form>
+                                <button class="btn repayment-control" type="button" title="Lower the next salary advance installment"
+                                        onclick="lowerNextRepayment(<?= (int)$row['id'] ?>,'advance',<?= (float)$row['installment_amount'] ?>)">
+                                    <i class="fa-solid fa-arrow-down"></i> Lower
+                                </button>
                             <?php endif; ?>
 
                             <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
@@ -1244,6 +1430,47 @@ window.addEventListener('click',function(e){
 </div>
 
 <script>
+function lowerNextRepayment(id, type, installment) {
+    const label = type === 'loan' ? 'loan' : 'salary advance';
+    const amount = prompt(
+        'Enter the reduced next ' + label + ' installment:',
+        Number(installment || 0).toFixed(2)
+    );
+    if (amount === null) return;
+
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value < 0 || value > Number(installment || 0)) {
+        alert('Enter a valid amount not greater than the installment.');
+        return;
+    }
+
+    if (!confirm(
+        'Lower the next ' + label + ' installment to K' +
+        value.toFixed(2) + '? The unpaid balance will carry forward.'
+    )) return;
+
+    const form = document.createElement('form');
+    form.method = 'post';
+
+    const fields = {
+        action: 'override_next_repayment',
+        id: String(id),
+        deduction_type: type,
+        override_amount: value.toFixed(2)
+    };
+
+    Object.keys(fields).forEach(function(name) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = fields[name];
+        form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+    form.submit();
+}
+
 function openWriteOff(action, id, label) {
     const modal = document.getElementById('writeOffModal');
     const actionInput = document.getElementById('writeOffAction');
