@@ -203,6 +203,25 @@ function payroll_complete_rows(
     return $rows;
 }
 
+
+/* ---------- Company-level recurring salary payment setting ---------- */
+if (isset($conn) && $conn instanceof mysqli) {
+    @$conn->query("
+        CREATE TABLE IF NOT EXISTS payroll_payment_settings (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            pharmacy_id INT NOT NULL,
+            payment_day TINYINT UNSIGNED NOT NULL DEFAULT 30,
+            created_by VARCHAR(150) DEFAULT NULL,
+            updated_by VARCHAR(150) DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_payroll_payment_settings_pharmacy (pharmacy_id),
+            KEY idx_payroll_payment_settings_day (payment_day)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ");
+}
+
 /* ---------- Payroll date / loan & advance helpers ---------- */
 
 function payroll_complete_valid_period(string $period): bool {
@@ -213,6 +232,32 @@ function payroll_complete_last_day_of_period(string $period): string {
     $d = DateTimeImmutable::createFromFormat('Y-m-d', $period . '-01');
     if (!$d) return date('Y-m-d');
     return $d->modify('last day of this month')->format('Y-m-d');
+}
+
+/**
+ * Return the scheduled salary payment date for a payroll period using the
+ * company's recurring payment day. Days that do not exist in a month use the
+ * month's last calendar day (e.g. day 31 in February).
+ */
+function payroll_complete_monthly_payment_date(string $period, int $paymentDay): string {
+    if (!payroll_complete_valid_period($period)) {
+        return date('Y-m-d');
+    }
+
+    $paymentDay = max(1, min(31, $paymentDay));
+    $first = DateTimeImmutable::createFromFormat('Y-m-d', $period . '-01');
+    if (!$first) {
+        return date('Y-m-d');
+    }
+
+    $lastDay = (int)$first->format('t');
+    $actualDay = min($paymentDay, $lastDay);
+
+    return $first->setDate(
+        (int)$first->format('Y'),
+        (int)$first->format('m'),
+        $actualDay
+    )->format('Y-m-d');
 }
 
 function payroll_complete_repayment_amount(
