@@ -15,7 +15,13 @@ session_start();
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/conn.php';
 
-require_admin();
+$loanRole = (string)($_SESSION['role'] ?? '');
+if (!in_array($loanRole, ['Admin', 'Human Resource'], true)) {
+    http_response_code(403);
+    exit('Access denied. Loans & Advances are restricted to Admin and Human Resource.');
+}
+$isLoanAdmin = ($loanRole === 'Admin');
+$isLoanHR = ($loanRole === 'Human Resource');
 
 $pharmacyId = (int)($_SESSION['pharmacy_id'] ?? 0);
 $branchId   = (int)($_SESSION['branch_id'] ?? ($_SESSION['current_branch_id'] ?? 0));
@@ -398,6 +404,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
        Clears ONLY the remaining balance and records who/why.
     ============================================================ */
     if ($action === 'write_off_loan') {
+        if (!$isLoanAdmin) {
+            la_redirect('', 'Only an Admin can write off a loan or salary advance.');
+        }
         $id = (int)($_POST['id'] ?? 0);
         $reason = trim((string)($_POST['reason'] ?? ''));
 
@@ -463,6 +472,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
        WRITE OFF SALARY ADVANCE
     ============================================================ */
     if ($action === 'write_off_advance') {
+        if (!$isLoanAdmin) {
+            la_redirect('', 'Only an Admin can write off a loan or salary advance.');
+        }
         $id = (int)($_POST['id'] ?? 0);
         $reason = trim((string)($_POST['reason'] ?? ''));
 
@@ -709,6 +721,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'approve_loan') {
+        if (!$isLoanAdmin) {
+            la_redirect('', 'Only an Admin can approve employee loans.');
+        }
         $id = (int)($_POST['id'] ?? 0);
 
         $stmt = $conn->prepare("
@@ -729,6 +744,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'approve_advance') {
+        if (!$isLoanAdmin) {
+            la_redirect('', 'Only an Admin can approve salary advances.');
+        }
         $id = (int)($_POST['id'] ?? 0);
 
         $stmt = $conn->prepare("
@@ -1142,7 +1160,7 @@ tr:last-child td{border-bottom:0}
                                     <button class="btn danger" type="submit" title="Cancel"><i class="fa-solid fa-xmark"></i></button>
                                 </form>
                             <?php else: ?>
-                                <span class="muted">â€”</span>
+                                <span class="muted">Ã¢â‚¬â€</span>
                             <?php endif; ?>
                             <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
                                 <form class="inline" method="post" onsubmit="return confirm('Excuse the next loan installment? The unpaid amount will carry forward to the following payroll.');">
@@ -1220,7 +1238,7 @@ tr:last-child td{border-bottom:0}
                                     <button class="btn danger" type="submit" title="Cancel"><i class="fa-solid fa-xmark"></i></button>
                                 </form>
                             <?php else: ?>
-                                <span class="muted">â€”</span>
+                                <span class="muted">Ã¢â‚¬â€</span>
                             <?php endif; ?>
                             <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
                                 <form class="inline" method="post" onsubmit="return confirm('Excuse the next salary advance installment? The unpaid amount will carry forward to the following payroll.');">
@@ -1276,7 +1294,7 @@ tr:last-child td{border-bottom:0}
                         <option value="">Select employee</option>
                         <?php foreach ($staff as $s): ?>
                             <option value="<?= (int)$s['id'] ?>">
-                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' â€” ' . $s['role']) ?>
+                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' Ã¢â‚¬â€ ' . $s['role']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -1336,7 +1354,7 @@ tr:last-child td{border-bottom:0}
                         <option value="">Select employee</option>
                         <?php foreach ($staff as $s): ?>
                             <option value="<?= (int)$s['id'] ?>">
-                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' â€” ' . $s['role']) ?>
+                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' Ã¢â‚¬â€ ' . $s['role']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
