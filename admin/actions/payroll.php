@@ -3311,7 +3311,6 @@ Print
             <div class="salary-schedule-note">Monthly rule: salaries are scheduled for the <strong><?= (int)$salaryPaymentDay ?><?= ($salaryPaymentDay % 100 >= 11 && $salaryPaymentDay % 100 <= 13) ? 'th' : (($salaryPaymentDay % 10 === 1) ? 'st' : (($salaryPaymentDay % 10 === 2) ? 'nd' : (($salaryPaymentDay % 10 === 3) ? 'rd' : 'th'))) ?> of every month</strong>. <?= $salaryPaymentDay > (int)$salaryPaymentDateObject->format('j') ? 'For months shorter than that day, the last calendar day is used.' : 'This month is scheduled for <strong>'.$salaryPaymentDateObject->format('d M Y').'</strong>.' ?></div>
         <?php endif; ?>
     </div>
-    <?php if (!$salaryPaymentIsPaid): ?>
     <form method="post" class="salary-date-form">
         <input type="hidden" name="action" value="save_salary_payment_date">
         <input type="hidden" name="month" value="<?= $selectedMonth ?>">
@@ -3325,9 +3324,8 @@ Print
             </select>
             <button class="btn primary" type="submit"><i class="fas fa-save"></i> Save Monthly Rule</button>
         </div>
-        <small class="field-help">This is a standing company setting, not a setting for only the selected month.</small>
+        <small class="field-help">This is a standing company setting, not a setting for only the selected month. Changing it never rewrites a payroll that has already been paid.</small>
     </form>
-    <?php endif; ?>
 </section>
 
 <nav class="payroll-tabs">
