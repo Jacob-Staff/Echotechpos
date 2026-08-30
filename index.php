@@ -41,13 +41,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['branch_id']       = $user['branch_id']; 
 
             // 6. ROLE-BASED ROUTING
-            $role = ucfirst(strtolower($user['role']));
+            // IMPORTANT: Human Resource must land in the HR portal,
+            // not the normal POS dashboard.
+            $role = trim((string)($user['role'] ?? ''));
 
-            if ($role === 'Admin') {
-                header("Location: admin/admin_dashboard.php");
-            } else {
-                header("Location: dashboard/dashboard.php");
+            if (strcasecmp($role, 'Human Resource') === 0) {
+                header("Location: admin/employee_management.php");
+                exit();
             }
+
+            if (strcasecmp($role, 'Admin') === 0) {
+                header("Location: admin/admin_dashboard.php");
+                exit();
+            }
+
+            // All other POS staff retain the normal dashboard.
+            header("Location: dashboard/dashboard.php");
             exit();
 
         } else {
@@ -182,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="mb-4 text-start">
             <label class="form-label small">Password</label>
-            <input type="password" name="password" class="form-control" placeholder="••••••••" required>
+            <input type="password" name="password" class="form-control" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" required>
         </div>
         <button type="submit" class="btn btn-login w-100 text-white">
             Login to Dashboard <i class="fas fa-arrow-right ms-2"></i>
