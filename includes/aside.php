@@ -89,19 +89,35 @@ function echotech_sidebar_link(string $route, string $page): string
 <aside class="left-sidebar" id="echotechSidebar">
     <div class="sidebar-inner">
 
-        <div class="user-profile-box">
-            <div class="user-avatar">
-                <i class="fas fa-user-tie"></i>
-            </div>
-
-            <div class="user-info text-truncate">
-                <div class="fw-bold small text-white text-truncate">
-                    Staff: <?= htmlspecialchars((string)$display_name, ENT_QUOTES, 'UTF-8'); ?>
+        <div class="user-profile-wrap">
+            <button type="button"
+                    class="user-profile-box user-profile-toggle"
+                    id="staffProfileToggle"
+                    aria-expanded="false"
+                    aria-controls="staffProfileMenu">
+                <div class="user-avatar">
+                    <i class="fas fa-user-tie"></i>
                 </div>
 
-                <div class="extra-small text-truncate sidebar-role">
-                    <?= htmlspecialchars((string)$display_role, ENT_QUOTES, 'UTF-8'); ?>
+                <div class="user-info text-truncate">
+                    <div class="fw-bold small text-white text-truncate">
+                        Staff: <?= htmlspecialchars((string)$display_name, ENT_QUOTES, 'UTF-8'); ?>
+                    </div>
+
+                    <div class="extra-small text-truncate sidebar-role">
+                        <?= htmlspecialchars((string)$display_role, ENT_QUOTES, 'UTF-8'); ?>
+                    </div>
                 </div>
+
+                <i class="fas fa-chevron-down user-profile-chevron" aria-hidden="true"></i>
+            </button>
+
+            <div class="staff-profile-menu" id="staffProfileMenu">
+                <a class="staff-profile-menu-item <?= echotech_sidebar_active('loans_advances.php'); ?>"
+                   href="loans_advances.php">
+                    <i class="fas fa-hand-holding-dollar"></i>
+                    <span>Loans &amp; Advances</span>
+                </a>
             </div>
         </div>
 
@@ -244,6 +260,85 @@ function echotech_sidebar_link(string $route, string $page): string
     font-size:.76rem;
 }
 
+/* ============================================================
+   STAFF PROFILE DROPDOWN
+   Only the profile box is made clickable.
+   ============================================================ */
+.user-profile-wrap{
+    position:relative;
+    margin-bottom:.75rem;
+}
+
+.user-profile-toggle{
+    width:100%;
+    border:0;
+    margin:0;
+    font:inherit;
+    text-align:left;
+    cursor:pointer;
+    position:relative;
+}
+
+.user-profile-toggle:focus{
+    outline:none;
+}
+
+.user-profile-chevron{
+    margin-left:auto;
+    color:#92a4b5;
+    font-size:10px;
+    transition:transform .16s ease;
+}
+
+.user-profile-toggle[aria-expanded="true"] .user-profile-chevron{
+    transform:rotate(180deg);
+}
+
+.staff-profile-menu{
+    display:none;
+    margin-top:5px;
+    padding:4px;
+    background:#0f172a;
+    border:1px solid #334155;
+    border-radius:7px;
+    box-sizing:border-box;
+}
+
+.staff-profile-menu.open{
+    display:block;
+}
+
+.staff-profile-menu-item{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    width:100%;
+    box-sizing:border-box;
+    padding:9px 10px;
+    color:#cbd5e1;
+    text-decoration:none;
+    border-radius:5px;
+    font-size:.82rem;
+    font-weight:600;
+    transition:all .16s ease;
+}
+
+.staff-profile-menu-item i{
+    width:17px;
+    text-align:center;
+    color:#60a5fa;
+}
+
+.staff-profile-menu-item:hover,
+.staff-profile-menu-item.active{
+    color:#fff;
+    background:#334155;
+}
+
+.staff-profile-menu-item.active{
+    box-shadow:inset 3px 0 #60a5fa;
+}
+
 .sidebar-link{
     display:flex;
     align-items:center;
@@ -321,3 +416,34 @@ function echotech_sidebar_link(string $route, string $page): string
     }
 }
 </style>
+
+<script>
+(function () {
+    var toggle = document.getElementById('staffProfileToggle');
+    var menu = document.getElementById('staffProfileMenu');
+
+    if (!toggle || !menu) return;
+
+    toggle.addEventListener('click', function (event) {
+        event.stopPropagation();
+
+        var isOpen = menu.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    });
+
+    document.addEventListener('click', function (event) {
+        if (!event.target.closest('.user-profile-wrap')) {
+            menu.classList.remove('open');
+            toggle.setAttribute('aria-expanded', 'false');
+        }
+    });
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            menu.classList.remove('open');
+            toggle.setAttribute('aria-expanded', 'false');
+        }
+    });
+})();
+</script>
+
