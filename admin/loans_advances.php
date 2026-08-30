@@ -853,8 +853,6 @@ tr:last-child td{border-bottom:0}
 @media(max-width:800px){.main{margin-left:0}.page{padding:18px}.heading{flex-direction:column}.cards{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.toolbar{flex-direction:column;align-items:stretch}.search{max-width:none}}
 
 .badge.Written-Off{background:#eef0f3;color:#58636d}
-
-.repayment-control{white-space:nowrap;font-size:11px!important;font-weight:700;}
 </style>
 </head>
 <body>
@@ -985,9 +983,7 @@ tr:last-child td{border-bottom:0}
                                 <span class="muted">â€”</span>
                             <?php endif; ?>
                             <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
-                                <a class="btn repayment-control" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Open Payroll to excuse or lower this month's repayment">
-                                    <i class="fa-solid fa-ban"></i> Excuse / Lower
-                                </a>
+                                <a class="btn" href="payroll.php?view=payroll&month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>&search=<?= urlencode((string)$row['staff_name']) ?>" title="Open this employee's payroll to excuse or lower the current repayment"><i class="fa-solid fa-ban"></i> Excuse / Lower</a>
                             <?php endif; ?>
 
                             <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
@@ -1053,9 +1049,7 @@ tr:last-child td{border-bottom:0}
                                 <span class="muted">â€”</span>
                             <?php endif; ?>
                             <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
-                                <a class="btn repayment-control" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Open Payroll to excuse or lower this month's repayment">
-                                    <i class="fa-solid fa-ban"></i> Excuse / Lower
-                                </a>
+                                <a class="btn" href="payroll.php?view=payroll&month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>&search=<?= urlencode((string)$row['staff_name']) ?>" title="Open this employee's payroll to excuse or lower the current repayment"><i class="fa-solid fa-ban"></i> Excuse / Lower</a>
                             <?php endif; ?>
 
                             <?php if (in_array($row['status'], ['Approved','Active'], true) && (float)$row['balance_amount'] > 0): ?>
