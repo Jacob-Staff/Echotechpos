@@ -625,6 +625,29 @@ function jsq(mixed $v): string
 
 $notice = $_GET['success'] ?? '';
 $error = $_GET['error'] ?? '';
+
+/* ------------------------- Sidebar data ------------------------- */
+$pharmacyName = 'PHARMACY POS';
+$stmt = $conn->prepare("SELECT name FROM pharmacies WHERE id=? LIMIT 1");
+if ($stmt) {
+    $stmt->bind_param('i', $pharmacyId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    if ($row && !empty($row['name'])) $pharmacyName = (string)$row['name'];
+    $stmt->close();
+}
+
+$totalOrders = 0;
+$stmt = $conn->prepare("SELECT COUNT(*) AS n FROM sales WHERE pharmacy_id=?");
+if ($stmt) {
+    $stmt->bind_param('i', $pharmacyId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $totalOrders = (int)($row['n'] ?? 0);
+    $stmt->close();
+}
+
+$currentAdminPage = basename((string)($_SERVER['PHP_SELF'] ?? ''));
 ?>
 <!doctype html>
 <html lang="en">
@@ -643,6 +666,48 @@ $error = $_GET['error'] ?? '';
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Inter,Arial,sans-serif}
+.admin-aside{
+ position:fixed;left:0;top:0;bottom:0;width:250px;background:#202831;color:#fff;
+ border-right:1px solid #161d24;z-index:1000;padding:18px 14px 115px;overflow:auto;
+}
+.admin-aside .admin-brand{height:54px;display:flex;align-items:center;gap:12px;padding:0 9px;margin-bottom:18px;color:#fff;text-decoration:none}
+.admin-aside .admin-brand-mark{width:38px;height:38px;border-radius:10px;background:#246bfe;display:grid;place-items:center}
+.admin-aside .admin-brand-mark i{font-size:17px;color:#fff}
+.admin-aside .admin-brand strong{display:block;font-size:15px;font-weight:800;letter-spacing:.2px}
+.admin-aside .admin-brand small{display:block;color:#aeb8c2;font-size:9px;text-transform:uppercase;letter-spacing:1.2px;margin-top:3px}
+.admin-aside .admin-caption{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:#8f9ba7;font-weight:800;padding:12px 11px 7px}
+.admin-aside .admin-nav{display:flex;flex-direction:column;gap:3px}
+.admin-aside .admin-nav a,.admin-aside .admin-nav .admin-parent{min-height:42px;border-radius:8px;color:#bdc6cf;display:flex;align-items:center;gap:11px;padding:0 12px;font-size:13px;font-weight:600;border:1px solid transparent;text-decoration:none;background:transparent}
+.admin-aside .admin-nav a i,.admin-aside .admin-nav .admin-parent>i:first-child{width:18px;text-align:center;color:#8996a3;font-size:13px}
+.admin-aside .admin-nav a:hover,.admin-aside .admin-nav .admin-parent:hover{background:#2a3541;color:#fff}
+.admin-aside .admin-nav a.active,.admin-aside .admin-nav .admin-parent.active{background:#344253;border-color:#405166;color:#fff;box-shadow:inset 3px 0 #246bfe}
+.admin-aside .admin-nav a.active i,.admin-aside .admin-nav .admin-parent.active>i:first-child{color:#70a0ff}
+.admin-aside .admin-badge{margin-left:auto;background:#465363;color:#e5eaf0;border-radius:12px;padding:3px 7px;font-size:10px}
+.admin-aside .admin-separator{height:1px;background:#3a444e;margin:14px 8px}
+.admin-aside .admin-group{display:flex;flex-direction:column;gap:2px}
+.admin-aside .admin-parent{width:100%;cursor:pointer;text-align:left}
+.admin-aside .admin-parent .admin-chevron{margin-left:auto;width:auto!important;color:#8996a3;font-size:10px;transition:transform .18s ease}
+.admin-aside .admin-parent.open .admin-chevron{transform:rotate(180deg)}
+.admin-aside .admin-subnav{display:flex;flex-direction:column;gap:2px;margin:0 0 3px 29px;padding-left:9px;border-left:1px solid #3a4652}
+.admin-aside .admin-subnav a{min-height:35px;padding:0 10px;font-size:11px;border-radius:7px}
+.admin-aside .admin-subnav a i{font-size:11px;width:15px}
+.admin-aside .admin-subnav a.active{background:#2c3947;border-color:#3b4a5a;box-shadow:inset 2px 0 #246bfe}
+.admin-aside .admin-mini{margin:14px 7px 0;background:#18212a;border:1px solid #35414d;border-radius:9px;padding:12px}
+.admin-aside .admin-mini-title{font-size:11px;font-weight:800;color:#edf1f5;margin-bottom:9px}
+.admin-aside .admin-mini-line{display:flex;justify-content:space-between;color:#a3adb8;font-size:10px;margin:7px 0}
+.admin-aside .admin-mini-line b{color:#f0f3f6}
+.admin-aside .admin-mini-progress{height:4px;background:#303b47;border-radius:4px;overflow:hidden}
+.admin-aside .admin-mini-progress span{display:block;height:100%;border-radius:4px;background:#246bfe}
+.admin-aside .admin-side-user{position:absolute;left:14px;right:14px;bottom:13px;border-top:1px solid #3a444e;padding-top:11px;background:#202831}
+.admin-aside .admin-user{display:flex;align-items:center;gap:9px;padding:9px;background:#18212a;border:1px solid #35414d;border-radius:9px}
+.admin-aside .admin-avatar{width:32px;height:32px;border-radius:50%;background:#3b4857;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff}
+.admin-aside .admin-user-copy{min-width:0;flex:1}
+.admin-aside .admin-user-copy b{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff}
+.admin-aside .admin-user-copy span{display:block;color:#9ba7b3;font-size:9px;margin-top:3px}
+.admin-aside .admin-user i{color:#84909d;font-size:11px}
+.admin-aside .admin-signout{display:flex;align-items:center;gap:9px;color:#f17a8b;text-decoration:none;font-size:11px;font-weight:700;padding:9px}
+@media(max-width:1000px){.admin-aside{transform:translateX(-100%);transition:.2s;box-shadow:15px 0 35px rgba(0,0,0,.22)}.admin-aside.open{transform:none}}
+
 .sidebar{position:fixed;inset:0 auto 0 0;width:var(--side);background:var(--c);color:#fff;
  padding:18px 14px;display:flex;flex-direction:column;z-index:1000}
 .brand{display:flex;gap:10px;align-items:center;color:#fff;text-decoration:none;margin-bottom:20px}
@@ -711,103 +776,81 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 </head>
 <body>
 
+<?php if ($isAdmin): ?>
+<aside class="admin-aside" id="adminAside">
+    <a class="admin-brand" href="admin_dashboard.php">
+        <span class="admin-brand-mark"><i class="fa-solid fa-capsules"></i></span>
+        <span><strong><?=eh($pharmacyName)?></strong><small>POS ADMIN CONTROL</small></span>
+    </a>
+
+    <div class="admin-caption">Workspace</div>
+    <nav class="admin-nav">
+        <a class="<?= $currentAdminPage === 'admin_dashboard.php' ? 'active' : '' ?>" href="admin_dashboard.php"><i class="fa-solid fa-chart-pie"></i>Dashboard</a>
+        <a class="active" href="staff_management.php"><i class="fa-solid fa-users"></i>Staff Management</a>
+        <a href="manage_setup.php"><i class="fa-solid fa-sliders"></i>System Setup</a>
+        <?php $payrollNavOpen = in_array($currentAdminPage, ['payroll.php','loans_advances.php'], true); ?>
+        <div class="admin-group">
+            <button type="button" class="admin-parent <?= $payrollNavOpen ? 'open active' : '' ?>" id="payrollNavParent" aria-expanded="<?= $payrollNavOpen ? 'true' : 'false' ?>">
+                <i class="fa-solid fa-file-invoice-dollar"></i><span>Payroll</span><i class="fa-solid fa-chevron-down admin-chevron"></i>
+            </button>
+            <div class="admin-subnav" id="payrollNavSubnav" style="<?= $payrollNavOpen ? '' : 'display:none;' ?>">
+                <a class="<?= $currentAdminPage === 'payroll.php' ? 'active' : '' ?>" href="payroll.php"><i class="fa-solid fa-file-invoice"></i>Payroll Register</a>
+                <a class="<?= $currentAdminPage === 'loans_advances.php' ? 'active' : '' ?>" href="loans_advances.php"><i class="fa-solid fa-hand-holding-dollar"></i>Loans &amp; Advances</a>
+            </div>
+        </div>
+        <a href="sales_report.php"><i class="fa-solid fa-chart-line"></i>Sales Analytics</a>
+        <a href="today_transactions.php"><i class="fa-solid fa-receipt"></i>Transactions <span class="admin-badge"><?=number_format($totalOrders)?></span></a>
+        <a href="online_orders.php"><i class="fa-solid fa-bag-shopping"></i>Online Orders</a>
+        <a href="pharmacy_stock.php"><i class="fa-solid fa-boxes-stacked"></i>Inventory</a>
+        <a href="suppliers.php"><i class="fa-solid fa-truck"></i>Suppliers</a>
+        <a href="customers.php"><i class="fa-solid fa-user-group"></i>Customers</a>
+    </nav>
+
+    <div class="admin-separator"></div>
+    <div class="admin-caption">Network</div>
+    <nav class="admin-nav">
+        <a href="branches.php"><i class="fa-solid fa-store"></i>Branches <span class="admin-badge"><?=count($branches)?></span></a>
+        <a href="purchase_orders.php"><i class="fa-solid fa-file-invoice-dollar"></i>Purchase Orders</a>
+        <a href="audit_logs.php"><i class="fa-solid fa-shield-halved"></i>Audit &amp; Security</a>
+        <a href="settings.php"><i class="fa-solid fa-gear"></i>Configuration</a>
+    </nav>
+
+    <div class="admin-mini">
+        <div class="admin-mini-title">Network Health</div>
+        <div class="admin-mini-line"><span>Database</span><b>Online</b></div>
+        <div class="admin-mini-progress"><span style="width:92%"></span></div>
+        <div class="admin-mini-line"><span>Active branches</span><b><?=count($branches)?></b></div>
+        <div class="admin-mini-progress"><span style="width:78%"></span></div>
+        <div class="admin-mini-line"><span>Sales records</span><b><?=number_format($totalOrders)?></b></div>
+        <div class="admin-mini-progress"><span style="width:66%"></span></div>
+    </div>
+
+    <div class="admin-side-user">
+        <div class="admin-user">
+            <div class="admin-avatar"><?=eh(strtoupper(substr((string)$userDisplayName,0,1)))?></div>
+            <div class="admin-user-copy"><b><?=eh($userDisplayName)?></b><span><?=eh($userRole)?> Â· Administrator</span></div>
+            <i class="fa-solid fa-ellipsis"></i>
+        </div>
+        <a class="admin-signout" href="../logout.php"><i class="fa-solid fa-right-from-bracket"></i>Sign out</a>
+    </div>
+</aside>
+<?php else: ?>
 <aside class="sidebar" id="sidebar">
-<?php if ($isHR): ?>
-    <!-- =========================================================
-         HUMAN RESOURCE SIDEBAR
-         HR oversees the entire pharmacy group, not one branch.
-         Keep this sidebar limited to HR functions.
-    ========================================================== -->
     <a class="brand" href="employee_management.php">
         <span class="brandmark"><i class="fa-solid fa-people-roof"></i></span>
         <span><b>PHARMANOVA</b><small>HR / EMPLOYEE CONTROL</small></span>
     </a>
-
-    <div class="side-user">
-        <div class="avatar"><?=eh(strtoupper(substr((string)current_user(),0,1)))?></div>
-        <div>
-            <b><?=eh(current_user())?></b>
-            <span>Human Resource</span>
-        </div>
-    </div>
-
+    <div class="side-user"><div class="avatar"><?=eh(strtoupper(substr((string)current_user(),0,1)))?></div><div><b><?=eh(current_user())?></b><span>Human Resource</span></div></div>
     <div class="cap">Human Resources</div>
     <nav class="nav">
-        <a href="employee_management.php">
-            <i class="fa-solid fa-user-gear"></i>Employee Management
-        </a>
-        <a href="staff_management.php" class="active">
-            <i class="fa-solid fa-users"></i>Staff Management
-        </a>
-        <a href="payroll.php">
-            <i class="fa-solid fa-file-invoice-dollar"></i>Payroll
-        </a>
-        <a href="loans_advances.php">
-            <i class="fa-solid fa-hand-holding-dollar"></i>Loans &amp; Advances
-        </a>
+        <a href="employee_management.php"><i class="fa-solid fa-user-gear"></i>Employee Management</a>
+        <a href="staff_management.php" class="active"><i class="fa-solid fa-users"></i>Staff Management</a>
+        <a href="payroll.php"><i class="fa-solid fa-file-invoice-dollar"></i>Payroll</a>
+        <a href="loans_advances.php"><i class="fa-solid fa-hand-holding-dollar"></i>Loans &amp; Advances</a>
     </nav>
-
-<?php else: ?>
-    <!-- =========================================================
-         ADMIN SIDEBAR
-         This is kept as the Admin navigation and is not changed
-         when an HR user opens Staff Management.
-    ========================================================== -->
-    <a class="brand" href="admin_dashboard.php">
-        <span class="brandmark"><i class="fa-solid fa-capsules"></i></span>
-        <span><b>ECHOTECH POS</b><small>Administration</small></span>
-    </a>
-
-    <div class="side-user">
-        <div class="avatar"><?=eh(strtoupper(substr((string)current_user(),0,1)))?></div>
-        <div>
-            <b><?=eh(current_user())?></b>
-            <span><?=eh(current_role() ?? 'Staff')?></span>
-        </div>
-    </div>
-
-    <div class="cap">Workspace</div>
-    <nav class="nav">
-        <a href="admin_dashboard.php">
-            <i class="fa-solid fa-chart-pie"></i>Dashboard
-        </a>
-        <a href="staff_management.php" class="active">
-            <i class="fa-solid fa-user-shield"></i>Staff Management
-        </a>
-        <a href="payroll.php">
-            <i class="fa-solid fa-file-invoice-dollar"></i>Payroll
-        </a>
-        <a href="customers.php">
-            <i class="fa-solid fa-users"></i>Customers
-        </a>
-        <a href="sales_report.php">
-            <i class="fa-solid fa-chart-line"></i>Sales Reports
-        </a>
-        <a href="pharmacy_stock.php">
-            <i class="fa-solid fa-boxes-stacked"></i>Pharmacy Stock
-        </a>
-        <a href="online_orders.php">
-            <i class="fa-solid fa-bag-shopping"></i>Online Orders
-        </a>
-    </nav>
-
-    <div class="cap">Administration</div>
-    <nav class="nav">
-        <a href="suppliers.php">
-            <i class="fa-solid fa-truck"></i>Suppliers
-        </a>
-        <a href="expenses.php">
-            <i class="fa-solid fa-wallet"></i>Expenses
-        </a>
-    </nav>
-<?php endif; ?>
-
-    <nav class="nav mt-auto">
-        <a class="logout" href="../logout.php">
-            <i class="fa-solid fa-right-from-bracket"></i>Logout
-        </a>
-    </nav>
+    <nav class="nav mt-auto"><a class="logout" href="../logout.php"><i class="fa-solid fa-right-from-bracket"></i>Logout</a></nav>
 </aside>
+<?php endif; ?>
 
 <main class="main">
 <header class="top">
@@ -993,8 +1036,21 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 'use strict';
 
 window.toggleSidebar=function(){
- document.getElementById('sidebar')?.classList.toggle('open');
+ const admin=document.getElementById('adminAside');
+ const hr=document.getElementById('sidebar');
+ (admin || hr)?.classList.toggle('open');
 };
+
+const payrollParent=document.getElementById('payrollNavParent');
+const payrollSub=document.getElementById('payrollNavSubnav');
+if(payrollParent && payrollSub){
+ payrollParent.addEventListener('click',function(){
+   const open=payrollSub.style.display!=='none';
+   payrollSub.style.display=open?'none':'flex';
+   payrollParent.classList.toggle('open',!open);
+   payrollParent.setAttribute('aria-expanded',!open?'true':'false');
+ });
+}
 
 const search=document.getElementById('staffSearch');
 const global=document.getElementById('globalSearch');
