@@ -729,6 +729,8 @@ body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Inter,Arial,s
 .nav i{width:18px;text-align:center}
 .logout{margin-top:auto!important;color:#ffb2bd!important}
 .main{margin-left:var(--side);min-height:100vh}
+.hr-sidebar + .main{margin-left:250px}
+@media(max-width:950px){.hr-sidebar + .main{margin-left:0}}
 .top{height:64px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;
  justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:900}
 .top-title b{display:block;font-size:16px}.top-title span{font-size:12px;color:var(--muted)}
@@ -841,21 +843,17 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
     </div>
 </aside>
 <?php else: ?>
-<aside class="sidebar" id="sidebar">
-    <a class="brand" href="employee_management.php">
-        <span class="brandmark"><i class="fa-solid fa-people-roof"></i></span>
-        <span><b>PHARMANOVA</b><small>HR / EMPLOYEE CONTROL</small></span>
-    </a>
-    <div class="side-user"><div class="avatar"><?=eh(strtoupper(substr((string)current_user(),0,1)))?></div><div><b><?=eh(current_user())?></b><span>Human Resource</span></div></div>
-    <div class="cap">Human Resources</div>
-    <nav class="nav">
-        <a href="employee_management.php"><i class="fa-solid fa-user-gear"></i>Employee Management</a>
-        <a href="staff_management.php" class="active"><i class="fa-solid fa-users"></i>Staff Management</a>
-        <a href="payroll.php"><i class="fa-solid fa-file-invoice-dollar"></i>Payroll</a>
-        <a href="loans_advances.php"><i class="fa-solid fa-hand-holding-dollar"></i>Loans &amp; Advances</a>
-    </nav>
-    <nav class="nav mt-auto"><a class="logout" href="../logout.php"><i class="fa-solid fa-right-from-bracket"></i>Logout</a></nav>
-</aside>
+<?php
+/* HR pages use the single shared HR sidebar used by employee_management.php. */
+if (!function_exists('h')) {
+    function h($value): string {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    }
+}
+$pharmacy_name = $pharmacyName;
+$user_role = $userRole;
+require_once __DIR__ . '/actions/hr_aside.php';
+?>
 <?php endif; ?>
 
 <main class="main">
