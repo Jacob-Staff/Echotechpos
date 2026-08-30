@@ -216,18 +216,18 @@ function payroll_complete_last_day_of_period(string $period): string {
 }
 
 function payroll_complete_monthly_payment_date(string $period, int $paymentDay): string {
-    $firstDay = DateTimeImmutable::createFromFormat('Y-m-d', $period . '-01');
-    if (!$firstDay) {
+    $d = DateTimeImmutable::createFromFormat('Y-m-d', $period . '-01');
+    if (!$d) {
         return date('Y-m-d');
     }
 
     $paymentDay = max(1, min(31, $paymentDay));
-    $lastDay = (int)$firstDay->format('t');
+    $lastDay = (int)$d->format('t');
     $actualDay = min($paymentDay, $lastDay);
 
-    return $firstDay->setDate(
-        (int)$firstDay->format('Y'),
-        (int)$firstDay->format('m'),
+    return $d->setDate(
+        (int)$d->format('Y'),
+        (int)$d->format('m'),
         $actualDay
     )->format('Y-m-d');
 }
@@ -982,6 +982,26 @@ if ($error === '' && payroll_complete_table($conn, 'payroll_salary_templates')) 
 }
 
 /* ---------- Recurring monthly salary payment schedule ---------- */
+
+/*
+ * The recurring company salary day is a master setting.  It must exist
+ * before the setting is read or saved; older installations may not have
+ * this table yet.  One row per pharmacy is maintained.
+ */
+if ($error === '') {
+    @$conn->query("CREATE TABLE IF NOT EXISTS payroll_payment_settings (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+        pharmacy_id INT UNSIGNED NOT NULL,
+        payment_day TINYINT UNSIGNED NOT NULL DEFAULT 30,
+        created_by VARCHAR(150) NULL,
+        updated_by VARCHAR(150) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uq_payroll_payment_settings_pharmacy (pharmacy_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci");
+}
+
 
 /*
  * The company has ONE master salary payment day.
