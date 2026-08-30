@@ -12,8 +12,8 @@ declare(strict_types=1);
 
 session_start();
 
-require_once __DIR__ . '/includes/auth.php';
-require_once __DIR__ . '/includes/conn.php';
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/conn.php';
 
 require_admin();
 
@@ -737,7 +737,7 @@ tr:last-child td{border-bottom:0}
                                     <button class="btn danger" type="submit" title="Cancel"><i class="fa-solid fa-xmark"></i></button>
                                 </form>
                             <?php else: ?>
-                                <span class="muted">—</span>
+                                <span class="muted">â€”</span>
                             <?php endif; ?>
                             </div>
                         </td>
@@ -791,7 +791,7 @@ tr:last-child td{border-bottom:0}
                                     <button class="btn danger" type="submit" title="Cancel"><i class="fa-solid fa-xmark"></i></button>
                                 </form>
                             <?php else: ?>
-                                <span class="muted">—</span>
+                                <span class="muted">â€”</span>
                             <?php endif; ?>
                             </div>
                         </td>
@@ -823,7 +823,7 @@ tr:last-child td{border-bottom:0}
                         <option value="">Select employee</option>
                         <?php foreach ($staff as $s): ?>
                             <option value="<?= (int)$s['id'] ?>">
-                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' — ' . $s['role']) ?>
+                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' â€” ' . $s['role']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -883,7 +883,7 @@ tr:last-child td{border-bottom:0}
                         <option value="">Select employee</option>
                         <?php foreach ($staff as $s): ?>
                             <option value="<?= (int)$s['id'] ?>">
-                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' — ' . $s['role']) ?>
+                                <?= la_esc(($s['full_name'] ?: $s['username']) . ' â€” ' . $s['role']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
