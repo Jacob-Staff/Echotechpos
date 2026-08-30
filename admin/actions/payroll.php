@@ -1468,14 +1468,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
             . $mailResult['sent'] . ' payslip(s) emailed.';
 
         if ($mailResult['failed'] > 0) {
-            $savedMessage .= ' ' . $mailResult['failed'] . ' email(s) failed; use Resend to try again.';
+            $savedMessage .= ' ' . $mailResult['failed'] . ' payslip(s) were not emailed.';
         }
 
         payroll_complete_redirect([
             'month'=>$selectedMonth,
             'year'=>$selectedYear,
             'view'=>'payroll',
-            ($mailResult['failed'] > 0 ? 'error' : 'saved') => $savedMessage
+            'saved' => $savedMessage
         ]);
     }
 
@@ -2712,9 +2712,9 @@ echo payroll_complete_h($initials ?: 'ST');
 <div style="font-size:9px;color:var(--muted);margin-bottom:5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?= payroll_complete_h($row['email']) ?>">
 <i class="fas fa-envelope"></i> <?= payroll_complete_h($row['email']) ?>
 <?php if (($row['payslip_email_status'] ?? 'pending') === 'sent'): ?>
-<span style="color:#08754f;font-weight:700;"> Ã‚Â· SENT</span>
+<span style="color:#08754f;font-weight:700;"> Ãƒâ€šÃ‚Â· SENT</span>
 <?php elseif (($row['payslip_email_status'] ?? 'pending') === 'failed'): ?>
-<span style="color:#b42318;font-weight:700;"> Ã‚Â· FAILED</span>
+<span style="color:#b42318;font-weight:700;"> Ãƒâ€šÃ‚Â· FAILED</span>
 <?php endif; ?>
 </div>
 <?php else: ?>
@@ -3346,7 +3346,7 @@ Recalculate
 <?= payroll_complete_h(
     $remit['payment_reference']
     ?: $remit['return_reference']
-    ?: 'â€”'
+    ?: 'Ã¢â‚¬â€'
 ) ?>
 </td>
 
