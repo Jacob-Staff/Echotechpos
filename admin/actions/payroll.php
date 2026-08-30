@@ -964,13 +964,82 @@ if ($error === '' && payroll_complete_table($conn, 'payroll_salary_templates')) 
     }
 }
 
-/* ---------- Salary payment schedule for the selected month ---------- */
+/* ---------- Recurring monthly salary payment schedule ---------- */
 
-$defaultSalaryPaymentDate = payroll_complete_last_day_of_period($period);
+/*
+ * The company has ONE master salary payment day.
+ * Example: if payment_day = 10, salaries are due every 10th of every month
+ * until the administrator changes that setting.
+ *
+ * payroll_payment_schedules remains the period-level historical record:
+ * it stores the actual scheduled date, payment date and late days for each
+ * payroll period. A master setting is therefore separate from payroll history.
+ */
+$salaryPaymentDay = 30;
+
+if ($error === '' && payroll_complete_table($conn, 'payroll_payment_settings')) {
+    $settingRows = payroll_complete_rows(
+        $conn,
+        "SELECT payment_day FROM payroll_payment_settings WHERE pharmacy_id = ? LIMIT 1",
+        'i',
+        [$pharmacyId]
+    );
+
+    if (!empty($settingRows[0]['payment_day'])) {
+        $salaryPaymentDay = max(1, min(31, (int)$settingRows[0]['payment_day']));
+    } else {
+        /*
+         * Safe migration for existing installations:
+         * if this pharmacy already has a schedule, use its existing day as
+         * the company's recurring day. Otherwise retain the old last-day
+         * default once, until the admin changes it.
+         */
+        $legacyRows = payroll_complete_rows(
+            $conn,
+            "SELECT scheduled_payment_date
+             FROM payroll_payment_schedules
+             WHERE pharmacy_id = ?
+             ORDER BY payroll_period DESC
+             LIMIT 1",
+            'i',
+            [$pharmacyId]
+        );
+
+        if (!empty($legacyRows[0]['scheduled_payment_date'])) {
+            $salaryPaymentDay = max(
+                1,
+                min(31, (int)date('j', strtotime((string)$legacyRows[0]['scheduled_payment_date'])))
+            );
+        }
+
+        $user = payroll_complete_user();
+        $stmt = $conn->prepare(
+            "INSERT INTO payroll_payment_settings
+             (pharmacy_id, payment_day, created_by, updated_by)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                 payment_day=VALUES(payment_day),
+                 updated_by=VALUES(updated_by)"
+        );
+        if ($stmt) {
+            $stmt->bind_param('iiss', $pharmacyId, $salaryPaymentDay, $user, $user);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+}
+
+$defaultSalaryPaymentDate = payroll_complete_monthly_payment_date($period, $salaryPaymentDay);
 $salaryPaymentSchedule = null;
 
 if ($error === '' && payroll_complete_table($conn, 'payroll_payment_schedules')) {
-    $stmt = $conn->prepare("SELECT * FROM payroll_payment_schedules WHERE pharmacy_id = ? AND payroll_period = ? LIMIT 1");
+    $stmt = $conn->prepare(
+        "SELECT *
+         FROM payroll_payment_schedules
+         WHERE pharmacy_id = ? AND payroll_period = ?
+         LIMIT 1"
+    );
+
     if ($stmt) {
         $stmt->bind_param('is', $pharmacyId, $period);
         $stmt->execute();
@@ -980,31 +1049,79 @@ if ($error === '' && payroll_complete_table($conn, 'payroll_payment_schedules'))
 
     if (!$salaryPaymentSchedule) {
         $user = payroll_complete_user();
-        $stmt = $conn->prepare("INSERT INTO payroll_payment_schedules
-            (pharmacy_id, payroll_period, scheduled_payment_date, created_by, updated_by)
-            VALUES (?, ?, ?, ?, ?)");
+        $stmt = $conn->prepare(
+            "INSERT INTO payroll_payment_schedules
+             (pharmacy_id, payroll_period, scheduled_payment_date, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?)"
+        );
+
         if ($stmt) {
-            $stmt->bind_param('issss', $pharmacyId, $period, $defaultSalaryPaymentDate, $user, $user);
+            $stmt->bind_param(
+                'issss',
+                $pharmacyId,
+                $period,
+                $defaultSalaryPaymentDate,
+                $user,
+                $user
+            );
             $stmt->execute();
             $stmt->close();
         }
+
         $salaryPaymentSchedule = [
             'scheduled_payment_date' => $defaultSalaryPaymentDate,
             'reminder_enabled' => 0,
             'payment_date' => null,
             'late_days' => 0,
         ];
+    } elseif (
+        empty($salaryPaymentSchedule['payment_date'])
+        && (string)($salaryPaymentSchedule['scheduled_payment_date'] ?? '') !== $defaultSalaryPaymentDate
+    ) {
+        /*
+         * The current unpaid period follows the master recurring setting.
+         * Paid historical periods are never rewritten.
+         */
+        $stmt = $conn->prepare(
+            "UPDATE payroll_payment_schedules
+             SET scheduled_payment_date = ?, updated_by = ?
+             WHERE pharmacy_id = ? AND payroll_period = ? AND payment_date IS NULL"
+        );
+
+        if ($stmt) {
+            $user = payroll_complete_user();
+            $stmt->bind_param(
+                'ssis',
+                $defaultSalaryPaymentDate,
+                $user,
+                $pharmacyId,
+                $period
+            );
+            $stmt->execute();
+            $stmt->close();
+
+            $salaryPaymentSchedule['scheduled_payment_date'] = $defaultSalaryPaymentDate;
+        }
     }
 }
 
-$scheduledSalaryPaymentDate = (string)($salaryPaymentSchedule['scheduled_payment_date'] ?? $defaultSalaryPaymentDate);
+$scheduledSalaryPaymentDate = (string)(
+    $salaryPaymentSchedule['scheduled_payment_date'] ?? $defaultSalaryPaymentDate
+);
+
 $salaryPaymentDateObject = new DateTimeImmutable($scheduledSalaryPaymentDate);
 $todayForPayroll = new DateTimeImmutable('today');
 $salaryPaymentIsPaid = !empty($salaryPaymentSchedule['payment_date']);
 $salaryPaymentReminder = !$salaryPaymentIsPaid && $todayForPayroll >= $salaryPaymentDateObject;
-$salaryLateDays = $salaryPaymentReminder ? payroll_complete_days_late($scheduledSalaryPaymentDate) : 0;
+$salaryLateDays = $salaryPaymentReminder
+    ? payroll_complete_days_late($scheduledSalaryPaymentDate)
+    : 0;
+
 if ($salaryPaymentIsPaid && !empty($salaryPaymentSchedule['payment_date'])) {
-    $salaryLateDays = payroll_complete_days_late($scheduledSalaryPaymentDate, (string)$salaryPaymentSchedule['payment_date']);
+    $salaryLateDays = payroll_complete_days_late(
+        $scheduledSalaryPaymentDate,
+        (string)$salaryPaymentSchedule['payment_date']
+    );
 }
 
 /* ---------- POST actions ---------- */
@@ -1014,32 +1131,108 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
     $action = (string)($_POST['action'] ?? '');
 
     if ($action === 'save_salary_payment_date') {
-        $paymentScheduleDate = trim((string)($_POST['scheduled_payment_date'] ?? ''));
-        $dateObject = DateTime::createFromFormat('Y-m-d', $paymentScheduleDate);
-        if (!$dateObject || $dateObject->format('Y-m-d') !== $paymentScheduleDate) {
-            payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'error'=>'Please enter a valid salary payment date.']);
+
+        /*
+         * This is intentionally a MONTHLY MASTER SETTING, not a
+         * next-month/selected-month date.
+         *
+         * Example:
+         *   payment_day = 10
+         *   -> 10 Aug, 10 Sep, 10 Oct, 10 Nov...
+         * until the admin changes it.
+         */
+        $paymentDay = (int)($_POST['salary_payment_day'] ?? 0);
+
+        /*
+         * Backward compatibility with the old date form:
+         * if an old browser submits scheduled_payment_date, use only its day.
+         */
+        if ($paymentDay <= 0 && !empty($_POST['scheduled_payment_date'])) {
+            $legacyDate = trim((string)$_POST['scheduled_payment_date']);
+            $dateObject = DateTime::createFromFormat('Y-m-d', $legacyDate);
+
+            if ($dateObject && $dateObject->format('Y-m-d') === $legacyDate) {
+                $paymentDay = (int)$dateObject->format('j');
+            }
         }
 
-        $existing = payroll_complete_rows($conn,
-            "SELECT payment_date FROM payroll_payment_schedules WHERE pharmacy_id = ? AND payroll_period = ? LIMIT 1",
-            'is', [$pharmacyId, $period]);
-        if (!empty($existing[0]['payment_date'])) {
-            payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'error'=>'The salary payment date cannot be changed after this payroll has been paid.']);
+        if ($paymentDay < 1 || $paymentDay > 31) {
+            payroll_complete_redirect([
+                'view' => 'payroll',
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Please choose a salary payment day from 1 to 31.'
+            ]);
         }
 
         $user = payroll_complete_user();
-        $stmt = $conn->prepare("INSERT INTO payroll_payment_schedules
-            (pharmacy_id, payroll_period, scheduled_payment_date, created_by, updated_by)
-            VALUES (?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE scheduled_payment_date=VALUES(scheduled_payment_date), updated_by=VALUES(updated_by)");
-        if (!$stmt) payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'error'=>'Could not save the salary payment date: '.$conn->error]);
-        $stmt->bind_param('issss', $pharmacyId, $period, $paymentScheduleDate, $user, $user);
+
+        /*
+         * Save the recurring company rule once.
+         * It is not tied to the selected payroll month.
+         */
+        $stmt = $conn->prepare(
+            "INSERT INTO payroll_payment_settings
+             (pharmacy_id, payment_day, created_by, updated_by)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                 payment_day=VALUES(payment_day),
+                 updated_by=VALUES(updated_by)"
+        );
+
+        if (!$stmt) {
+            payroll_complete_redirect([
+                'view' => 'payroll',
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Could not save the recurring salary payment day: ' . $conn->error
+            ]);
+        }
+
+        $stmt->bind_param('iiss', $pharmacyId, $paymentDay, $user, $user);
         $ok = $stmt->execute();
         $msg = $stmt->error;
         $stmt->close();
-        if (!$ok) payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'error'=>'Could not save the salary payment date: '.$msg]);
 
-        payroll_complete_redirect(['view'=>'payroll','month'=>$selectedMonth,'year'=>$selectedYear,'saved'=>'Salary payment date for '.$periodLabel.' set to '.date('d M Y', strtotime($paymentScheduleDate)).'.']);
+        if (!$ok) {
+            payroll_complete_redirect([
+                'view' => 'payroll',
+                'month' => $selectedMonth,
+                'year' => $selectedYear,
+                'error' => 'Could not save the recurring salary payment day: ' . $msg
+            ]);
+        }
+
+        /*
+         * Update the selected period only when it has not been paid.
+         * This keeps payment history and late-day records intact.
+         */
+        $newScheduledDate = payroll_complete_monthly_payment_date($period, $paymentDay);
+
+        $stmt = $conn->prepare(
+            "UPDATE payroll_payment_schedules
+             SET scheduled_payment_date = ?, updated_by = ?
+             WHERE pharmacy_id = ? AND payroll_period = ? AND payment_date IS NULL"
+        );
+
+        if ($stmt) {
+            $stmt->bind_param(
+                'ssis',
+                $newScheduledDate,
+                $user,
+                $pharmacyId,
+                $period
+            );
+            $stmt->execute();
+            $stmt->close();
+        }
+
+        payroll_complete_redirect([
+            'view' => 'payroll',
+            'month' => $selectedMonth,
+            'year' => $selectedYear,
+            'saved' => 'Monthly salary payment day set to the ' . $paymentDay . ($paymentDay === 1 ? 'st' : ($paymentDay === 2 ? 'nd' : ($paymentDay === 3 ? 'rd' : 'th'))) . ' of every month until changed.'
+        ]);
     }
 
     /*
@@ -2766,7 +2959,7 @@ tbody tr:hover{background:#fbfcfd}
 
 /* Salary payment schedule / automatic deduction UI */
 .payroll-date-panel{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:center;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;margin-bottom:16px}
-.payroll-date-title{font-size:13px;font-weight:800;color:var(--charcoal);display:flex;align-items:center;gap:8px}.payroll-date-title i{color:var(--blue)}.payroll-date-sub{font-size:10px;color:var(--muted);line-height:1.55;margin-top:5px}.salary-date-form{border-left:1px solid var(--border);padding-left:18px}.salary-date-form label{display:block;font-size:10px;font-weight:800;color:var(--muted);margin-bottom:5px}.salary-date-form-row{display:flex;gap:7px}.salary-date-form input{height:38px;min-width:0;flex:1;border:1px solid var(--border);border-radius:8px;padding:0 9px;font:inherit;font-size:12px}.salary-late-alert{margin-top:9px;padding:8px 10px;border:1px solid #efc0c8;background:var(--red-soft);color:#b4233b;border-radius:8px;font-size:10px;font-weight:700}.salary-paid-note{margin-top:9px;padding:8px 10px;border:1px solid #b9e8d1;background:var(--green-soft);color:#08754f;border-radius:8px;font-size:10px}.salary-schedule-note{margin-top:9px;font-size:10px;color:#53616d}.mandatory-deduction-field>span{display:flex;align-items:center;gap:6px}.must-badge{display:inline-flex;align-items:center;padding:2px 5px;border-radius:4px;background:var(--red);color:#fff;font-size:8px;letter-spacing:.4px}.mandatory-help{color:#b4233b}.deduction-actions{display:flex;gap:5px;margin-top:4px}.deduction-excuse{color:#b4233b;border-color:#efc0c8;background:#fff6f7}.deduction-lower{color:#a36d00;border-color:#ecd79b;background:#fffaf0}
+.payroll-date-title{font-size:13px;font-weight:800;color:var(--charcoal);display:flex;align-items:center;gap:8px}.payroll-date-title i{color:var(--blue)}.payroll-date-sub{font-size:10px;color:var(--muted);line-height:1.55;margin-top:5px}.salary-date-form{border-left:1px solid var(--border);padding-left:18px}.salary-date-form label{display:block;font-size:10px;font-weight:800;color:var(--muted);margin-bottom:5px}.salary-date-form-row{display:flex;gap:7px}.salary-date-form input{height:38px;min-width:0;flex:1;border:1px solid var(--border);border-radius:8px;padding:0 9px;font:inherit;font-size:12px},.salary-date-form select{height:38px;min-width:0;flex:1;border:1px solid var(--border);border-radius:8px;padding:0 9px;font:inherit;font-size:12px;background:#fff}.salary-late-alert{margin-top:9px;padding:8px 10px;border:1px solid #efc0c8;background:var(--red-soft);color:#b4233b;border-radius:8px;font-size:10px;font-weight:700}.salary-paid-note{margin-top:9px;padding:8px 10px;border:1px solid #b9e8d1;background:var(--green-soft);color:#08754f;border-radius:8px;font-size:10px}.salary-schedule-note{margin-top:9px;font-size:10px;color:#53616d}.mandatory-deduction-field>span{display:flex;align-items:center;gap:6px}.must-badge{display:inline-flex;align-items:center;padding:2px 5px;border-radius:4px;background:var(--red);color:#fff;font-size:8px;letter-spacing:.4px}.mandatory-help{color:#b4233b}.deduction-actions{display:flex;gap:5px;margin-top:4px}.deduction-excuse{color:#b4233b;border-color:#efc0c8;background:#fff6f7}.deduction-lower{color:#a36d00;border-color:#ecd79b;background:#fffaf0}
 @media(max-width:850px){.payroll-date-panel{grid-template-columns:1fr}.salary-date-form{border-left:0;border-top:1px solid var(--border);padding-left:0;padding-top:13px}}
 
 /* Salary Template UI */
@@ -2866,13 +3059,13 @@ Print
 <section class="payroll-date-panel">
     <div class="payroll-date-copy">
         <div class="payroll-date-title"><i class="fas fa-calendar-check"></i> Salary Payment Schedule</div>
-        <div class="payroll-date-sub">Set the date salaries for <?= payroll_complete_h($periodLabel) ?> are expected to be paid. The system will remind you on that date and count unpaid days until the actual payment is recorded.</div>
+        <div class="payroll-date-sub">Set the company's normal salary payment day once. For example, choosing <strong>10</strong> means salaries are due every 10th of every month until this setting is changed.</div>
         <?php if ($salaryPaymentReminder): ?>
             <div class="salary-late-alert"><i class="fas fa-triangle-exclamation"></i> SALARY PAYMENT REMINDER: Payment is due. <?= $salaryLateDays > 0 ? '<strong>'.$salaryLateDays.' late day'.($salaryLateDays === 1 ? '' : 's').'</strong> counted so far.' : '<strong>Due today</strong>.' ?></div>
         <?php elseif ($salaryPaymentIsPaid): ?>
-            <div class="salary-paid-note"><i class="fas fa-circle-check"></i> Paid on <strong><?= payroll_complete_h(date('d M Y', strtotime((string)$salaryPaymentSchedule['payment_date']))) ?></strong>. Late days recorded: <strong><?= (int)$salaryLateDays ?></strong>.</div>
+            <div class="salary-paid-note"><i class="fas fa-circle-check"></i> Paid on <strong><?= payroll_complete_h(date('d M Y', strtotime((string)$salaryPaymentSchedule['payment_date']))) ?></strong>. Late days recorded: <strong><?= (int)$salaryLateDays ?></strong>. Monthly payment rule: <strong>every <?= (int)$salaryPaymentDay ?><?= ($salaryPaymentDay % 100 >= 11 && $salaryPaymentDay % 100 <= 13) ? 'th' : (($salaryPaymentDay % 10 === 1) ? 'st' : (($salaryPaymentDay % 10 === 2) ? 'nd' : (($salaryPaymentDay % 10 === 3) ? 'rd' : 'th'))) ?>.</strong></div>
         <?php else: ?>
-            <div class="salary-schedule-note">Scheduled for <strong><?= payroll_complete_h($salaryPaymentDateObject->format('d M Y')) ?></strong>.</div>
+            <div class="salary-schedule-note">Monthly rule: salaries are scheduled for the <strong><?= (int)$salaryPaymentDay ?><?= ($salaryPaymentDay % 100 >= 11 && $salaryPaymentDay % 100 <= 13) ? 'th' : (($salaryPaymentDay % 10 === 1) ? 'st' : (($salaryPaymentDay % 10 === 2) ? 'nd' : (($salaryPaymentDay % 10 === 3) ? 'rd' : 'th'))) ?> of every month</strong>. <?= $salaryPaymentDay > (int)$salaryPaymentDateObject->format('j') ? 'For months shorter than that day, the last calendar day is used.' : 'This month is scheduled for <strong>'.$salaryPaymentDateObject->format('d M Y').'</strong>.' ?></div>
         <?php endif; ?>
     </div>
     <?php if (!$salaryPaymentIsPaid): ?>
@@ -2880,11 +3073,16 @@ Print
         <input type="hidden" name="action" value="save_salary_payment_date">
         <input type="hidden" name="month" value="<?= $selectedMonth ?>">
         <input type="hidden" name="year" value="<?= $selectedYear ?>">
-        <label>Expected Salary Payment Date</label>
+        <label>Monthly Salary Payment Day</label>
         <div class="salary-date-form-row">
-            <input type="date" name="scheduled_payment_date" value="<?= payroll_complete_h($scheduledSalaryPaymentDate) ?>" required>
-            <button class="btn primary" type="submit"><i class="fas fa-save"></i> Save Date</button>
+            <select name="salary_payment_day" required>
+                <?php for ($day = 1; $day <= 31; $day++): ?>
+                    <option value="<?= $day ?>" <?= $salaryPaymentDay === $day ? 'selected' : '' ?>><?= $day ?><?= ($day % 100 >= 11 && $day % 100 <= 13) ? 'th' : (($day % 10 === 1) ? 'st' : (($day % 10 === 2) ? 'nd' : (($day % 10 === 3) ? 'rd' : 'th'))) ?></option>
+                <?php endfor; ?>
+            </select>
+            <button class="btn primary" type="submit"><i class="fas fa-save"></i> Save Monthly Rule</button>
         </div>
+        <small class="field-help">This is a standing company setting, not a setting for only the selected month.</small>
     </form>
     <?php endif; ?>
 </section>
@@ -3157,9 +3355,37 @@ echo payroll_complete_h($initials ?: 'ST');
     class="btn small"
     type="button"
     onclick="toggleEdit(<?= (int)$row['id'] ?>)"
+    title="Edit payroll row"
 >
 <i class="fas fa-pen"></i>
 </button>
+
+<?php
+$mainAutoLoan = payroll_complete_repayment_amount($conn, $pharmacyId, (int)$row['staff_id'], $period, 'loan');
+$mainAutoAdvance = payroll_complete_repayment_amount($conn, $pharmacyId, (int)$row['staff_id'], $period, 'advance');
+?>
+
+<?php if ($mainAutoLoan > 0): ?>
+<button
+    class="btn small deduction-excuse"
+    type="button"
+    onclick="openAndExcuse(<?= (int)$row['id'] ?>,'loan')"
+    title="Excuse this month's loan installment"
+>
+<i class="fas fa-ban"></i> Excuse Loan
+</button>
+<?php endif; ?>
+
+<?php if ($mainAutoAdvance > 0): ?>
+<button
+    class="btn small deduction-excuse"
+    type="button"
+    onclick="openAndExcuse(<?= (int)$row['id'] ?>,'advance')"
+    title="Excuse this month's salary advance installment"
+>
+<i class="fas fa-ban"></i> Excuse Advance
+</button>
+<?php endif; ?>
 
 <?php endif; ?>
 
@@ -4141,6 +4367,27 @@ function toggleRemittance(id){
 
 function money(v){
     return 'K' + Number(v || 0).toLocaleString('en-ZM',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+function openAndExcuse(id,type){
+    const editRow = document.getElementById('edit-' + id);
+    if(!editRow) return;
+
+    if(editRow.style.display === 'none' || editRow.style.display === ''){
+        toggleEdit(id);
+    }
+
+    const button = editRow.querySelector('.deduction-excuse[onclick*="' + type + '"]');
+    if(button){
+        excuseDeduction(button,type);
+    } else {
+        const inputName = type === 'loan' ? 'loan_deduction' : 'salary_advance';
+        const input = editRow.querySelector('input[name="' + inputName + '"]');
+        if(input){
+            input.value = '0';
+            calculatePayrollPreview(editRow);
+        }
+    }
 }
 
 function excuseDeduction(button,type){
