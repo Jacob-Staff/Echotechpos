@@ -1107,9 +1107,12 @@ function payroll_payslip_pdf_content(array $data): string {
 
 
 function payroll_payslip_ensure_document_table(mysqli $conn): void {
-    if (payroll_complete_table($conn, 'payroll_payslip_documents')) return;
-
-    $create = "
+    /*
+     * The document table may already exist from an older deployment.
+     * Do NOT return early: older installations may be missing renderer_version.
+     */
+    if (!payroll_complete_table($conn, 'payroll_payslip_documents')) {
+        $create = "
         CREATE TABLE `payroll_payslip_documents` (
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             `payroll_record_id` INT UNSIGNED NOT NULL,
@@ -1125,12 +1128,21 @@ function payroll_payslip_ensure_document_table(mysqli $conn): void {
             KEY `idx_payslip_document_pharmacy` (`pharmacy_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ";
-    if (!$conn->query($create) && !payroll_complete_table($conn, 'payroll_payslip_documents')) {
-        throw new RuntimeException('Could not create official payslip document table: ' . $conn->error);
+        if (!$conn->query($create) && !payroll_complete_table($conn, 'payroll_payslip_documents')) {
+            throw new RuntimeException('Could not create official payslip document table: ' . $conn->error);
+        }
     }
 
+    /* Upgrade an existing table that predates renderer_version. */
     if (!payroll_complete_col($conn, 'payroll_payslip_documents', 'renderer_version')) {
-        @$conn->query("ALTER TABLE payroll_payslip_documents ADD COLUMN renderer_version VARCHAR(40) NOT NULL DEFAULT '' AFTER pdf_hash");
+        if (!@$conn->query(
+            "ALTER TABLE payroll_payslip_documents
+             ADD COLUMN renderer_version VARCHAR(40) NOT NULL DEFAULT '' AFTER pdf_hash"
+        )) {
+            throw new RuntimeException(
+                'Could not upgrade official payslip document table: ' . $conn->error
+            );
+        }
     }
 }
 
