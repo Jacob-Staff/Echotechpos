@@ -1428,7 +1428,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
         }
 
         $user = payroll_complete_user();
-        $stmt->bind_param('ssssiss', $paymentDate, $paymentReference, $paymentMethod, $user, $pharmacyId, $period);
+        $stmt->bind_param(
+    'ssssis',
+    $paymentDate,
+    $paymentReference,
+    $paymentMethod,
+    $user,
+    $pharmacyId,
+    $period
+);
         $ok = $stmt->execute();
         $changed = $stmt->affected_rows;
         $msg = $stmt->error;
