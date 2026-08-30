@@ -140,6 +140,12 @@ try {
 
     $stmt = $conn->prepare($sql);
 
+    if (!$stmt) {
+        throw new RuntimeException(
+            'Unable to prepare login query: ' . $conn->error
+        );
+    }
+
     $stmt->bind_param(
         's',
         $username
@@ -309,6 +315,12 @@ try {
         WHERE id = ?
     ");
 
+    if (!$update) {
+        throw new RuntimeException(
+            'Unable to prepare last_login update: ' . $conn->error
+        );
+    }
+
     $userId = (int) $user['id'];
 
     $update->bind_param(
@@ -351,7 +363,32 @@ unset(
 
 /*
 |--------------------------------------------------------------------------
-| Go to dashboard
+| Role-based landing page
+|--------------------------------------------------------------------------
+|
+| Human Resource accounts belong to the HR portal and must NOT
+| be sent to the POS dashboard.
+|
+| The HR portal is:
+|
+|   /admin/employee_management.php
+|
+| All other roles retain the existing POS dashboard destination.
+|--------------------------------------------------------------------------
+*/
+
+$role = trim((string) ($user['role'] ?? ''));
+
+if (strcasecmp($role, 'Human Resource') === 0) {
+
+    header('Location: admin/employee_management.php');
+    exit;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Default POS destination
 |--------------------------------------------------------------------------
 */
 
