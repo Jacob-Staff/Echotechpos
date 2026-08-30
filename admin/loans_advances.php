@@ -12,8 +12,8 @@ declare(strict_types=1);
 
 session_start();
 
-require_once __DIR__ . '/../includes/auth.php';
-require_once __DIR__ . '/../includes/conn.php';
+require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/conn.php';
 
 require_admin();
 
@@ -188,6 +188,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$valid) la_redirect('', 'Selected employee is not valid for this pharmacy.');
 
+        $activeCheck = $conn->prepare("SELECT id FROM employee_loans WHERE pharmacy_id=? AND staff_id=? AND status IN ('Pending','Approved','Active') LIMIT 1");
+        if ($activeCheck) {
+            $activeCheck->bind_param('ii', $pharmacyId, $staffId);
+            $activeCheck->execute();
+            $alreadyInProgress = (bool)$activeCheck->get_result()->fetch_assoc();
+            $activeCheck->close();
+            if ($alreadyInProgress) {
+                la_redirect('', 'This employee already has a loan in progress (Pending, Approved or Active). A new loan cannot be created until the existing loan is completed, rejected or cancelled.');
+            }
+        }
+
         $total = round($principal + $interest, 2);
         $installment = min($installment, $total);
         $loanNumber = 'LN-' . date('YmdHis') . '-' . random_int(100, 999);
@@ -267,6 +278,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $verify->close();
 
         if (!$valid) la_redirect('', 'Selected employee is not valid for this pharmacy.');
+
+        $activeCheck = $conn->prepare("SELECT id FROM salary_advances WHERE pharmacy_id=? AND staff_id=? AND status IN ('Pending','Approved','Active') LIMIT 1");
+        if ($activeCheck) {
+            $activeCheck->bind_param('ii', $pharmacyId, $staffId);
+            $activeCheck->execute();
+            $alreadyInProgress = (bool)$activeCheck->get_result()->fetch_assoc();
+            $activeCheck->close();
+            if ($alreadyInProgress) {
+                la_redirect('', 'This employee already has a salary advance in progress (Pending, Approved or Active). A new advance cannot be created until the existing advance is completed, rejected or cancelled.');
+            }
+        }
 
         $installment = min($installment, $amount);
         $advanceNumber = 'ADV-' . date('YmdHis') . '-' . random_int(100, 999);
@@ -628,6 +650,7 @@ tr:last-child td{border-bottom:0}
             <h1>Loans & Salary Advances</h1>
             <p>Manage employee loans, salary advances, approvals and repayment balances.</p>
         </div>
+        <div style="margin-top:8px;font-size:11px;color:#6f7d88;line-height:1.5;">Loan and advance installments are automatically included in Payroll from their first repayment month. Use Payroll to excuse or lower the current month's deduction; the unpaid balance carries forward.</div>
         <div class="actions">
             <button class="btn" type="button" onclick="openModal('advanceModal')">
                 <i class="fa-solid fa-hand-holding-dollar"></i> Salary Advance
@@ -680,7 +703,7 @@ tr:last-child td{border-bottom:0}
             <input type="text" name="q" value="<?= la_esc($search) ?>" placeholder="Search employee or reference...">
             <select name="status">
                 <option value="">All Statuses</option>
-                <?php foreach (['Pending','Active','Completed','Cancelled','Rejected','Draft'] as $s): ?>
+                <?php foreach (['Pending','Approved','Active','Completed','Cancelled','Rejected','Draft'] as $s): ?>
                     <option value="<?= $s ?>" <?= $statusFilter === $s ? 'selected' : '' ?>><?= $s ?></option>
                 <?php endforeach; ?>
             </select>
@@ -739,6 +762,9 @@ tr:last-child td{border-bottom:0}
                             <?php else: ?>
                                 <span class="muted">â€”</span>
                             <?php endif; ?>
+                            <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
+                                <a class="btn" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Manage current payroll deduction"><i class="fa-solid fa-calculator"></i></a>
+                            <?php endif; ?>
                             </div>
                         </td>
                     </tr>
@@ -792,6 +818,9 @@ tr:last-child td{border-bottom:0}
                                 </form>
                             <?php else: ?>
                                 <span class="muted">â€”</span>
+                            <?php endif; ?>
+                            <?php if (in_array($row['status'], ['Pending','Approved','Active'], true)): ?>
+                                <a class="btn" href="payroll.php?month=<?= (int)date('n') ?>&year=<?= (int)date('Y') ?>" title="Manage current payroll deduction"><i class="fa-solid fa-calculator"></i></a>
                             <?php endif; ?>
                             </div>
                         </td>
