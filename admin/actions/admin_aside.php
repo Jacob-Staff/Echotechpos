@@ -162,6 +162,10 @@ a{text-decoration:none;color:inherit}
             <div class="nav-subnav" id="payrollNavSubnav" style="<?= $payrollNavOpen ? '' : 'display:none;' ?>">
                 <a class="<?= $current_admin_page === 'payroll.php' ? 'active' : '' ?>" href="payroll.php"><i class="fas fa-file-invoice"></i>Payroll Register</a>
                 <a class="<?= $current_admin_page === 'loans_advances.php' ? 'active' : '' ?>" href="loans_advances.php"><i class="fas fa-hand-holding-dollar"></i>Loans &amp; Advances</a>
+                <a href="compliance.php">
+    <i class="fa-solid fa-shield-halved"></i>
+    Compliance
+</a>
             </div>
         </div>
 
