@@ -252,19 +252,19 @@ $hrIsActive = static function (string $page) use ($hrCurrentPage): string {
     <nav class="hr-nav">
 
         <a class="<?= $hrIsActive('staff_management.php') ?>"
-           href="staff_management.php">
+           href="hr_staff_management.php">
             <i class="fa-solid fa-users"></i>
             <span>Staff Management</span>
         </a>
 
         <a class="<?= $hrIsActive('payroll.php') ?>"
-           href="payroll.php">
+           href="hr_payroll.php">
             <i class="fa-solid fa-file-invoice-dollar"></i>
             <span>Payroll</span>
         </a>
 
         <a class="<?= $hrIsActive('loans_advances.php') ?>"
-           href="loans_advances.php">
+           href="hr_loans_advances.php">
             <i class="fa-solid fa-hand-holding-dollar"></i>
             <span>Loans &amp; Advances</span>
         </a>
