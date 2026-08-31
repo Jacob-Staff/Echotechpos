@@ -2,13 +2,6 @@
 declare(strict_types=1);
 
 /*
- * Change this whenever the actual payslip PDF renderer/layout changes.
- * Existing stored PDFs with an older version are regenerated once so the
- * official document matches the current payslip template.
- */
-const PAYSLIP_PDF_RENDER_VERSION = '2026-08-30-v4';
-
-/*
  * EchoTech POS â€” dedicated Payslip module.
  *
  * This file owns ALL payslip presentation, PDF generation, verification
@@ -59,104 +52,92 @@ if (!function_exists('require_login') && !function_exists('require_admin')) {
     /* Existing deployments normally provide these through auth.php. */
 }
 if (function_exists('require_login')) require_login();
-if (function_exists('require_admin')) require_admin();
-elseif (($_SESSION['role'] ?? '') !== 'Admin') { http_response_code(403); exit('Access denied.'); }
+
+$payslipRole = trim((string)($_SESSION['role'] ?? ''));
+if (!in_array($payslipRole, ['Admin', 'Human Resource'], true)) {
+    http_response_code(403);
+    exit('Access denied. Payslips are restricted to Administrative and Human Resource staff.');
+}
 
 if (!function_exists('payroll_complete_h')) {
-    function payroll_complete_h(mixed $v): string {
-        return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+
+function payroll_complete_h(mixed $v): string {
+    return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+}
+
+function payroll_complete_money(float $v): string {
+    return 'K' . number_format($v, 2);
+}
+
+function payroll_verification_token(): string {
+    try {
+        return strtoupper(bin2hex(random_bytes(24)));
+    } catch (Throwable $e) {
+        return strtoupper(hash('sha256', uniqid((string)mt_rand(), true) . microtime(true)));
     }
 }
 
-if (!function_exists('payroll_complete_money')) {
-    function payroll_complete_money(float $v): string {
-        return 'K' . number_format($v, 2);
-    }
+function payroll_verification_hash(array $row, string $token): string {
+    $parts = [
+        (string)($row['pharmacy_id'] ?? ''),
+        (string)($row['staff_id'] ?? ''),
+        (string)($row['payroll_period'] ?? ''),
+        (string)($row['basic_salary'] ?? 0),
+        (string)($row['allowances'] ?? 0),
+        (string)($row['bonus'] ?? 0),
+        (string)($row['overtime'] ?? 0),
+        (string)($row['other_earnings'] ?? 0),
+        (string)($row['paye'] ?? 0),
+        (string)($row['napsa'] ?? 0),
+        (string)($row['nhima'] ?? 0),
+        (string)($row['loan_deduction'] ?? 0),
+        (string)($row['salary_advance'] ?? 0),
+        (string)($row['other_deductions'] ?? 0),
+        (string)($row['gross_salary'] ?? 0),
+        (string)($row['total_deductions'] ?? 0),
+        (string)($row['net_salary'] ?? 0),
+        (string)($row['employer_napsa'] ?? 0),
+        (string)($row['employer_nhima'] ?? 0),
+        $token,
+    ];
+    return hash('sha256', implode('|', $parts));
 }
 
-/* Payslip-specific helpers must always be available, even when payroll.php
- * has already provided the generic payroll helpers. */
-if (!function_exists('payroll_verification_token')) {
-    function payroll_verification_token(): string {
-        try {
-            return strtoupper(bin2hex(random_bytes(24)));
-        } catch (Throwable $e) {
-            return strtoupper(hash('sha256', uniqid((string)mt_rand(), true) . microtime(true)));
-        }
-    }
+function payroll_public_base_url(): string {
+    $forwarded = strtolower(trim((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')));
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443)
+        || $forwarded === 'https';
+    $host = (string)($_SERVER['HTTP_HOST'] ?? 'echotechpos.onrender.com');
+    $host = preg_replace('/[^a-zA-Z0-9.:-]/', '', $host) ?: 'echotechpos.onrender.com';
+    return ($https ? 'https://' : 'http://') . $host;
 }
 
-if (!function_exists('payroll_verification_hash')) {
-    function payroll_verification_hash(array $row, string $token): string {
-        $parts = [
-            (string)($row['pharmacy_id'] ?? ''),
-            (string)($row['staff_id'] ?? ''),
-            (string)($row['payroll_period'] ?? ''),
-            (string)($row['basic_salary'] ?? 0),
-            (string)($row['allowances'] ?? 0),
-            (string)($row['bonus'] ?? 0),
-            (string)($row['overtime'] ?? 0),
-            (string)($row['other_earnings'] ?? 0),
-            (string)($row['paye'] ?? 0),
-            (string)($row['napsa'] ?? 0),
-            (string)($row['nhima'] ?? 0),
-            (string)($row['loan_deduction'] ?? 0),
-            (string)($row['salary_advance'] ?? 0),
-            (string)($row['other_deductions'] ?? 0),
-            (string)($row['gross_salary'] ?? 0),
-            (string)($row['total_deductions'] ?? 0),
-            (string)($row['net_salary'] ?? 0),
-            (string)($row['employer_napsa'] ?? 0),
-            (string)($row['employer_nhima'] ?? 0),
-            $token,
-        ];
-        return hash('sha256', implode('|', $parts));
-    }
+function payroll_complete_table(mysqli $db, string $table): bool {
+    $safe = $db->real_escape_string($table);
+    $r = @$db->query("SHOW TABLES LIKE '{$safe}'");
+    return $r instanceof mysqli_result && $r->num_rows > 0;
 }
 
-if (!function_exists('payroll_public_base_url')) {
-    function payroll_public_base_url(): string {
-        $forwarded = strtolower(trim((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')));
-        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443)
-            || $forwarded === 'https';
-        $host = (string)($_SERVER['HTTP_HOST'] ?? 'echotechpos.onrender.com');
-        $host = preg_replace('/[^a-zA-Z0-9.:-]/', '', $host) ?: 'echotechpos.onrender.com';
-        return ($https ? 'https://' : 'http://') . $host;
-    }
+function payroll_complete_col(mysqli $db, string $table, string $column): bool {
+    $safeTable = str_replace('`', '``', $table);
+    $safeColumn = $db->real_escape_string($column);
+    $r = @$db->query("SHOW COLUMNS FROM `{$safeTable}` LIKE '{$safeColumn}'");
+    return $r instanceof mysqli_result && $r->num_rows > 0;
 }
 
-if (!function_exists('payroll_complete_table')) {
-    function payroll_complete_table(mysqli $db, string $table): bool {
-        $safe = $db->real_escape_string($table);
-        $r = @$db->query("SHOW TABLES LIKE '{$safe}'");
-        return $r instanceof mysqli_result && $r->num_rows > 0;
-    }
+function payroll_complete_rows(mysqli $db, string $sql, string $types = '', array $params = []): array {
+    $stmt = @$db->prepare($sql);
+    if (!$stmt) return [];
+    if ($types !== '') @$stmt->bind_param($types, ...$params);
+    if (!@$stmt->execute()) { $stmt->close(); return []; }
+    $r = @$stmt->get_result();
+    $rows = [];
+    if ($r) while ($row = $r->fetch_assoc()) $rows[] = $row;
+    $stmt->close();
+    return $rows;
 }
-
-if (!function_exists('payroll_complete_col')) {
-    function payroll_complete_col(mysqli $db, string $table, string $column): bool {
-        $safeTable = str_replace('`', '``', $table);
-        $safeColumn = $db->real_escape_string($column);
-        $r = @$db->query("SHOW COLUMNS FROM `{$safeTable}` LIKE '{$safeColumn}'");
-        return $r instanceof mysqli_result && $r->num_rows > 0;
-    }
 }
-
-if (!function_exists('payroll_complete_rows')) {
-    function payroll_complete_rows(mysqli $db, string $sql, string $types = '', array $params = []): array {
-        $stmt = @$db->prepare($sql);
-        if (!$stmt) return [];
-        if ($types !== '') @$stmt->bind_param($types, ...$params);
-        if (!@$stmt->execute()) { $stmt->close(); return []; }
-        $r = @$stmt->get_result();
-        $rows = [];
-        if ($r) while ($row = $r->fetch_assoc()) $rows[] = $row;
-        $stmt->close();
-        return $rows;
-    }
-}
-
 if (!function_exists('payroll_mail_config')) {
 function payroll_mail_config(): array {
     /*
@@ -785,7 +766,7 @@ function payroll_payslip_css(): string {
     .payslip-footer > div{text-align:left!important}
 }@media print{
     @page{
-        size:Letter portrait;
+        size:A4 portrait;
         margin:10mm;
     }
     html,body{
@@ -1107,12 +1088,9 @@ function payroll_payslip_pdf_content(array $data): string {
 
 
 function payroll_payslip_ensure_document_table(mysqli $conn): void {
-    /*
-     * The document table may already exist from an older deployment.
-     * Do NOT return early: older installations may be missing renderer_version.
-     */
-    if (!payroll_complete_table($conn, 'payroll_payslip_documents')) {
-        $create = "
+    if (payroll_complete_table($conn, 'payroll_payslip_documents')) return;
+
+    $create = "
         CREATE TABLE `payroll_payslip_documents` (
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             `payroll_record_id` INT UNSIGNED NOT NULL,
@@ -1128,21 +1106,12 @@ function payroll_payslip_ensure_document_table(mysqli $conn): void {
             KEY `idx_payslip_document_pharmacy` (`pharmacy_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ";
-        if (!$conn->query($create) && !payroll_complete_table($conn, 'payroll_payslip_documents')) {
-            throw new RuntimeException('Could not create official payslip document table: ' . $conn->error);
-        }
+    if (!$conn->query($create) && !payroll_complete_table($conn, 'payroll_payslip_documents')) {
+        throw new RuntimeException('Could not create official payslip document table: ' . $conn->error);
     }
 
-    /* Upgrade an existing table that predates renderer_version. */
     if (!payroll_complete_col($conn, 'payroll_payslip_documents', 'renderer_version')) {
-        if (!@$conn->query(
-            "ALTER TABLE payroll_payslip_documents
-             ADD COLUMN renderer_version VARCHAR(40) NOT NULL DEFAULT '' AFTER pdf_hash"
-        )) {
-            throw new RuntimeException(
-                'Could not upgrade official payslip document table: ' . $conn->error
-            );
-        }
+        @$conn->query("ALTER TABLE payroll_payslip_documents ADD COLUMN renderer_version VARCHAR(40) NOT NULL DEFAULT '' AFTER pdf_hash");
     }
 }
 
@@ -1344,10 +1313,7 @@ function payroll_send_period_payslips(mysqli $conn, int $pharmacyId, string $per
  * Standalone payslip controller.
  * URL: /admin/actions/payslip.php?record_id=123&format=pdf
  * ------------------------------------------------------------------------- */
-if (
-    basename((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === 'payslip.php'
-    || (isset($_GET['official_pdf']) && $_GET['official_pdf'] === '1')
-) {
+if (basename((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === 'payslip.php') {
     $recordId = (int)($_GET['record_id'] ?? 0);
     $staffId = (int)($_GET['staff_id'] ?? 0);
     $month = max(1, min(12, (int)($_POST['month'] ?? $_GET['month'] ?? date('n'))));
