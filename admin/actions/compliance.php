@@ -116,7 +116,7 @@ function compliance_h($value): string
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
-function compliance_money(float $value): string
+function compliance_money($value): string
 {
     return 'K ' . number_format($value, 2);
 }
@@ -325,7 +325,7 @@ function compliance_audit(mysqli $db, int $pharmacyId, string $action, string $e
     compliance_exec(
         $db,
         'INSERT INTO compliance_audit_log (pharmacy_id, action, entity_type, entity_id, details, actor) VALUES (?,?,?,?,?,?)',
-        'isisss',
+        'ississ',
         [$pharmacyId, $action, $entityType, $entityId, $details, $actor]
     );
 }
@@ -379,7 +379,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $registeredAt = $status === 'registered' ? date('Y-m-d H:i:s') : null;
         if ($recordId > 0) {
-            compliance_exec($conn, 'UPDATE compliance_branch_devices SET branch_id=?,device_name=?,vsdc_serial=?,registration_status=?,registered_at=?,notes=?,updated_by=? WHERE id=? AND pharmacy_id=?', 'isssssiii', [$recordBranch,$device,$serial,$status,$registeredAt,$notes,compliance_actor(),$recordId,$pharmacy_id]);
+            compliance_exec($conn, 'UPDATE compliance_branch_devices SET branch_id=?,device_name=?,vsdc_serial=?,registration_status=?,registered_at=?,notes=?,updated_by=? WHERE id=? AND pharmacy_id=?', 'issssssii', [$recordBranch,$device,$serial,$status,$registeredAt,$notes,compliance_actor(),$recordId,$pharmacy_id]);
         } else {
             compliance_exec($conn, 'INSERT INTO compliance_branch_devices (pharmacy_id,branch_id,device_name,vsdc_serial,registration_status,registered_at,notes,created_by,updated_by) VALUES (?,?,?,?,?,?,?,?,?)', 'iisssssss', [$pharmacy_id,$recordBranch,$device,$serial,$status,$registeredAt,$notes,compliance_actor(),compliance_actor()]);
             $recordId = (int)$conn->insert_id;
@@ -406,7 +406,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $notes = trim((string)($_POST['notes'] ?? ''));
         $dueValue = $due !== '' ? $due : null;
         if ($id > 0) {
-            compliance_exec($conn, 'UPDATE compliance_obligations SET obligation_type=?,period_label=?,due_date=?,status=?,amount=?,reference=?,notes=?,updated_by=? WHERE id=? AND pharmacy_id=?', 'sssssdssii', [$type,$period,$dueValue,$status,$amount,$reference,$notes,compliance_actor(),$id,$pharmacy_id]);
+            compliance_exec($conn, 'UPDATE compliance_obligations SET obligation_type=?,period_label=?,due_date=?,status=?,amount=?,reference=?,notes=?,updated_by=? WHERE id=? AND pharmacy_id=?', 'ssssdsssii', [$type,$period,$dueValue,$status,$amount,$reference,$notes,compliance_actor(),$id,$pharmacy_id]);
         } else {
             compliance_exec($conn, 'INSERT INTO compliance_obligations (pharmacy_id,obligation_type,period_label,due_date,status,amount,reference,notes,created_by,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?)', 'issssdssss', [$pharmacy_id,$type,$period,$dueValue,$status,$amount,$reference,$notes,compliance_actor(),compliance_actor()]);
             $id = (int)$conn->insert_id;
@@ -519,11 +519,6 @@ if (compliance_table_exists($conn, 'sales')) {
         $where = 's.pharmacy_id=?';
         $types = 'i';
         $params = [$pharmacy_id];
-        if (in_array('branch_id', $salesCols, true) && $branch_id > 0) {
-            $where .= ' AND s.branch_id=?';
-            $types .= 'i';
-            $params[] = $branch_id;
-        }
         $zraInvoices = compliance_rows($conn, 'SELECT ' . implode(',', $select) . ' FROM sales s WHERE ' . $where . ' ORDER BY ' . (in_array('created_at',$salesCols,true) ? 's.created_at' : 's.id') . ' DESC LIMIT 100', $types, $params);
     }
 }
@@ -537,13 +532,13 @@ $auditRows = compliance_rows($conn, 'SELECT * FROM compliance_audit_log WHERE ph
  | Admin header / aside
  * ------------------------------------------------------------ */
 $current_admin_page = 'compliance.php';
+$admin_page_title = 'Compliance';
 $user_display_name = (string)($_SESSION['full_name'] ?? $_SESSION['username'] ?? $_SESSION['sessionUsername'] ?? 'Administrator');
 $total_orders = 0;
 $branch_count = count($branches);
 if (compliance_table_exists($conn, 'sales')) {
     $salesCols = compliance_columns($conn, 'sales');
     $q = 'SELECT COUNT(*) c FROM sales WHERE pharmacy_id=?';
-    if (in_array('branch_id',$salesCols,true) && $branch_id > 0) $q .= ' AND branch_id=' . $branch_id;
     $row = compliance_one($conn, $q, 'i', [$pharmacy_id]);
     $total_orders = (int)($row['c'] ?? 0);
 }
