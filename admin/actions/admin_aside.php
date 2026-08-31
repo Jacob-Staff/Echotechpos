@@ -154,20 +154,36 @@ a{text-decoration:none;color:inherit}
 
         <?php $payrollNavOpen = in_array($current_admin_page, ['payroll.php','loans_advances.php'], true); ?>
         <div class="nav-group">
-            <button type="button" class="nav-parent <?= $payrollNavOpen ? 'open active' : '' ?>" id="payrollNavParent" aria-expanded="<?= $payrollNavOpen ? 'true' : 'false' ?>">
+            <button type="button"
+                    class="nav-parent <?= $payrollNavOpen ? 'open active' : '' ?>"
+                    id="payrollNavParent"
+                    aria-expanded="<?= $payrollNavOpen ? 'true' : 'false' ?>">
                 <i class="fas fa-file-invoice-dollar"></i>
                 <span>Payroll</span>
                 <i class="fas fa-chevron-down nav-chevron"></i>
             </button>
-            <div class="nav-subnav" id="payrollNavSubnav" style="<?= $payrollNavOpen ? '' : 'display:none;' ?>">
-                <a class="<?= $current_admin_page === 'payroll.php' ? 'active' : '' ?>" href="payroll.php"><i class="fas fa-file-invoice"></i>Payroll Register</a>
-                <a class="<?= $current_admin_page === 'loans_advances.php' ? 'active' : '' ?>" href="loans_advances.php"><i class="fas fa-hand-holding-dollar"></i>Loans &amp; Advances</a>
-                <a href="compliance.php">
-    <i class="fa-solid fa-shield-halved"></i>
-    Compliance
-</a>
+
+            <div class="nav-subnav"
+                 id="payrollNavSubnav"
+                 style="<?= $payrollNavOpen ? '' : 'display:none;' ?>">
+                <a class="<?= $current_admin_page === 'payroll.php' ? 'active' : '' ?>"
+                   href="payroll.php">
+                    <i class="fas fa-file-invoice"></i>Payroll Register
+                </a>
+
+                <a class="<?= $current_admin_page === 'loans_advances.php' ? 'active' : '' ?>"
+                   href="loans_advances.php">
+                    <i class="fas fa-hand-holding-dollar"></i>Loans &amp; Advances
+                </a>
             </div>
         </div>
+
+        <?php if ($user_role === 'Admin'): ?>
+        <a class="<?= $current_admin_page === 'compliance.php' ? 'active' : '' ?>"
+           href="compliance.php">
+            <i class="fas fa-shield-halved"></i>Compliance
+        </a>
+        <?php endif; ?>
 
         <a href="sales_report.php"><i class="fas fa-chart-line"></i>Sales Analytics</a>
         <a href="today_transactions.php"><i class="fas fa-receipt"></i>Transactions <span class="nav-badge"><?php echo (int)$total_orders; ?></span></a>
@@ -201,7 +217,7 @@ a{text-decoration:none;color:inherit}
             <div class="avatar"><?php echo strtoupper(substr($user_display_name ?: 'A', 0, 1)); ?></div>
             <div class="user-copy">
                 <b><?php echo htmlspecialchars($user_display_name); ?></b>
-                <span><?php echo htmlspecialchars($user_role); ?> Â· Administrator</span>
+                <span><?php echo htmlspecialchars($user_role); ?> &middot; Administrator</span>
             </div>
             <i class="fas fa-ellipsis"></i>
         </div>
