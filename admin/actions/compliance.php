@@ -71,8 +71,8 @@ if (function_exists('require_login')) {
     require_login();
 }
 
-$role = (string)($_SESSION['role'] ?? '');
-if ($role !== 'Admin') {
+$role = (string)($_SESSION['role'] ?? $_SESSION['user_role'] ?? $_SESSION['userRole'] ?? '');
+if (strcasecmp(trim($role), 'Admin') !== 0) {
     http_response_code(403);
     exit('Access denied. Compliance is restricted to Admin.');
 }
@@ -83,8 +83,8 @@ if (!isset($conn) || !($conn instanceof mysqli)) {
 }
 $conn->set_charset('utf8mb4');
 
-$pharmacyId = (int)($_SESSION['pharmacy_id'] ?? 0);
-$userId = (int)($_SESSION['user_id'] ?? 0);
+$pharmacyId = (int)($_SESSION['pharmacy_id'] ?? $_SESSION['pharmacyId'] ?? 0);
+$userId = (int)($_SESSION['user_id'] ?? $_SESSION['userId'] ?? 0);
 if ($pharmacyId <= 0) {
     http_response_code(400);
     exit('Pharmacy session is missing.');
@@ -195,7 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ");
         if (!$stmt) compliance_redirect('zra', '', 'Could not prepare settings save.');
         $stmt->bind_param(
-            'issisiiisssssssssi',
+            'issisiisssssssssssi',
             $pharmacyId,$tpin,$businessName,$vatRegistered,$vatNo,$incomeTax,$turnoverTax,
             $smartStatus,$environment,$cis,$serial,$vsdcStatus,$endpoint,$taxRef,
             $contactName,$contactEmail,$contactPhone,$notes,$userId
@@ -263,6 +263,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $settings = compliance_setting($conn, $pharmacyId);
+
+/*
+ * Always define compliance fields before rendering them.
+ * This prevents undefined-array-key warnings when the
+ * compliance_settings record has not been created yet.
+ */
+$tpin = (string)($settings['tpin'] ?? '');
+$businessName = (string)($settings['business_name'] ?? '');
+$vatNumber = (string)($settings['vat_number'] ?? '');
+$vatRegistered = (int)($settings['vat_registered'] ?? 0);
+$incomeTaxRegistered = (int)($settings['income_tax_registered'] ?? 0);
+$turnoverTaxRegistered = (int)($settings['turnover_tax_registered'] ?? 0);
+$smartInvoiceStatus = (string)($settings['smart_invoice_status'] ?? 'not_configured');
+$smartInvoiceEnvironment = (string)($settings['smart_invoice_environment'] ?? 'test');
+$cisCode = (string)($settings['cis_code'] ?? '');
+$vsdcSerial = (string)($settings['vsdc_serial'] ?? '');
+$vsdcStatus = (string)($settings['vsdc_status'] ?? 'not_configured');
+$vsdcEndpoint = (string)($settings['vsdc_endpoint'] ?? '');
+$taxAccountReference = (string)($settings['tax_account_reference'] ?? '');
+$complianceContactName = (string)($settings['compliance_contact_name'] ?? '');
+$complianceContactEmail = (string)($settings['compliance_contact_email'] ?? '');
+$complianceContactPhone = (string)($settings['compliance_contact_phone'] ?? '');
+$complianceNotes = (string)($settings['notes'] ?? '');
 $tab = compliance_post('tab', $_GET['tab'] ?? 'overview');
 $allowedTabs = ['overview','zra','tax','branches','invoices','obligations','payments','audit'];
 if (!in_array($tab, $allowedTabs, true)) $tab = 'overview';
@@ -361,9 +384,17 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:11px 10p
 </head>
 <body>
 <div class="app">
-<?php if (is_file($adminAside)) require $adminAside; ?>
+<?php
+if (is_file($adminAside)) {
+    require_once $adminAside;
+}
+?>
 <main class="main">
-<?php if (is_file($adminHeader)) require $adminHeader; ?>
+<?php
+if (is_file($adminHeader)) {
+    require_once $adminHeader;
+}
+?>
 
 <section class="compliance-content">
 <div class="heading">
@@ -404,8 +435,8 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:11px 10p
 <?php if ($tab==='overview'): ?>
 <div class="grid2">
   <div class="panel"><div class="panel-head"><h2>Compliance readiness</h2><p>Phase 1 records that must be completed before live Smart Invoice integration.</p></div><div class="panel-body">
-    <div class="linkbox"><div><b>Taxpayer TPIN</b><span><?= $settings['tpin'] ? 'Configured' : 'Missing' ?></span></div><span class="badge <?= $settings['tpin']?'green':'red' ?>"><?= $settings['tpin']?'READY':'ACTION' ?></span></div>
-    <div class="linkbox"><div><b>VAT registration</b><span><?= !empty($settings['vat_registered']) ? 'Registered' : 'Not marked registered' ?></span></div><span class="badge <?= !empty($settings['vat_registered'])?'green':'gray' ?>"><?= !empty($settings['vat_registered'])?'ON':'OFF' ?></span></div>
+    <div class="linkbox"><div><b>Taxpayer TPIN</b><span><?= $tpin !== '' ? 'Configured' : 'Missing' ?></span></div><span class="badge <?= $tpin !== ''?'green':'red' ?>"><?= $tpin !== ''?'READY':'ACTION' ?></span></div>
+    <div class="linkbox"><div><b>VAT registration</b><span><?= $vatRegistered === 1 ? 'Registered' : 'Not marked registered' ?></span></div><span class="badge <?= $vatRegistered === 1?'green':'gray' ?>"><?= $vatRegistered === 1?'ON':'OFF' ?></span></div>
     <div class="linkbox"><div><b>Smart Invoice configuration</b><span><?= compliance_h(ucwords(str_replace('_',' ',(string)($settings['smart_invoice_status'] ?? 'not_configured')))) ?></span></div><span class="badge <?= (($settings['smart_invoice_status']??'')==='connected')?'green':'orange' ?>">STATUS</span></div>
     <div class="linkbox"><div><b>VSDC</b><span><?= compliance_h(ucwords(str_replace('_',' ',(string)($settings['vsdc_status'] ?? 'not_configured')))) ?></span></div><span class="badge <?= (($settings['vsdc_status']??'')==='online')?'green':'gray' ?>">STATUS</span></div>
   </div></div>
@@ -427,33 +458,33 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:11px 10p
 <input type="hidden" name="action" value="save_settings">
 <div class="grid2">
 <div>
-<div class="field"><label>Business / Taxpayer Name</label><input name="business_name" value="<?= compliance_h($settings['business_name']??'') ?>"></div>
-<div class="field"><label>ZRA TPIN</label><input name="tpin" value="<?= compliance_h($settings['tpin']??'') ?>" placeholder="Enter taxpayer TPIN"></div>
-<div class="field"><label>VAT Number / Registration Reference</label><input name="vat_number" value="<?= compliance_h($settings['vat_number']??'') ?>"></div>
+<div class="field"><label>Business / Taxpayer Name</label><input name="business_name" value="<?= compliance_h($businessName) ?>"></div>
+<div class="field"><label>ZRA TPIN</label><input name="tpin" value="<?= compliance_h($tpin) ?>" placeholder="Enter taxpayer TPIN"></div>
+<div class="field"><label>VAT Number / Registration Reference</label><input name="vat_number" value="<?= compliance_h($vatNumber) ?>"></div>
 <div class="grid2">
-<div class="check"><input type="checkbox" name="vat_registered" value="1" <?= !empty($settings['vat_registered'])?'checked':'' ?>><label>VAT registered</label></div>
-<div class="check"><input type="checkbox" name="income_tax_registered" value="1" <?= !empty($settings['income_tax_registered'])?'checked':'' ?>><label>Income Tax registered</label></div>
+<div class="check"><input type="checkbox" name="vat_registered" value="1" <?= $vatRegistered === 1?'checked':'' ?>><label>VAT registered</label></div>
+<div class="check"><input type="checkbox" name="income_tax_registered" value="1" <?= $incomeTaxRegistered === 1?'checked':'' ?>><label>Income Tax registered</label></div>
 </div>
-<div class="check" style="margin-top:10px"><input type="checkbox" name="turnover_tax_registered" value="1" <?= !empty($settings['turnover_tax_registered'])?'checked':'' ?>><label>Turnover Tax registered</label></div>
+<div class="check" style="margin-top:10px"><input type="checkbox" name="turnover_tax_registered" value="1" <?= $turnoverTaxRegistered === 1?'checked':'' ?>><label>Turnover Tax registered</label></div>
 </div>
 <div>
 <div class="field"><label>Smart Invoice status</label><select name="smart_invoice_status">
-<?php foreach(['not_configured','pending','test','connected','suspended'] as $v): ?><option value="<?= $v ?>" <?= (($settings['smart_invoice_status']??'not_configured')===$v)?'selected':'' ?>><?= ucwords(str_replace('_',' ',$v)) ?></option><?php endforeach; ?>
+<?php foreach(['not_configured','pending','test','connected','suspended'] as $v): ?><option value="<?= $v ?>" <?= ($smartInvoiceStatus===$v)?'selected':'' ?>><?= ucwords(str_replace('_',' ',$v)) ?></option><?php endforeach; ?>
 </select></div>
-<div class="field"><label>Smart Invoice environment</label><select name="smart_invoice_environment"><option value="test" <?= (($settings['smart_invoice_environment']??'test')==='test')?'selected':'' ?>>Test</option><option value="production" <?= (($settings['smart_invoice_environment']??'test')==='production')?'selected':'' ?>>Production</option></select></div>
-<div class="field"><label>CIS Code</label><input name="cis_code" value="<?= compliance_h($settings['cis_code']??'') ?>"></div>
-<div class="field"><label>VSDC Serial Number</label><input name="vsdc_serial" value="<?= compliance_h($settings['vsdc_serial']??'') ?>"></div>
-<div class="field"><label>VSDC Status</label><select name="vsdc_status"><?php foreach(['not_configured','offline','online','error'] as $v): ?><option value="<?= $v ?>" <?= (($settings['vsdc_status']??'not_configured')===$v)?'selected':'' ?>><?= ucwords(str_replace('_',' ',$v)) ?></option><?php endforeach; ?></select></div>
-<div class="field"><label>VSDC Endpoint</label><input name="vsdc_endpoint" value="<?= compliance_h($settings['vsdc_endpoint']??'') ?>" placeholder="Leave blank until Phase 2"></div>
+<div class="field"><label>Smart Invoice environment</label><select name="smart_invoice_environment"><option value="test" <?= ($smartInvoiceEnvironment==='test')?'selected':'' ?>>Test</option><option value="production" <?= ($smartInvoiceEnvironment==='production')?'selected':'' ?>>Production</option></select></div>
+<div class="field"><label>CIS Code</label><input name="cis_code" value="<?= compliance_h($cisCode) ?>"></div>
+<div class="field"><label>VSDC Serial Number</label><input name="vsdc_serial" value="<?= compliance_h($vsdcSerial) ?>"></div>
+<div class="field"><label>VSDC Status</label><select name="vsdc_status"><?php foreach(['not_configured','offline','online','error'] as $v): ?><option value="<?= $v ?>" <?= ($vsdcStatus===$v)?'selected':'' ?>><?= ucwords(str_replace('_',' ',$v)) ?></option><?php endforeach; ?></select></div>
+<div class="field"><label>VSDC Endpoint</label><input name="vsdc_endpoint" value="<?= compliance_h($vsdcEndpoint) ?>" placeholder="Leave blank until Phase 2"></div>
 </div>
 </div>
 <div class="grid3">
-<div class="field"><label>Tax Account Reference</label><input name="tax_account_reference" value="<?= compliance_h($settings['tax_account_reference']??'') ?>"></div>
-<div class="field"><label>Compliance Contact</label><input name="compliance_contact_name" value="<?= compliance_h($settings['compliance_contact_name']??'') ?>"></div>
-<div class="field"><label>Contact Phone</label><input name="compliance_contact_phone" value="<?= compliance_h($settings['compliance_contact_phone']??'') ?>"></div>
+<div class="field"><label>Tax Account Reference</label><input name="tax_account_reference" value="<?= compliance_h($taxAccountReference) ?>"></div>
+<div class="field"><label>Compliance Contact</label><input name="compliance_contact_name" value="<?= compliance_h($complianceContactName) ?>"></div>
+<div class="field"><label>Contact Phone</label><input name="compliance_contact_phone" value="<?= compliance_h($complianceContactPhone) ?>"></div>
 </div>
-<div class="field"><label>Contact Email</label><input type="email" name="compliance_contact_email" value="<?= compliance_h($settings['compliance_contact_email']??'') ?>"></div>
-<div class="field"><label>Compliance Notes</label><textarea name="notes"><?= compliance_h($settings['notes']??'') ?></textarea></div>
+<div class="field"><label>Contact Email</label><input type="email" name="compliance_contact_email" value="<?= compliance_h($complianceContactEmail) ?>"></div>
+<div class="field"><label>Compliance Notes</label><textarea name="notes"><?= compliance_h($complianceNotes) ?></textarea></div>
 <div class="actions"><button class="btn primary" type="submit"><i class="fa-solid fa-floppy-disk"></i> Save Compliance Settings</button><a class="btn" target="_blank" rel="noopener" href="https://siportal.zra.org.zm/main/signup/indexLearnMore"><i class="fa-solid fa-arrow-up-right-from-square"></i> ZRA Registration Portal</a></div>
 </form>
 </div></div>
