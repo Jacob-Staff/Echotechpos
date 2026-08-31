@@ -25,7 +25,8 @@
  *   - Payroll history
  *   - YTD register
  *
- * The Admin Header and Admin Aside remain separate reusable files.
+ * Admin and HR use separate reusable asides. Admin uses admin_aside.php + admin_header.php;
+ * Human Resource uses hr_aside.php + the HR payroll header. Final approval is Admin-only.
  */
 
 declare(strict_types=1);
@@ -2042,7 +2043,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
 
     if ($action === 'approve') {
 
-        /* Final payroll approval is an ADMIN-only action. HR prepares and submits payroll. */
+        /*
+         * FINAL PAYROLL APPROVAL IS ADMIN-ONLY.
+         * Human Resource may prepare, calculate and review payroll, but can
+         * never approve or give the final approval, even by direct POST request.
+         */
         if (!$isPayrollAdmin) {
             payroll_complete_redirect([
                 'month'=>$selectedMonth,
@@ -2806,6 +2811,47 @@ button,input,select,textarea{font:inherit}
 button,select{cursor:pointer}
 a{text-decoration:none;color:inherit}
 .main{margin-left:250px;min-height:100vh}
+.payroll-main.hr-payroll-main{margin-left:250px}
+.hr-payroll-top{
+    height:64px;
+    background:#fff;
+    border-bottom:1px solid var(--border);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 24px;
+    position:sticky;
+    top:0;
+    z-index:900;
+}
+.hr-payroll-top .hr-payroll-title b{
+    display:block;
+    font-size:16px;
+    color:var(--charcoal);
+}
+.hr-payroll-top .hr-payroll-title span{
+    font-size:12px;
+    color:var(--muted);
+}
+.hr-payroll-top .hr-payroll-date{
+    font-size:11px;
+    color:var(--muted);
+}
+.hr-payroll-security-note{
+    margin:0 0 16px;
+    padding:11px 14px;
+    border:1px solid #cbdcff;
+    background:#f4f7ff;
+    color:#2458b8;
+    border-radius:9px;
+    font-size:11px;
+}
+.hr-payroll-security-note strong{font-weight:800}
+@media(max-width:950px){
+    .main,.payroll-main.hr-payroll-main{margin-left:0}
+    .hr-payroll-top{padding:0 16px}
+    .hr-payroll-top .hr-payroll-date{display:none}
+}
 .payroll-content{max-width:1600px;margin:auto;padding:24px 28px 40px}
 
 .page-heading{
@@ -3219,11 +3265,29 @@ tbody tr:hover{background:#fbfcfd}
 
 <div class="app">
 
-<?php require_once __DIR__ . '/admin_aside.php'; ?>
+<?php if ($isPayrollHR): ?>
 
-<main class="main">
+    <?php require_once __DIR__ . '/hr_aside.php'; ?>
 
-<?php require_once __DIR__ . '/admin_header.php'; ?>
+    <main class="main payroll-main hr-payroll-main">
+
+        <header class="hr-payroll-top">
+            <div class="hr-payroll-title">
+                <b><?= payroll_complete_h($pharmacyName) ?> â€” Human Resource Portal</b>
+                <span> / Payroll</span>
+            </div>
+            <div class="hr-payroll-date"><?= date('d M Y') ?></div>
+        </header>
+
+<?php else: ?>
+
+    <?php require_once __DIR__ . '/admin_aside.php'; ?>
+
+    <main class="main payroll-main">
+
+        <?php require_once __DIR__ . '/admin_header.php'; ?>
+
+<?php endif; ?>
 
 <section class="payroll-content">
 
@@ -3586,9 +3650,9 @@ echo payroll_complete_h($initials ?: 'ST');
 <div style="font-size:9px;color:var(--muted);margin-bottom:5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?= payroll_complete_h($row['email']) ?>">
 <i class="fas fa-envelope"></i> <?= payroll_complete_h($row['email']) ?>
 <?php if (($row['payslip_email_status'] ?? 'pending') === 'sent'): ?>
-<span style="color:#08754f;font-weight:700;"> ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· SENT</span>
+<span style="color:#08754f;font-weight:700;"> ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· SENT</span>
 <?php elseif (($row['payslip_email_status'] ?? 'pending') === 'failed'): ?>
-<span style="color:#b42318;font-weight:700;"> ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· FAILED</span>
+<span style="color:#b42318;font-weight:700;"> ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· FAILED</span>
 <?php endif; ?>
 </div>
 <?php else: ?>
@@ -3831,13 +3895,26 @@ Employer cost:
 
 <?php if ($payrollRows): ?>
 
+<?php if ($isPayrollHR && $periodStatus === 'calculated'): ?>
+<div class="hr-payroll-security-note">
+    <strong>HR preparation complete.</strong>
+    This payroll is awaiting <strong>Admin final approval</strong>.
+    Human Resource cannot approve or give final approval to payroll.
+</div>
+<?php elseif ($isPayrollHR && in_array($periodStatus, ['approved','paid','locked'], true)): ?>
+<div class="hr-payroll-security-note">
+    <strong>Admin approval recorded.</strong>
+    This payroll has already passed the Admin approval stage. HR access remains limited to the permitted payroll functions.
+</div>
+<?php endif; ?>
+
 <section class="panel">
 
 <div class="panel-head">
 
 <div class="panel-title">
 <b>Payroll Workflow</b>
-<span>Controlled payroll sequence.</span>
+<span><?= $isPayrollHR ? 'HR preparation and Admin-controlled approval sequence.' : 'Controlled payroll sequence.' ?></span>
 </div>
 
 <div class="action-stack">
@@ -3857,6 +3934,12 @@ Employer cost:
 Approve
 </button>
 </form>
+
+<?php elseif ($periodStatus === 'calculated' && $isPayrollHR): ?>
+
+<span class="status calculated">
+    Awaiting Admin final approval
+</span>
 
 <?php elseif ($periodStatus === 'approved'): ?>
 
@@ -4280,7 +4363,7 @@ Recalculate
 <?= payroll_complete_h(
     $remit['payment_reference']
     ?: $remit['return_reference']
-    ?: 'ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â'
+    ?: 'ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â'
 ) ?>
 </td>
 
