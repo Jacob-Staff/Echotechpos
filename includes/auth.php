@@ -268,23 +268,40 @@ function require_admin(): void
 }
 
 /**
- * Human Resource / Management portal access.
+ * Human Resource portal access.
  *
- * IMPORTANT:
- * This is intentionally separate from require_admin().
- * HR is allowed into HR/Employee Management without receiving
- * unrestricted Admin-only access.
+ * HR is a separate portal. Human Resource users can access HR pages,
+ * while Admin users retain oversight/access to the HR portal.
+ * This does NOT grant HR access to Admin-only pages.
  */
 function require_hr_portal(): void
 {
-    require_login();
+    require_pharmacy();
 
     $role = trim((string)(current_role() ?? ''));
 
-    if (!in_array($role, ['Admin', 'Manager', 'Human Resource'], true)) {
+    if (!in_array($role, ['Admin', 'Human Resource'], true)) {
         http_response_code(403);
         render_denied_message(
-            'This area is restricted to Human Resource, Administrative and Management staff.'
+            'This area is restricted to Human Resource and Administrative staff.'
+        );
+    }
+}
+
+/**
+ * Staff Management is an Admin-only control.
+ *
+ * Do not use require_admin() here because that helper intentionally allows
+ * Manager access to other administrative/management areas.
+ */
+function require_staff_management(): void
+{
+    require_pharmacy();
+
+    if (current_role() !== 'Admin') {
+        http_response_code(403);
+        render_denied_message(
+            'Staff Management is restricted to Admin accounts only.'
         );
     }
 }
