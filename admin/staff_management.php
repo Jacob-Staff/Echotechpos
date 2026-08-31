@@ -10,24 +10,18 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/../includes/conn.php';
 require_once __DIR__ . '/../includes/auth.php';
 
-require_pharmacy();
+require_staff_management();
 
 $userRole = (string)(current_role() ?? '');
-if (!in_array($userRole, ['Admin', 'Human Resource'], true)) {
-    http_response_code(403);
-    exit('Access denied. Staff Management is available to Admin and Human Resource.');
-}
-
 $pharmacyId = current_pharmacy();
 $currentUserId = current_user_id();
 
-if (!$pharmacyId || !$currentUserId) {
+if (!$pharmacyId || !$currentUserId || $userRole !== 'Admin') {
     http_response_code(403);
-    exit('Invalid staff session.');
+    exit('Invalid staff management session.');
 }
 
-$isAdmin = ($userRole === 'Admin');
-$isHR = ($userRole === 'Human Resource');
+$isAdmin = true;
 
 $roles = echotech_staff_roles();
 $pages = echotech_pages();
@@ -784,7 +778,6 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 </head>
 <body>
 
-<?php if ($isAdmin): ?>
 <aside class="admin-aside" id="adminAside">
     <a class="admin-brand" href="admin_dashboard.php">
         <span class="admin-brand-mark"><i class="fa-solid fa-capsules"></i></span>
@@ -842,31 +835,18 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
         <a class="admin-signout" href="../logout.php"><i class="fa-solid fa-right-from-bracket"></i>Sign out</a>
     </div>
 </aside>
-<?php else: ?>
-<?php
-/* HR pages use the single shared HR sidebar used by employee_management.php. */
-if (!function_exists('h')) {
-    function h($value): string {
-        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
-    }
-}
-$pharmacy_name = $pharmacyName;
-$user_role = $userRole;
-require_once __DIR__ . '/actions/hr_aside.php';
-?>
-<?php endif; ?>
 
 <main class="main">
 <header class="top">
     <div class="top-title">
-        <b><?= $isHR ? 'PHARMANOVA â€” Human Resource Portal' : 'Staff & Access Control' ?></b>
-        <span><?= $isHR ? 'Pharmacy group employee accounts and staff administration' : 'Accounts, roles, page access and functions' ?></span>
+        <b><?=eh($pharmacyName)?> â€” Staff &amp; Access Control</b>
+        <span>Accounts, roles, page access and functions</span>
     </div>
     <div class="top-right">
         <input id="globalSearch" class="search" placeholder="Search staff...">
         <div class="branch">
             <i class="fa-solid fa-building me-1"></i>
-            <?= $isHR ? 'Pharmacy Group' : count($branches).' branch'.(count($branches)===1?'':'es') ?>
+            <?=count($branches).' branch'.(count($branches)===1?'':'es')?>
         </div>
         <button class="btn-smx" type="button" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
     </div>
@@ -875,9 +855,9 @@ require_once __DIR__ . '/actions/hr_aside.php';
 <section class="content">
 <div class="head">
     <div>
-        <div class="eyebrow"><?= $isHR ? 'Human Resources' : 'Administration' ?></div>
+        <div class="eyebrow">Administration</div>
         <h1>Staff Management</h1>
-        <p><?= $isHR ? 'Manage employees across all branches in this pharmacy group. HR access is group-wide and is not limited by branch.' : 'Every POS page is available by default. You can restrict access or functions at any time.' ?></p>
+        <p>Manage staff accounts, roles, page access, security and POS functions.</p>
     </div>
     <div class="actions">
         <button class="btnx" type="button" onclick="window.print()"><i class="fa-solid fa-print me-1"></i>Print</button>
@@ -912,7 +892,7 @@ require_once __DIR__ . '/actions/hr_aside.php';
  $search=strtolower(($u['full_name']??'').' '.($u['username']??'').' '.($u['email']??'').' '.($u['role']??''));
 ?>
 <tr class="staffrow" data-search="<?=eh($search)?>" data-role="<?=eh($u['role'])?>" data-branch="<?=eh($u['branch_id'])?>">
-<td><div class="staff-name"><?=eh($u['full_name'] ?: $u['username'])?></div><div class="muted"><?=eh($u['username'])?> Ãƒâ€šÃ‚Â· <?=eh($u['email'])?></div></td>
+<td><div class="staff-name"><?=eh($u['full_name'] ?: $u['username'])?></div><div class="muted"><?=eh($u['username'])?> Â· <?=eh($u['email'])?></div></td>
 <td><span class="badge-role"><?=eh($u['role'] ?: 'General')?></span></td>
 <td><?=eh($u['branch_name'] ?: 'Unassigned')?></td>
 <td><?php if(strcasecmp((string)$u['status'],'Active')===0):?><span class="badge-role badge-green">Active</span><?php else:?><span class="badge-role badge-red"><?=eh($u['status'])?></span><?php endif;?></td>
