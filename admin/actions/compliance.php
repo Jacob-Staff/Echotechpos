@@ -1,36 +1,30 @@
 <?php
 /**
- * EchoTech POS - PHASE 1 COMPLIANCE / ZRA ADMIN
+ * ============================================================
+ * EchoTech POS - ADMIN COMPLIANCE
+ * ============================================================
+ * Location: /admin/actions/compliance.php
+ * Phase 1 - ZRA / Smart Invoice compliance administration.
  *
- * Location:
- *   /admin/actions/compliance.php
+ * This module deliberately does NOT send live invoices to ZRA.
+ * It provides the compliance record, readiness checks, branch/device
+ * register, obligations, tax-payment register and audit trail.
  *
- * Browser:
- *   /admin/compliance.php
- *
- * Phase 1:
- *   - Compliance dashboard
- *   - ZRA taxpayer profile
- *   - Smart Invoice/VSDC configuration
- *   - VAT/tax registration settings
- *   - Branch compliance register
- *   - ZRA invoice register
- *   - Tax obligations and due dates
- *   - Tax payments register
- *   - Compliance audit log
- *
- * IMPORTANT:
- *   This module does NOT claim EchoTech POS is ZRA-certified and does
- *   NOT send live invoices to ZRA. ZRA states that third-party POS/ERP
- *   systems use the VSDC after certification. Phase 2 will add the
- *   certified VSDC integration.
+ * The code is defensive against differences in the existing POS schema:
+ * it detects optional columns/tables before querying them and uses a
+ * dedicated compliance_* record set for Phase 1 administration.
+ * ============================================================
  */
+
 declare(strict_types=1);
 
-if (session_status() === PHP_SESSION_NONE) {
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+error_reporting(E_ALL);
+date_default_timezone_set('Africa/Lusaka');
 
+if (session_status() === PHP_SESSION_NONE) {
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443);
     session_set_cookie_params([
         'lifetime' => 0,
         'path' => '/',
@@ -41,40 +35,21 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-$authCandidates = [
-    __DIR__ . '/../../includes/auth.php',
-    __DIR__ . '/../../includes/auth_helpers.php',
-    __DIR__ . '/../../auth.php',
-];
-foreach ($authCandidates as $f) {
-    if (is_file($f)) {
-        require_once $f;
-        break;
-    }
-}
-
-$dbCandidates = [
+/* ------------------------------------------------------------
+ | Connection
+ * ------------------------------------------------------------ */
+$connectionCandidates = [
     __DIR__ . '/../../includes/conn.php',
     __DIR__ . '/../../config.php',
-    __DIR__ . '/../../db.php',
+    __DIR__ . '/../../includes/db.php',
 ];
-foreach ($dbCandidates as $f) {
-    if (is_file($f)) {
-        require_once $f;
-        if (isset($conn) && $conn instanceof mysqli) {
-            break;
-        }
+foreach ($connectionCandidates as $candidate) {
+    if (is_file($candidate)) {
+        require_once $candidate;
     }
-}
-
-if (function_exists('require_login')) {
-    require_login();
-}
-
-$role = (string)($_SESSION['role'] ?? '');
-if ($role !== 'Admin') {
-    http_response_code(403);
-    exit('Access denied. Compliance is restricted to Admin.');
+    if (isset($conn) && $conn instanceof mysqli) {
+        break;
+    }
 }
 
 if (!isset($conn) || !($conn instanceof mysqli)) {
@@ -83,966 +58,669 @@ if (!isset($conn) || !($conn instanceof mysqli)) {
 }
 $conn->set_charset('utf8mb4');
 
-$pharmacyId = (int)($_SESSION['pharmacy_id'] ?? 0);
-$userId = (int)($_SESSION['user_id'] ?? 0);
-if ($pharmacyId <= 0) {
-    http_response_code(400);
-    exit('Pharmacy session is missing.');
+/* ------------------------------------------------------------
+ | Authentication
+ * ------------------------------------------------------------ */
+$authCandidates = [
+    __DIR__ . '/../../includes/auth.php',
+    __DIR__ . '/../../includes/auth_helpers.php',
+    __DIR__ . '/../../auth.php',
+];
+foreach ($authCandidates as $authFile) {
+    if (is_file($authFile)) {
+        require_once $authFile;
+        break;
+    }
+}
+if (function_exists('require_login')) {
+    require_login();
+}
+if (function_exists('require_admin')) {
+    require_admin();
 }
 
-function compliance_h(mixed $v): string {
-    return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+/* ------------------------------------------------------------
+ | Tenant context
+ * ------------------------------------------------------------ */
+$pharmacy_id = (int)($_SESSION['pharmacy_id'] ?? $_SESSION['pharmacyId'] ?? 0);
+$branch_id   = (int)($_SESSION['branch_id'] ?? $_SESSION['current_branch_id'] ?? 0);
+$user_role   = (string)($_SESSION['role'] ?? $_SESSION['user_role'] ?? $_SESSION['userRole'] ?? 'Admin');
+
+if ($pharmacy_id <= 0) {
+    // Resolve pharmacy from the selected branch when the session only has branch_id.
+    if ($branch_id > 0) {
+        $s = $conn->prepare('SELECT pharmacy_id FROM branches WHERE id=? LIMIT 1');
+        if ($s) {
+            $s->bind_param('i', $branch_id);
+            $s->execute();
+            $r = $s->get_result()->fetch_assoc();
+            $s->close();
+            $pharmacy_id = (int)($r['pharmacy_id'] ?? 0);
+            if ($pharmacy_id > 0) {
+                $_SESSION['pharmacy_id'] = $pharmacy_id;
+            }
+        }
+    }
 }
-function compliance_money(mixed $v): string {
-    return 'K' . number_format((float)$v, 2);
+
+if ($pharmacy_id <= 0) {
+    http_response_code(401);
+    exit('Your pharmacy session has expired. Please sign in again.');
 }
-function compliance_table_exists(mysqli $db, string $table): bool {
-    $table = $db->real_escape_string($table);
-    $r = @$db->query("SHOW TABLES LIKE '{$table}'");
-    return $r instanceof mysqli_result && $r->num_rows > 0;
+
+/* ------------------------------------------------------------
+ | Helpers
+ * ------------------------------------------------------------ */
+function compliance_h(mixed $value): string
+{
+    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
-function compliance_redirect(string $tab = 'overview', string $msg = '', string $err = ''): never {
-    $q = ['tab' => $tab];
-    if ($msg !== '') $q['ok'] = $msg;
-    if ($err !== '') $q['err'] = $err;
-    header('Location: ../compliance.php?' . http_build_query($q));
+
+function compliance_money(float $value): string
+{
+    return 'K ' . number_format($value, 2);
+}
+
+function compliance_table_exists(mysqli $db, string $table): bool
+{
+    $safe = $db->real_escape_string($table);
+    $result = @$db->query("SHOW TABLES LIKE '{$safe}'");
+    return $result instanceof mysqli_result && $result->num_rows > 0;
+}
+
+function compliance_columns(mysqli $db, string $table): array
+{
+    static $cache = [];
+    if (isset($cache[$table])) return $cache[$table];
+    $out = [];
+    if (!compliance_table_exists($db, $table)) return $out;
+    $safe = str_replace('`', '``', $table);
+    $r = @$db->query("SHOW COLUMNS FROM `{$safe}`");
+    if ($r instanceof mysqli_result) {
+        while ($row = $r->fetch_assoc()) {
+            $out[] = (string)$row['Field'];
+        }
+    }
+    return $cache[$table] = $out;
+}
+
+function compliance_has_column(mysqli $db, string $table, string $column): bool
+{
+    return in_array($column, compliance_columns($db, $table), true);
+}
+
+function compliance_exec(mysqli $db, string $sql, string $types = '', array $params = []): bool
+{
+    $stmt = @$db->prepare($sql);
+    if (!$stmt) return false;
+    if ($types !== '') {
+        @$stmt->bind_param($types, ...$params);
+    }
+    $ok = @$stmt->execute();
+    $stmt->close();
+    return (bool)$ok;
+}
+
+function compliance_rows(mysqli $db, string $sql, string $types = '', array $params = []): array
+{
+    $stmt = @$db->prepare($sql);
+    if (!$stmt) return [];
+    if ($types !== '') {
+        @$stmt->bind_param($types, ...$params);
+    }
+    if (!@$stmt->execute()) {
+        $stmt->close();
+        return [];
+    }
+    $result = @$stmt->get_result();
+    $rows = [];
+    if ($result instanceof mysqli_result) {
+        while ($row = $result->fetch_assoc()) $rows[] = $row;
+    }
+    $stmt->close();
+    return $rows;
+}
+
+function compliance_one(mysqli $db, string $sql, string $types = '', array $params = []): ?array
+{
+    $rows = compliance_rows($db, $sql, $types, $params);
+    return $rows[0] ?? null;
+}
+
+function compliance_csrf(): string
+{
+    if (empty($_SESSION['compliance_csrf'])) {
+        $_SESSION['compliance_csrf'] = bin2hex(random_bytes(32));
+    }
+    return (string)$_SESSION['compliance_csrf'];
+}
+
+function compliance_check_csrf(): void
+{
+    $posted = (string)($_POST['csrf_token'] ?? '');
+    $stored = (string)($_SESSION['compliance_csrf'] ?? '');
+    if ($stored === '' || !hash_equals($stored, $posted)) {
+        http_response_code(419);
+        exit('Security token expired. Please reload the Compliance page and try again.');
+    }
+}
+
+function compliance_actor(): string
+{
+    return (string)(
+        $_SESSION['full_name']
+        ?? $_SESSION['username']
+        ?? $_SESSION['sessionUsername']
+        ?? 'Administrator'
+    );
+}
+
+function compliance_redirect(string $view = 'overview', string $message = '', string $type = 'success'): never
+{
+    $url = 'compliance.php?view=' . rawurlencode($view);
+    if ($message !== '') {
+        $url .= '&notice=' . rawurlencode($message) . '&notice_type=' . rawurlencode($type);
+    }
+    header('Location: ' . $url);
     exit;
 }
-function compliance_audit(mysqli $db, int $pharmacyId, int $userId, string $action, string $type = '', ?int $entityId = null, string $description = ''): void {
-    if (!compliance_table_exists($db, 'compliance_audit_log')) return;
-    $ip = substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 64);
-    $stmt = $db->prepare("INSERT INTO compliance_audit_log
-        (pharmacy_id,user_id,action,entity_type,entity_id,description,ip_address)
-        VALUES (?,?,?,?,?,?,?)");
-    if ($stmt) {
-        $stmt->bind_param('iississ', $pharmacyId, $userId, $action, $type, $entityId, $description, $ip);
-        @$stmt->execute();
-        $stmt->close();
-    }
-}
-function compliance_setting(mysqli $db, int $pharmacyId): array {
-    if (!compliance_table_exists($db, 'compliance_settings')) return [];
-    $stmt = $db->prepare("SELECT * FROM compliance_settings WHERE pharmacy_id=? LIMIT 1");
-    if (!$stmt) return [];
-    $stmt->bind_param('i', $pharmacyId);
-    $stmt->execute();
-    $r = $stmt->get_result();
-    $row = $r ? $r->fetch_assoc() : [];
-    $stmt->close();
-    return $row ?: [];
-}
-function compliance_post(string $key, string $default = ''): string {
-    return trim((string)($_POST[$key] ?? $default));
-}
-function compliance_bool(string $key): int {
-    return isset($_POST[$key]) && $_POST[$key] === '1' ? 1 : 0;
+
+/* ------------------------------------------------------------
+ | Create Phase 1 compliance tables
+ * ------------------------------------------------------------ */
+@$conn->query("CREATE TABLE IF NOT EXISTS compliance_settings (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pharmacy_id INT UNSIGNED NOT NULL,
+    taxpayer_name VARCHAR(255) NOT NULL DEFAULT '',
+    tpin VARCHAR(80) NOT NULL DEFAULT '',
+    vat_number VARCHAR(80) NOT NULL DEFAULT '',
+    pacra_number VARCHAR(80) NOT NULL DEFAULT '',
+    tax_registration_status VARCHAR(40) NOT NULL DEFAULT 'not_registered',
+    smart_invoice_status VARCHAR(40) NOT NULL DEFAULT 'not_configured',
+    vsdc_serial VARCHAR(120) NOT NULL DEFAULT '',
+    vsdc_registered_at DATETIME NULL,
+    default_tax_type VARCHAR(100) NOT NULL DEFAULT 'VAT',
+    notes TEXT NULL,
+    created_by VARCHAR(150) NULL,
+    updated_by VARCHAR(150) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_compliance_settings_pharmacy (pharmacy_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+@$conn->query("CREATE TABLE IF NOT EXISTS compliance_branch_devices (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pharmacy_id INT UNSIGNED NOT NULL,
+    branch_id INT UNSIGNED NOT NULL,
+    device_name VARCHAR(150) NOT NULL DEFAULT '',
+    vsdc_serial VARCHAR(120) NOT NULL DEFAULT '',
+    registration_status VARCHAR(40) NOT NULL DEFAULT 'pending',
+    registered_at DATETIME NULL,
+    notes TEXT NULL,
+    created_by VARCHAR(150) NULL,
+    updated_by VARCHAR(150) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_compliance_branch_devices_pharmacy (pharmacy_id),
+    KEY idx_compliance_branch_devices_branch (branch_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+@$conn->query("CREATE TABLE IF NOT EXISTS compliance_obligations (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pharmacy_id INT UNSIGNED NOT NULL,
+    obligation_type VARCHAR(100) NOT NULL,
+    period_label VARCHAR(50) NOT NULL,
+    due_date DATE NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'pending',
+    amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+    reference VARCHAR(150) NOT NULL DEFAULT '',
+    notes TEXT NULL,
+    created_by VARCHAR(150) NULL,
+    updated_by VARCHAR(150) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_compliance_obligations_pharmacy (pharmacy_id),
+    KEY idx_compliance_obligations_due (due_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+@$conn->query("CREATE TABLE IF NOT EXISTS compliance_tax_payments (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pharmacy_id INT UNSIGNED NOT NULL,
+    obligation_id INT UNSIGNED NULL,
+    payment_type VARCHAR(100) NOT NULL,
+    payment_date DATE NULL,
+    amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+    payment_reference VARCHAR(150) NOT NULL DEFAULT '',
+    status VARCHAR(30) NOT NULL DEFAULT 'recorded',
+    notes TEXT NULL,
+    created_by VARCHAR(150) NULL,
+    updated_by VARCHAR(150) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_compliance_tax_payments_pharmacy (pharmacy_id),
+    KEY idx_compliance_tax_payments_date (payment_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+@$conn->query("CREATE TABLE IF NOT EXISTS compliance_audit_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    pharmacy_id INT UNSIGNED NOT NULL,
+    action VARCHAR(120) NOT NULL,
+    entity_type VARCHAR(80) NOT NULL DEFAULT 'compliance',
+    entity_id BIGINT UNSIGNED NULL,
+    details TEXT NULL,
+    actor VARCHAR(150) NOT NULL DEFAULT 'Administrator',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_compliance_audit_pharmacy (pharmacy_id),
+    KEY idx_compliance_audit_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+function compliance_audit(mysqli $db, int $pharmacyId, string $action, string $entityType = 'compliance', ?int $entityId = null, string $details = ''): void
+{
+    $actor = compliance_actor();
+    compliance_exec(
+        $db,
+        'INSERT INTO compliance_audit_log (pharmacy_id, action, entity_type, entity_id, details, actor) VALUES (?,?,?,?,?,?)',
+        'isisss',
+        [$pharmacyId, $action, $entityType, $entityId, $details, $actor]
+    );
 }
 
+/* ------------------------------------------------------------
+ | Pharmacy information
+ * ------------------------------------------------------------ */
+$pharmacy = compliance_one($conn, 'SELECT * FROM pharmacies WHERE id=? LIMIT 1', 'i', [$pharmacy_id]) ?? [];
+$pharmacy_name = (string)($pharmacy['name'] ?? $pharmacy['pharmacy_name'] ?? 'PHARMACY POS');
+
+/* ------------------------------------------------------------
+ | POST actions
+ * ------------------------------------------------------------ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = compliance_post('action');
+    compliance_check_csrf();
+    $action = trim((string)($_POST['action'] ?? ''));
 
-    if ($action === 'save_settings') {
-        if (!compliance_table_exists($conn, 'compliance_settings')) {
-            compliance_redirect('zra', '', 'Run the Phase 1 SQL migration first.');
+    if ($action === 'save_taxpayer') {
+        $taxpayerName = trim((string)($_POST['taxpayer_name'] ?? ''));
+        $tpin = trim((string)($_POST['tpin'] ?? ''));
+        $vat = trim((string)($_POST['vat_number'] ?? ''));
+        $pacra = trim((string)($_POST['pacra_number'] ?? ''));
+        $taxStatus = trim((string)($_POST['tax_registration_status'] ?? 'not_registered'));
+        $smartStatus = trim((string)($_POST['smart_invoice_status'] ?? 'not_configured'));
+        $vsdc = trim((string)($_POST['vsdc_serial'] ?? ''));
+        $taxType = trim((string)($_POST['default_tax_type'] ?? 'VAT'));
+        $notes = trim((string)($_POST['notes'] ?? ''));
+
+        $existing = compliance_one($conn, 'SELECT id FROM compliance_settings WHERE pharmacy_id=? LIMIT 1', 'i', [$pharmacy_id]);
+        if ($existing) {
+            compliance_exec($conn, 'UPDATE compliance_settings SET taxpayer_name=?,tpin=?,vat_number=?,pacra_number=?,tax_registration_status=?,smart_invoice_status=?,vsdc_serial=?,default_tax_type=?,notes=?,updated_by=? WHERE pharmacy_id=?', 'ssssssssssi', [$taxpayerName,$tpin,$vat,$pacra,$taxStatus,$smartStatus,$vsdc,$taxType,$notes,compliance_actor(),$pharmacy_id]);
+            $id = (int)$existing['id'];
+        } else {
+            compliance_exec($conn, 'INSERT INTO compliance_settings (pharmacy_id,taxpayer_name,tpin,vat_number,pacra_number,tax_registration_status,smart_invoice_status,vsdc_serial,default_tax_type,notes,created_by,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', 'isssssssssss', [$pharmacy_id,$taxpayerName,$tpin,$vat,$pacra,$taxStatus,$smartStatus,$vsdc,$taxType,$notes,compliance_actor(),compliance_actor()]);
+            $id = (int)$conn->insert_id;
         }
-
-        $tpin = compliance_post('tpin');
-        $businessName = compliance_post('business_name');
-        $vatNo = compliance_post('vat_number');
-        $smartStatus = compliance_post('smart_invoice_status', 'not_configured');
-        $environment = compliance_post('smart_invoice_environment', 'test');
-        $cis = compliance_post('cis_code');
-        $serial = compliance_post('vsdc_serial');
-        $vsdcStatus = compliance_post('vsdc_status', 'not_configured');
-        $endpoint = compliance_post('vsdc_endpoint');
-        $taxRef = compliance_post('tax_account_reference');
-        $contactName = compliance_post('compliance_contact_name');
-        $contactEmail = compliance_post('compliance_contact_email');
-        $contactPhone = compliance_post('compliance_contact_phone');
-        $notes = compliance_post('notes');
-        $vatRegistered = compliance_bool('vat_registered');
-        $incomeTax = compliance_bool('income_tax_registered');
-        $turnoverTax = compliance_bool('turnover_tax_registered');
-
-        $allowedSmart = ['not_configured','pending','test','connected','suspended'];
-        $allowedEnv = ['test','production'];
-        $allowedVsd = ['not_configured','offline','online','error'];
-        if (!in_array($smartStatus, $allowedSmart, true)) $smartStatus = 'not_configured';
-        if (!in_array($environment, $allowedEnv, true)) $environment = 'test';
-        if (!in_array($vsdcStatus, $allowedVsd, true)) $vsdcStatus = 'not_configured';
-
-        $stmt = $conn->prepare("
-            INSERT INTO compliance_settings
-            (pharmacy_id,tpin,business_name,vat_registered,vat_number,income_tax_registered,
-             turnover_tax_registered,smart_invoice_status,smart_invoice_environment,cis_code,
-             vsdc_serial,vsdc_status,vsdc_endpoint,tax_account_reference,compliance_contact_name,
-             compliance_contact_email,compliance_contact_phone,notes,updated_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON DUPLICATE KEY UPDATE
-              tpin=VALUES(tpin), business_name=VALUES(business_name),
-              vat_registered=VALUES(vat_registered), vat_number=VALUES(vat_number),
-              income_tax_registered=VALUES(income_tax_registered),
-              turnover_tax_registered=VALUES(turnover_tax_registered),
-              smart_invoice_status=VALUES(smart_invoice_status),
-              smart_invoice_environment=VALUES(smart_invoice_environment),
-              cis_code=VALUES(cis_code), vsdc_serial=VALUES(vsdc_serial),
-              vsdc_status=VALUES(vsdc_status), vsdc_endpoint=VALUES(vsdc_endpoint),
-              tax_account_reference=VALUES(tax_account_reference),
-              compliance_contact_name=VALUES(compliance_contact_name),
-              compliance_contact_email=VALUES(compliance_contact_email),
-              compliance_contact_phone=VALUES(compliance_contact_phone),
-              notes=VALUES(notes), updated_by=VALUES(updated_by)
-        ");
-        if (!$stmt) compliance_redirect('zra', '', 'Could not prepare settings save.');
-        $stmt->bind_param(
-            'issisiiisssssssssi',
-            $pharmacyId,$tpin,$businessName,$vatRegistered,$vatNo,$incomeTax,$turnoverTax,
-            $smartStatus,$environment,$cis,$serial,$vsdcStatus,$endpoint,$taxRef,
-            $contactName,$contactEmail,$contactPhone,$notes,$userId
-        );
-        $ok = @$stmt->execute();
-        $stmt->close();
-        if (!$ok) compliance_redirect('zra', '', 'Settings were not saved.');
-        compliance_audit($conn,$pharmacyId,$userId,'update_settings','compliance_settings',null,'Updated ZRA/compliance configuration.');
-        compliance_redirect('zra','Compliance settings saved.');
+        compliance_audit($conn, $pharmacy_id, 'Updated taxpayer compliance profile', 'compliance_settings', $id);
+        compliance_redirect('taxpayer', 'Taxpayer compliance profile saved.');
     }
 
-    if ($action === 'add_obligation') {
-        $taxType = compliance_post('tax_type');
-        $year = max(2000, (int)($_POST['period_year'] ?? date('Y')));
-        $monthRaw = $_POST['period_month'] ?? '';
-        $month = $monthRaw === '' ? null : max(1, min(12, (int)$monthRaw));
-        $returnDue = compliance_post('return_due_date') ?: null;
-        $paymentDue = compliance_post('payment_due_date') ?: null;
-        $amount = max(0, (float)($_POST['amount_due'] ?? 0));
-        $notes = compliance_post('notes');
+    if ($action === 'save_branch_device') {
+        $recordId = (int)($_POST['record_id'] ?? 0);
+        $recordBranch = (int)($_POST['branch_id'] ?? 0);
+        $device = trim((string)($_POST['device_name'] ?? ''));
+        $serial = trim((string)($_POST['vsdc_serial'] ?? ''));
+        $status = trim((string)($_POST['registration_status'] ?? 'pending'));
+        $notes = trim((string)($_POST['notes'] ?? ''));
 
-        if ($taxType === '') compliance_redirect('obligations','','Tax type is required.');
-        $stmt = $conn->prepare("INSERT INTO compliance_obligations
-            (pharmacy_id,tax_type,period_year,period_month,return_due_date,payment_due_date,amount_due,notes,created_by,updated_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?)");
-        if (!$stmt) compliance_redirect('obligations','','Could not prepare obligation.');
-        $stmt->bind_param('isiissdsii',$pharmacyId,$taxType,$year,$month,$returnDue,$paymentDue,$amount,$notes,$userId,$userId);
-        $ok = @$stmt->execute();
-        $newId = $stmt->insert_id;
-        $stmt->close();
-        if (!$ok) compliance_redirect('obligations','','Could not save obligation.');
-        compliance_audit($conn,$pharmacyId,$userId,'create_obligation','compliance_obligations',(int)$newId,"Created {$taxType} obligation.");
-        compliance_redirect('obligations','Tax obligation added.');
+        $validBranch = compliance_one($conn, 'SELECT id FROM branches WHERE id=? AND pharmacy_id=? LIMIT 1', 'ii', [$recordBranch,$pharmacy_id]);
+        if (!$validBranch) compliance_redirect('branches', 'The selected branch is not part of this pharmacy.', 'error');
+
+        $registeredAt = $status === 'registered' ? date('Y-m-d H:i:s') : null;
+        if ($recordId > 0) {
+            compliance_exec($conn, 'UPDATE compliance_branch_devices SET branch_id=?,device_name=?,vsdc_serial=?,registration_status=?,registered_at=?,notes=?,updated_by=? WHERE id=? AND pharmacy_id=?', 'isssssiii', [$recordBranch,$device,$serial,$status,$registeredAt,$notes,compliance_actor(),$recordId,$pharmacy_id]);
+        } else {
+            compliance_exec($conn, 'INSERT INTO compliance_branch_devices (pharmacy_id,branch_id,device_name,vsdc_serial,registration_status,registered_at,notes,created_by,updated_by) VALUES (?,?,?,?,?,?,?,?,?)', 'iisssssss', [$pharmacy_id,$recordBranch,$device,$serial,$status,$registeredAt,$notes,compliance_actor(),compliance_actor()]);
+            $recordId = (int)$conn->insert_id;
+        }
+        compliance_audit($conn, $pharmacy_id, 'Updated branch/device compliance record', 'compliance_branch_devices', $recordId);
+        compliance_redirect('branches', 'Branch/device compliance record saved.');
     }
 
-    if ($action === 'mark_obligation_filed') {
-        $id = (int)($_POST['id'] ?? 0);
+    if ($action === 'delete_branch_device') {
+        $recordId = (int)($_POST['record_id'] ?? 0);
+        compliance_exec($conn, 'DELETE FROM compliance_branch_devices WHERE id=? AND pharmacy_id=?', 'ii', [$recordId,$pharmacy_id]);
+        compliance_audit($conn, $pharmacy_id, 'Deleted branch/device compliance record', 'compliance_branch_devices', $recordId);
+        compliance_redirect('branches', 'Branch/device record removed.');
+    }
+
+    if ($action === 'save_obligation') {
+        $id = (int)($_POST['record_id'] ?? 0);
+        $type = trim((string)($_POST['obligation_type'] ?? 'VAT'));
+        $period = trim((string)($_POST['period_label'] ?? date('F Y')));
+        $due = trim((string)($_POST['due_date'] ?? ''));
+        $status = trim((string)($_POST['status'] ?? 'pending'));
+        $amount = max(0, (float)($_POST['amount'] ?? 0));
+        $reference = trim((string)($_POST['reference'] ?? ''));
+        $notes = trim((string)($_POST['notes'] ?? ''));
+        $dueValue = $due !== '' ? $due : null;
         if ($id > 0) {
-            $stmt = $conn->prepare("UPDATE compliance_obligations SET return_status='filed',updated_by=? WHERE id=? AND pharmacy_id=?");
-            if ($stmt) {
-                $stmt->bind_param('iii',$userId,$id,$pharmacyId);
-                @$stmt->execute();
-                $stmt->close();
-                compliance_audit($conn,$pharmacyId,$userId,'mark_filed','compliance_obligations',$id,'Marked tax return as filed.');
-            }
+            compliance_exec($conn, 'UPDATE compliance_obligations SET obligation_type=?,period_label=?,due_date=?,status=?,amount=?,reference=?,notes=?,updated_by=? WHERE id=? AND pharmacy_id=?', 'sssssdssii', [$type,$period,$dueValue,$status,$amount,$reference,$notes,compliance_actor(),$id,$pharmacy_id]);
+        } else {
+            compliance_exec($conn, 'INSERT INTO compliance_obligations (pharmacy_id,obligation_type,period_label,due_date,status,amount,reference,notes,created_by,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?)', 'issssdssss', [$pharmacy_id,$type,$period,$dueValue,$status,$amount,$reference,$notes,compliance_actor(),compliance_actor()]);
+            $id = (int)$conn->insert_id;
         }
-        compliance_redirect('obligations','Return marked as filed.');
+        compliance_audit($conn, $pharmacy_id, 'Updated tax obligation', 'compliance_obligations', $id);
+        compliance_redirect('obligations', 'Tax obligation saved.');
     }
 
-    if ($action === 'mark_obligation_paid') {
-        $id = (int)($_POST['id'] ?? 0);
+    if ($action === 'save_payment') {
+        $id = (int)($_POST['record_id'] ?? 0);
+        $obligationId = (int)($_POST['obligation_id'] ?? 0);
+        $type = trim((string)($_POST['payment_type'] ?? 'VAT'));
+        $date = trim((string)($_POST['payment_date'] ?? ''));
+        $amount = max(0, (float)($_POST['amount'] ?? 0));
+        $reference = trim((string)($_POST['payment_reference'] ?? ''));
+        $status = trim((string)($_POST['status'] ?? 'recorded'));
+        $notes = trim((string)($_POST['notes'] ?? ''));
+        $dateValue = $date !== '' ? $date : null;
+        $obligationValue = $obligationId > 0 ? $obligationId : null;
         if ($id > 0) {
-            $stmt = $conn->prepare("UPDATE compliance_obligations SET payment_status='paid',amount_paid=amount_due,updated_by=? WHERE id=? AND pharmacy_id=?");
-            if ($stmt) {
-                $stmt->bind_param('iii',$userId,$id,$pharmacyId);
-                @$stmt->execute();
-                $stmt->close();
-                compliance_audit($conn,$pharmacyId,$userId,'mark_paid','compliance_obligations',$id,'Marked tax obligation as paid.');
-            }
+            compliance_exec($conn, 'UPDATE compliance_tax_payments SET obligation_id=?,payment_type=?,payment_date=?,amount=?,payment_reference=?,status=?,notes=?,updated_by=? WHERE id=? AND pharmacy_id=?', 'issdssssii', [$obligationValue,$type,$dateValue,$amount,$reference,$status,$notes,compliance_actor(),$id,$pharmacy_id]);
+        } else {
+            compliance_exec($conn, 'INSERT INTO compliance_tax_payments (pharmacy_id,obligation_id,payment_type,payment_date,amount,payment_reference,status,notes,created_by,updated_by) VALUES (?,?,?,?,?,?,?,?,?,?)', 'iissdsssss', [$pharmacy_id,$obligationValue,$type,$dateValue,$amount,$reference,$status,$notes,compliance_actor(),compliance_actor()]);
+            $id = (int)$conn->insert_id;
         }
-        compliance_redirect('obligations','Payment marked as paid.');
+        compliance_audit($conn, $pharmacy_id, 'Recorded tax payment', 'compliance_tax_payments', $id);
+        compliance_redirect('payments', 'Tax payment record saved.');
     }
-
-    compliance_redirect('overview');
 }
 
-$settings = compliance_setting($conn, $pharmacyId);
-$tab = compliance_post('tab', $_GET['tab'] ?? 'overview');
-$allowedTabs = ['overview','zra','tax','branches','invoices','obligations','payments','audit'];
-if (!in_array($tab, $allowedTabs, true)) $tab = 'overview';
+/* ------------------------------------------------------------
+ | View + notice
+ * ------------------------------------------------------------ */
+$view = (string)($_GET['view'] ?? 'overview');
+$allowedViews = ['overview','taxpayer','smart_invoice','branches','invoices','obligations','payments','audit'];
+if (!in_array($view, $allowedViews, true)) $view = 'overview';
 
-$ok = (string)($_GET['ok'] ?? '');
-$err = (string)($_GET['err'] ?? '');
+$notice = (string)($_GET['notice'] ?? '');
+$noticeType = (string)($_GET['notice_type'] ?? 'success');
 
-$stats = [
-    'branches' => 0, 'connected' => 0, 'pending_invoices' => 0,
-    'failed_invoices' => 0, 'open_obligations' => 0, 'overdue' => 0
+/* ------------------------------------------------------------
+ | Compliance profile
+ * ------------------------------------------------------------ */
+$settings = compliance_one($conn, 'SELECT * FROM compliance_settings WHERE pharmacy_id=? LIMIT 1', 'i', [$pharmacy_id]) ?? [];
+
+// IMPORTANT: always define these variables. This fixes the undefined
+// array-key warning previously appearing on the Compliance page.
+$taxpayer_name = (string)($settings['taxpayer_name'] ?? $pharmacy_name);
+$tpin = (string)($settings['tpin'] ?? '');
+$vat_number = (string)($settings['vat_number'] ?? '');
+$pacra_number = (string)($settings['pacra_number'] ?? '');
+$tax_registration_status = (string)($settings['tax_registration_status'] ?? 'not_registered');
+$smart_invoice_status = (string)($settings['smart_invoice_status'] ?? 'not_configured');
+$vsdc_serial = (string)($settings['vsdc_serial'] ?? '');
+$default_tax_type = (string)($settings['default_tax_type'] ?? 'VAT');
+$compliance_notes = (string)($settings['notes'] ?? '');
+
+/* ------------------------------------------------------------
+ | Readiness
+ * ------------------------------------------------------------ */
+$readiness = [
+    'tpin' => $tpin !== '',
+    'vat' => $vat_number !== '',
+    'tax_registration' => in_array($tax_registration_status, ['registered','active','valid'], true),
+    'smart_invoice' => in_array($smart_invoice_status, ['configured','registered','active'], true),
 ];
+$readinessCompleted = count(array_filter($readiness));
+$readinessTotal = count($readiness);
+$readinessPercent = (int)round(($readinessCompleted / max(1,$readinessTotal)) * 100);
 
-if (compliance_table_exists($conn,'compliance_branches')) {
-    $stmt=$conn->prepare("SELECT COUNT(*) c, SUM(smart_invoice_registered=1) registered FROM compliance_branches WHERE pharmacy_id=?");
-    if($stmt){$stmt->bind_param('i',$pharmacyId);$stmt->execute();$r=$stmt->get_result();$x=$r?$r->fetch_assoc():[];$stats['branches']=(int)($x['c']??0);$stats['connected']=(int)($x['registered']??0);$stmt->close();}
-}
-if (compliance_table_exists($conn,'compliance_invoices')) {
-    $stmt=$conn->prepare("SELECT
-        SUM(status='pending') pending_count,
-        SUM(status='rejected') rejected_count
-        FROM compliance_invoices WHERE pharmacy_id=?");
-    if($stmt){$stmt->bind_param('i',$pharmacyId);$stmt->execute();$r=$stmt->get_result();$x=$r?$r->fetch_assoc():[];$stats['pending_invoices']=(int)($x['pending_count']??0);$stats['failed_invoices']=(int)($x['rejected_count']??0);$stmt->close();}
-}
-if (compliance_table_exists($conn,'compliance_obligations')) {
-    $stmt=$conn->prepare("SELECT
-        SUM(payment_status<>'paid' AND payment_status<>'not_applicable') open_count,
-        SUM(payment_due_date < CURDATE() AND payment_status<>'paid') overdue_count
-        FROM compliance_obligations WHERE pharmacy_id=?");
-    if($stmt){$stmt->bind_param('i',$pharmacyId);$stmt->execute();$r=$stmt->get_result();$x=$r?$r->fetch_assoc():[];$stats['open_obligations']=(int)($x['open_count']??0);$stats['overdue']=(int)($x['overdue_count']??0);$stmt->close();}
-}
+/* ------------------------------------------------------------
+ | Branches and device records
+ * ------------------------------------------------------------ */
+$branches = compliance_rows($conn, 'SELECT id, branch_name FROM branches WHERE pharmacy_id=? ORDER BY branch_name ASC', 'i', [$pharmacy_id]);
+$branchDevices = compliance_rows($conn, 'SELECT d.*, b.branch_name FROM compliance_branch_devices d LEFT JOIN branches b ON b.id=d.branch_id AND b.pharmacy_id=d.pharmacy_id WHERE d.pharmacy_id=? ORDER BY b.branch_name ASC, d.device_name ASC, d.id DESC', 'i', [$pharmacy_id]);
 
-$obligations = [];
-if (compliance_table_exists($conn,'compliance_obligations')) {
-    $stmt=$conn->prepare("SELECT * FROM compliance_obligations WHERE pharmacy_id=? ORDER BY COALESCE(payment_due_date,return_due_date) ASC, id DESC LIMIT 100");
-    if($stmt){$stmt->bind_param('i',$pharmacyId);$stmt->execute();$r=$stmt->get_result();if($r)while($row=$r->fetch_assoc())$obligations[]=$row;$stmt->close();}
-}
-$invoices = [];
-if (compliance_table_exists($conn,'compliance_invoices')) {
-    $stmt=$conn->prepare("SELECT * FROM compliance_invoices WHERE pharmacy_id=? ORDER BY id DESC LIMIT 100");
-    if($stmt){$stmt->bind_param('i',$pharmacyId);$stmt->execute();$r=$stmt->get_result();if($r)while($row=$r->fetch_assoc())$invoices[]=$row;$stmt->close();}
-}
-$branches = [];
-if (compliance_table_exists($conn,'compliance_branches')) {
-    $stmt=$conn->prepare("SELECT * FROM compliance_branches WHERE pharmacy_id=? ORDER BY branch_name");
-    if($stmt){$stmt->bind_param('i',$pharmacyId);$stmt->execute();$r=$stmt->get_result();if($r)while($row=$r->fetch_assoc())$branches[]=$row;$stmt->close();}
-}
-$audits = [];
-if (compliance_table_exists($conn,'compliance_audit_log')) {
-    $stmt=$conn->prepare("SELECT * FROM compliance_audit_log WHERE pharmacy_id=? ORDER BY id DESC LIMIT 100");
-    if($stmt){$stmt->bind_param('i',$pharmacyId);$stmt->execute();$r=$stmt->get_result();if($r)while($row=$r->fetch_assoc())$audits[]=$row;$stmt->close();}
+/* ------------------------------------------------------------
+ | Obligations / payments
+ * ------------------------------------------------------------ */
+$obligations = compliance_rows($conn, 'SELECT * FROM compliance_obligations WHERE pharmacy_id=? ORDER BY due_date IS NULL, due_date ASC, id DESC', 'i', [$pharmacy_id]);
+$payments = compliance_rows($conn, 'SELECT p.*, o.obligation_type, o.period_label FROM compliance_tax_payments p LEFT JOIN compliance_obligations o ON o.id=p.obligation_id AND o.pharmacy_id=p.pharmacy_id WHERE p.pharmacy_id=? ORDER BY p.payment_date DESC, p.id DESC', 'i', [$pharmacy_id]);
+
+$totalOutstanding = 0.0;
+$overdueCount = 0;
+$today = date('Y-m-d');
+foreach ($obligations as $o) {
+    $status = strtolower((string)$o['status']);
+    $amount = (float)$o['amount'];
+    if (!in_array($status, ['paid','settled','complete'], true)) $totalOutstanding += $amount;
+    if (!empty($o['due_date']) && $o['due_date'] < $today && !in_array($status, ['paid','settled','complete'], true)) $overdueCount++;
 }
 
-$adminAside = __DIR__ . '/admin_aside.php';
-$adminHeader = __DIR__ . '/admin_header.php';
+$totalPayments = 0.0;
+foreach ($payments as $p) $totalPayments += (float)$p['amount'];
+
+/* ------------------------------------------------------------
+ | ZRA invoice/readiness view
+ | No live submission. Pull only existing sales data when the
+ | current production schema contains the expected fields.
+ * ------------------------------------------------------------ */
+$zraInvoices = [];
+if (compliance_table_exists($conn, 'sales')) {
+    $salesCols = compliance_columns($conn, 'sales');
+    $select = ['s.id'];
+    foreach (['invoice','created_at','total','subtotal','vat_amount','payment_method','pharmacy_id','branch_id'] as $c) {
+        if (in_array($c, $salesCols, true)) $select[] = 's.`' . $c . '`';
+    }
+    if (in_array('invoice', $salesCols, true) || in_array('total', $salesCols, true)) {
+        $select[] = "CASE WHEN " . (in_array('invoice',$salesCols,true) ? "COALESCE(s.invoice,'')" : "''") . " <> '' THEN 'Invoice created' ELSE 'Pending compliance reference' END AS compliance_status";
+        $where = 's.pharmacy_id=?';
+        $types = 'i';
+        $params = [$pharmacy_id];
+        if (in_array('branch_id', $salesCols, true) && $branch_id > 0) {
+            $where .= ' AND s.branch_id=?';
+            $types .= 'i';
+            $params[] = $branch_id;
+        }
+        $zraInvoices = compliance_rows($conn, 'SELECT ' . implode(',', $select) . ' FROM sales s WHERE ' . $where . ' ORDER BY ' . (in_array('created_at',$salesCols,true) ? 's.created_at' : 's.id') . ' DESC LIMIT 100', $types, $params);
+    }
+}
+
+/* ------------------------------------------------------------
+ | Audit
+ * ------------------------------------------------------------ */
+$auditRows = compliance_rows($conn, 'SELECT * FROM compliance_audit_log WHERE pharmacy_id=? ORDER BY created_at DESC, id DESC LIMIT 150', 'i', [$pharmacy_id]);
+
+/* ------------------------------------------------------------
+ | Admin header / aside
+ * ------------------------------------------------------------ */
+$current_admin_page = 'compliance.php';
+$user_display_name = (string)($_SESSION['full_name'] ?? $_SESSION['username'] ?? $_SESSION['sessionUsername'] ?? 'Administrator');
+$total_orders = 0;
+$branch_count = count($branches);
+if (compliance_table_exists($conn, 'sales')) {
+    $salesCols = compliance_columns($conn, 'sales');
+    $q = 'SELECT COUNT(*) c FROM sales WHERE pharmacy_id=?';
+    if (in_array('branch_id',$salesCols,true) && $branch_id > 0) $q .= ' AND branch_id=' . $branch_id;
+    $row = compliance_one($conn, $q, 'i', [$pharmacy_id]);
+    $total_orders = (int)($row['c'] ?? 0);
+}
+
+$csrf = compliance_csrf();
+
+if (is_file(__DIR__ . '/admin_header.php')) {
+    // The existing header expects the variables above.
+    // It is loaded below after the page CSS begins.
+}
 ?>
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Compliance â€” EchoTech POS</title>
+<title>Compliance | <?= compliance_h($pharmacy_name) ?></title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 <style>
-:root{
-    --bg:#f4f6f9;
-    --card:#fff;
-    --text:#17202b;
-    --muted:#718096;
-    --border:#e3e8ef;
-    --blue:#2563eb;
-    --green:#059669;
-    --orange:#d97706;
-    --red:#dc2626;
-    --dark:#202831;
-    --shadow:0 4px 18px rgba(15,23,42,.06);
-}
-
-*{
-    box-sizing:border-box;
-}
-
-html,
-body{
-    margin:0;
-    padding:0;
-    min-height:100%;
-}
-
-body{
-    background:var(--bg);
-    color:var(--text);
-    font:14px Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    overflow-x:hidden;
-}
-
-.app{
-    min-height:100vh;
-    width:100%;
-}
-
-/* =========================================================
-   MAIN CONTENT LAYOUT
-   Admin aside = 250px
-   ========================================================= */
-
-.main{
-    min-height:100vh;
-    margin-left:250px;
-    width:calc(100% - 250px);
-    position:relative;
-    overflow-x:hidden;
-}
-
-/* =========================================================
-   COMPLIANCE CONTENT
-   ========================================================= */
-
-.compliance-content{
-    width:100%;
-    max-width:1600px;
-    margin:0 auto;
-    padding:24px;
-}
-
-/* =========================================================
-   PAGE HEADING
-   ========================================================= */
-
-.heading{
-    display:flex;
-    justify-content:space-between;
-    gap:20px;
-    align-items:flex-start;
-    margin-bottom:18px;
-}
-
-.heading h1{
-    margin:0 0 6px;
-    font-size:28px;
-    line-height:1.2;
-}
-
-.heading p{
-    margin:0;
-    color:var(--muted);
-}
-
-.heading .actions{
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-    align-items:center;
-}
-
-/* =========================================================
-   BUTTONS
-   ========================================================= */
-
-.btn{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    gap:7px;
-    border:1px solid var(--border);
-    background:#fff;
-    color:var(--text);
-    padding:10px 14px;
-    border-radius:8px;
-    text-decoration:none;
-    font-weight:700;
-    cursor:pointer;
-    white-space:nowrap;
-    transition:.15s ease;
-}
-
-.btn:hover{
-    transform:translateY(-1px);
-}
-
-.btn.primary{
-    background:var(--blue);
-    color:#fff;
-    border-color:var(--blue);
-}
-
-/* =========================================================
-   ALERTS
-   ========================================================= */
-
-.alert{
-    padding:12px 14px;
-    border-radius:9px;
-    margin-bottom:14px;
-}
-
-.alert.ok{
-    background:#ecfdf5;
-    color:#047857;
-    border:1px solid #a7f3d0;
-}
-
-.alert.err{
-    background:#fef2f2;
-    color:#b91c1c;
-    border:1px solid #fecaca;
-}
-
-/* =========================================================
-   SUMMARY CARDS
-   ========================================================= */
-
-.cards{
-    display:grid;
-    grid-template-columns:repeat(5,1fr);
-    gap:12px;
-    margin-bottom:18px;
-}
-
-.card{
-    background:var(--card);
-    border:1px solid var(--border);
-    border-radius:12px;
-    padding:16px;
-    box-shadow:var(--shadow);
-    min-width:0;
-}
-
-.label{
-    font-size:11px;
-    text-transform:uppercase;
-    color:var(--muted);
-    font-weight:800;
-}
-
-.value{
-    font-size:25px;
-    font-weight:800;
-    margin-top:8px;
-}
-
-.sub{
-    font-size:11px;
-    color:var(--muted);
-    margin-top:4px;
-}
-
-/* =========================================================
-   TABS
-   ========================================================= */
-
-.tabs{
-    display:flex;
-    gap:5px;
-    overflow-x:auto;
-    overflow-y:hidden;
-    background:#fff;
-    border:1px solid var(--border);
-    border-radius:12px;
-    padding:6px;
-    margin-bottom:16px;
-    scrollbar-width:thin;
-}
-
-.tabs a{
-    white-space:nowrap;
-    padding:10px 12px;
-    border-radius:8px;
-    text-decoration:none;
-    color:#52606d;
-    font-weight:700;
-    flex:0 0 auto;
-}
-
-.tabs a.active{
-    background:#eef4ff;
-    color:var(--blue);
-}
-
-/* =========================================================
-   PANELS
-   ========================================================= */
-
-.panel{
-    background:#fff;
-    border:1px solid var(--border);
-    border-radius:12px;
-    box-shadow:var(--shadow);
-    margin-bottom:16px;
-    overflow:hidden;
-}
-
-.panel-head{
-    padding:16px 18px;
-    border-bottom:1px solid var(--border);
-}
-
-.panel-head h2{
-    margin:0;
-    font-size:17px;
-}
-
-.panel-head p{
-    margin:4px 0 0;
-    color:var(--muted);
-    font-size:12px;
-}
-
-.panel-body{
-    padding:18px;
-}
-
-/* =========================================================
-   GRIDS
-   ========================================================= */
-
-.grid2{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:14px;
-}
-
-.grid3{
-    display:grid;
-    grid-template-columns:repeat(3,1fr);
-    gap:14px;
-}
-
-/* =========================================================
-   FORM FIELDS
-   ========================================================= */
-
-.field{
-    margin-bottom:12px;
-}
-
-.field label{
-    display:block;
-    font-size:12px;
-    font-weight:800;
-    margin-bottom:6px;
-}
-
-.field input,
-.field select,
-.field textarea{
-    width:100%;
-    border:1px solid #d9e0e8;
-    border-radius:8px;
-    padding:10px 11px;
-    background:#fff;
-    font:inherit;
-    color:var(--text);
-}
-
-.field input:focus,
-.field select:focus,
-.field textarea:focus{
-    outline:none;
-    border-color:var(--blue);
-    box-shadow:0 0 0 3px rgba(37,99,235,.08);
-}
-
-.field textarea{
-    min-height:90px;
-    resize:vertical;
-}
-
-/* =========================================================
-   CHECKBOX
-   ========================================================= */
-
-.check{
-    display:flex;
-    gap:8px;
-    align-items:center;
-    padding:10px;
-    border:1px solid var(--border);
-    border-radius:8px;
-}
-
-.check input{
-    width:auto;
-}
-
-/* =========================================================
-   ACTIONS
-   ========================================================= */
-
-.actions{
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-    margin-top:6px;
-}
-
-/* =========================================================
-   TABLES
-   ========================================================= */
-
-.table-wrap{
-    width:100%;
-    overflow-x:auto;
-}
-
-table{
-    width:100%;
-    border-collapse:collapse;
-    min-width:650px;
-}
-
-th,
-td{
-    text-align:left;
-    padding:11px 10px;
-    border-bottom:1px solid #edf0f4;
-    font-size:12px;
-}
-
-th{
-    font-size:11px;
-    color:#667789;
-    text-transform:uppercase;
-    background:#fafbfc;
-    white-space:nowrap;
-}
-
-td{
-    vertical-align:middle;
-}
-
-/* =========================================================
-   BADGES
-   ========================================================= */
-
-.badge{
-    display:inline-block;
-    padding:5px 8px;
-    border-radius:999px;
-    font-size:10px;
-    font-weight:800;
-}
-
-.green{
-    background:#eaf8f1;
-    color:#047857;
-}
-
-.orange{
-    background:#fff7e6;
-    color:#b45309;
-}
-
-.red{
-    background:#fef0f0;
-    color:#b91c1c;
-}
-
-.gray{
-    background:#eef2f5;
-    color:#5b6773;
-}
-
-/* =========================================================
-   NOTICE
-   ========================================================= */
-
-.notice{
-    padding:12px;
-    border:1px solid #dbe5f3;
-    background:#f7faff;
-    border-radius:8px;
-    color:#40566f;
-    font-size:12px;
-    line-height:1.55;
-}
-
-/* =========================================================
-   LINK BOX
-   ========================================================= */
-
-.linkbox{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    padding:14px;
-    border:1px solid var(--border);
-    border-radius:9px;
-    margin-bottom:10px;
-}
-
-.linkbox b{
-    display:block;
-}
-
-.linkbox span{
-    font-size:11px;
-    color:var(--muted);
-}
-
-/* =========================================================
-   EMPTY STATE
-   ========================================================= */
-
-.empty{
-    text-align:center;
-    padding:35px;
-    color:var(--muted);
-}
-
-/* =========================================================
-   DESKTOP / TABLET
-   ========================================================= */
-
-@media(max-width:1200px){
-
-    .cards{
-        grid-template-columns:repeat(3,1fr);
-    }
-
-}
-
-/* =========================================================
-   MOBILE
-   ========================================================= */
-
-@media(max-width:800px){
-
-    .main{
-        margin-left:0;
-        width:100%;
-    }
-
-    .compliance-content{
-        padding:14px;
-    }
-
-    .heading{
-        flex-direction:column;
-    }
-
-    .heading .actions{
-        width:100%;
-    }
-
-    .grid2,
-    .grid3{
-        grid-template-columns:1fr;
-    }
-
-    .cards{
-        grid-template-columns:repeat(2,1fr);
-    }
-
-}
-
-/* =========================================================
-   SMALL MOBILE
-   ========================================================= */
-
-@media(max-width:520px){
-
-    .cards{
-        grid-template-columns:1fr;
-    }
-
-    .heading h1{
-        font-size:23px;
-    }
-
-    .heading p{
-        line-height:1.5;
-    }
-
-    .compliance-content{
-        padding:12px;
-    }
-
-    .panel-body{
-        padding:14px;
-    }
-
-}
-
-/* =========================================================
-   PRINT
-   ========================================================= */
-
-@media print{
-
-    .tabs,
-    .btn,
-    .heading .actions{
-        display:none!important;
-    }
-
-    .main{
-        margin-left:0;
-        width:100%;
-    }
-
-    .compliance-content{
-        padding:0;
-        max-width:none;
-    }
-
-    .panel{
-        box-shadow:none;
-    }
-
-}
+:root{--ink:#26313d;--muted:#718096;--line:#e4e9ef;--bg:#f4f7fa;--panel:#fff;--blue:#2563eb;--blue-soft:#eef4ff;--green:#138a57;--green-soft:#ecf9f2;--amber:#b7791f;--amber-soft:#fff7e6;--red:#c0392b;--red-soft:#fff1f0;--shadow:0 8px 24px rgba(31,45,61,.06)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color:var(--ink);font-size:13px}.main{min-height:100vh;margin-left:250px}.compliance-content{padding:22px 28px 40px;max-width:1500px;margin:0 auto}.page-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;color:#748094}.page-head h1{margin:4px 0 5px;font-size:25px;line-height:1.15}.page-head p{margin:0;color:var(--muted);font-size:12px}.page-actions{display:flex;gap:8px}.btn{border:1px solid #d7dee7;background:#fff;color:#354052;border-radius:8px;padding:9px 13px;font-weight:750;font-size:11px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:7px}.btn:hover{background:#f8fafc}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}.btn.green{background:var(--green);border-color:var(--green);color:#fff}.btn.danger{color:var(--red);border-color:#f1c4bf}.notice{border:1px solid #cfe0ff;background:#f3f7ff;color:#31537e;padding:11px 13px;border-radius:9px;margin-bottom:15px}.notice.error{border-color:#f0c4bf;background:var(--red-soft);color:#96382f}.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:15px}.summary-card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:15px;box-shadow:var(--shadow)}.summary-top{display:flex;justify-content:space-between;align-items:center;color:#748094;font-size:10px;font-weight:800;text-transform:uppercase}.summary-icon{width:31px;height:31px;border-radius:8px;background:#f0f4f8;display:grid;place-items:center;color:#58677a}.summary-value{font-size:25px;font-weight:850;margin-top:8px}.summary-sub{font-size:10px;color:#8a95a3;margin-top:4px}.tabs{display:flex;gap:4px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:5px;overflow-x:auto;margin-bottom:15px;white-space:nowrap}.tabs a{display:inline-flex;align-items:center;gap:6px;padding:9px 12px;border-radius:8px;color:#5e6b7c;text-decoration:none;font-weight:750;font-size:11px}.tabs a.active{background:var(--blue-soft);color:var(--blue)}.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.panel{background:#fff;border:1px solid var(--line);border-radius:11px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:14px}.panel-head{padding:15px 17px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:15px;align-items:flex-start}.panel-head h2,.panel-head h3{font-size:15px;margin:0 0 4px}.panel-head p{margin:0;color:var(--muted);font-size:11px}.panel-body{padding:16px}.info-box{border:1px solid #d7e3f5;background:#f5f8fd;border-radius:9px;padding:12px;color:#52677f;font-size:11px;line-height:1.55}.readiness-list{display:grid;gap:9px}.readiness-item{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:9px;padding:12px}.readiness-item strong{font-size:12px}.readiness-item small{display:block;color:var(--muted);margin-top:3px;font-size:10px}.state{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:850;text-transform:uppercase}.state.ok{background:var(--green-soft);color:var(--green)}.state.warn{background:var(--amber-soft);color:var(--amber)}.state.bad{background:var(--red-soft);color:var(--red)}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field.full{grid-column:1/-1}.field label{display:block;font-size:10px;font-weight:800;color:#566273;margin-bottom:5px}.field input,.field select,.field textarea{width:100%;border:1px solid #d8e0e8;border-radius:8px;padding:9px 10px;font:inherit;font-size:11px;background:#fff;color:#26313d}.field textarea{min-height:90px;resize:vertical}.form-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:13px}.table-wrap{overflow:auto}.table{width:100%;border-collapse:collapse;min-width:720px}.table th{background:#f8fafc;color:#718096;text-transform:uppercase;letter-spacing:.04em;font-size:9px;text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}.table td{padding:10px 12px;border-bottom:1px solid #edf0f4;font-size:10px;vertical-align:top}.table tr:last-child td{border-bottom:0}.muted{color:var(--muted)}.empty{padding:35px;text-align:center;color:#8b96a4}.progress{height:7px;background:#edf1f5;border-radius:99px;overflow:hidden;margin-top:8px}.progress span{display:block;height:100%;background:var(--blue);border-radius:99px}.metric-row{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:13px}.metric{border:1px solid var(--line);border-radius:9px;padding:10px}.metric b{display:block;font-size:16px}.metric span{font-size:9px;color:var(--muted)}.section-link{font-size:10px;font-weight:800;color:var(--blue);text-decoration:none}.badge{display:inline-block;padding:4px 7px;border-radius:999px;background:#f0f3f6;font-size:9px;font-weight:800}.badge.green{background:var(--green-soft);color:var(--green)}.badge.amber{background:var(--amber-soft);color:var(--amber)}.badge.red{background:var(--red-soft);color:var(--red)}.inline-form{display:inline}.danger-link{background:none;border:0;color:var(--red);cursor:pointer;font:inherit;font-size:10px;font-weight:750}.two-col-form{display:grid;grid-template-columns:1fr 1fr;gap:12px}.mini-note{font-size:9px;color:#8a95a3;margin-top:5px}@media(max-width:1100px){.summary-grid{grid-template-columns:repeat(2,1fr)}.grid-2{grid-template-columns:1fr}.main{margin-left:250px}}@media(max-width:900px){.main{margin-left:0}.compliance-content{padding:18px 15px 30px}.page-head{flex-direction:column}.page-actions{width:100%}.page-actions .btn{flex:1;justify-content:center}}@media(max-width:560px){.summary-grid{grid-template-columns:1fr}.form-grid,.two-col-form{grid-template-columns:1fr}.metric-row{grid-template-columns:1fr}.field.full{grid-column:auto}.page-head h1{font-size:22px}}
 </style>
 </head>
 <body>
 <div class="app">
-<?php if (is_file($adminAside)) require $adminAside; ?>
+<?php
+if (is_file(__DIR__ . '/admin_aside.php')) require __DIR__ . '/admin_aside.php';
+?>
 <main class="main">
-<?php if (is_file($adminHeader)) require $adminHeader; ?>
-
+<?php
+if (is_file(__DIR__ . '/admin_header.php')) require __DIR__ . '/admin_header.php';
+?>
 <section class="compliance-content">
-<div class="heading">
-  <div>
-    <div style="color:#2563eb;font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase">Administration / Compliance</div>
-    <h1>ZRA & Tax Compliance</h1>
-    <p>Central compliance control for the multi-branch pharmacy POS.</p>
-  </div>
-  <div class="actions">
-    <button class="btn" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
-    <a class="btn primary" href="https://www.zra.org.zm/smart-invoice-learn-more/" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> ZRA Smart Invoice</a>
-  </div>
-</div>
+    <div class="page-head">
+        <div>
+            <div class="eyebrow">Administration / Regulatory</div>
+            <h1>Compliance</h1>
+            <p>Manage taxpayer registration, Smart Invoice readiness, branch devices, obligations and tax-payment records for <?= compliance_h($pharmacy_name) ?>.</p>
+        </div>
+        <div class="page-actions">
+            <a class="btn" href="compliance.php?view=overview"><i class="fas fa-arrows-rotate"></i>Refresh</a>
+            <button class="btn" type="button" onclick="window.print()"><i class="fas fa-print"></i>Print</button>
+        </div>
+    </div>
 
-<?php if ($ok !== ''): ?><div class="alert ok"><i class="fa-solid fa-circle-check"></i> <?= compliance_h($ok) ?></div><?php endif; ?>
-<?php if ($err !== ''): ?><div class="alert err"><i class="fa-solid fa-circle-exclamation"></i> <?= compliance_h($err) ?></div><?php endif; ?>
+    <?php if ($notice !== ''): ?>
+        <div class="notice <?= $noticeType === 'error' ? 'error' : '' ?>">
+            <i class="fas <?= $noticeType === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check' ?>"></i>
+            <?= compliance_h($notice) ?>
+        </div>
+    <?php endif; ?>
 
-<div class="cards">
-  <div class="card"><div class="label">Smart Invoice</div><div class="value"><?= compliance_h(ucwords(str_replace('_',' ',(string)($settings['smart_invoice_status'] ?? 'not_configured')))) ?></div><div class="sub">Current configuration</div></div>
-  <div class="card"><div class="label">Branches</div><div class="value"><?= $stats['branches'] ?></div><div class="sub"><?= $stats['connected'] ?> marked registered</div></div>
-  <div class="card"><div class="label">Pending Invoices</div><div class="value"><?= $stats['pending_invoices'] ?></div><div class="sub">Phase 2 submission queue</div></div>
-  <div class="card"><div class="label">Rejected Invoices</div><div class="value"><?= $stats['failed_invoices'] ?></div><div class="sub">Needs review</div></div>
-  <div class="card"><div class="label">Open Obligations</div><div class="value"><?= $stats['open_obligations'] ?></div><div class="sub">Returns/payments</div></div>
-  <div class="card"><div class="label">Overdue</div><div class="value"><?= $stats['overdue'] ?></div><div class="sub">Past payment due date</div></div>
-</div>
+    <div class="summary-grid">
+        <div class="summary-card"><div class="summary-top"><span>Readiness</span><span class="summary-icon"><i class="fas fa-shield-halved"></i></span></div><div class="summary-value"><?= $readinessPercent ?>%</div><div class="progress"><span style="width:<?= $readinessPercent ?>%"></span></div><div class="summary-sub"><?= $readinessCompleted ?> of <?= $readinessTotal ?> readiness checks complete</div></div>
+        <div class="summary-card"><div class="summary-top"><span>Branches</span><span class="summary-icon"><i class="fas fa-store"></i></span></div><div class="summary-value"><?= number_format($branch_count) ?></div><div class="summary-sub">Active pharmacy branches</div></div>
+        <div class="summary-card"><div class="summary-top"><span>Outstanding</span><span class="summary-icon"><i class="fas fa-file-invoice-dollar"></i></span></div><div class="summary-value" style="font-size:21px"><?= compliance_money($totalOutstanding) ?></div><div class="summary-sub">Unpaid compliance obligations</div></div>
+        <div class="summary-card"><div class="summary-top"><span>Overdue</span><span class="summary-icon"><i class="fas fa-calendar-xmark"></i></span></div><div class="summary-value"><?= $overdueCount ?></div><div class="summary-sub">Past payment due date</div></div>
+    </div>
 
-<nav class="tabs">
-<?php foreach ([
-'overview'=>['fa-gauge-high','Overview'],'zra'=>['fa-landmark','ZRA / Smart Invoice'],
-'tax'=>['fa-percent','Tax Configuration'],'branches'=>['fa-code-branch','Branches'],
-'invoices'=>['fa-file-invoice','ZRA Invoices'],'obligations'=>['fa-calendar-check','Obligations'],
-'payments'=>['fa-money-bill-transfer','Tax Payments'],'audit'=>['fa-shield-halved','Audit Log']
-] as $key=>$t): ?>
-<a class="<?= $tab===$key?'active':'' ?>" href="?tab=<?= $key ?>"><i class="fa-solid <?= $t[0] ?>"></i> <?= $t[1] ?></a>
-<?php endforeach; ?>
-</nav>
+    <nav class="tabs" aria-label="Compliance navigation">
+        <?php
+        $tabs = [
+            'overview'=>['Overview','fa-gauge-high'],
+            'taxpayer'=>['ZRA / Smart Invoice','fa-building-columns'],
+            'smart_invoice'=>['Tax Configuration','fa-percent'],
+            'branches'=>['Branches','fa-code-branch'],
+            'invoices'=>['ZRA Invoices','fa-file-invoice'],
+            'obligations'=>['Obligations','fa-calendar-check'],
+            'payments'=>['Tax Payments','fa-money-bill-transfer'],
+            'audit'=>['Audit','fa-shield-halved'],
+        ];
+        foreach ($tabs as $key=>$tab):
+        ?>
+            <a class="<?= $view === $key ? 'active' : '' ?>" href="compliance.php?view=<?= $key ?>"><i class="fas <?= $tab[1] ?>"></i><?= compliance_h($tab[0]) ?></a>
+        <?php endforeach; ?>
+    </nav>
 
-<?php if ($tab==='overview'): ?>
-<div class="grid2">
-  <div class="panel"><div class="panel-head"><h2>Compliance readiness</h2><p>Phase 1 records that must be completed before live Smart Invoice integration.</p></div><div class="panel-body">
-    <div class="linkbox"><div><b>Taxpayer TPIN</b><span><?= $settings['tpin'] ? 'Configured' : 'Missing' ?></span></div><span class="badge <?= $settings['tpin']?'green':'red' ?>"><?= $settings['tpin']?'READY':'ACTION' ?></span></div>
-    <div class="linkbox"><div><b>VAT registration</b><span><?= !empty($settings['vat_registered']) ? 'Registered' : 'Not marked registered' ?></span></div><span class="badge <?= !empty($settings['vat_registered'])?'green':'gray' ?>"><?= !empty($settings['vat_registered'])?'ON':'OFF' ?></span></div>
-    <div class="linkbox"><div><b>Smart Invoice configuration</b><span><?= compliance_h(ucwords(str_replace('_',' ',(string)($settings['smart_invoice_status'] ?? 'not_configured')))) ?></span></div><span class="badge <?= (($settings['smart_invoice_status']??'')==='connected')?'green':'orange' ?>">STATUS</span></div>
-    <div class="linkbox"><div><b>VSDC</b><span><?= compliance_h(ucwords(str_replace('_',' ',(string)($settings['vsdc_status'] ?? 'not_configured')))) ?></span></div><span class="badge <?= (($settings['vsdc_status']??'')==='online')?'green':'gray' ?>">STATUS</span></div>
-  </div></div>
-  <div class="panel"><div class="panel-head"><h2>ZRA workflow</h2><p>Phase 1 prepares the compliance layer without sending live data.</p></div><div class="panel-body">
-    <div class="notice"><b>Important:</b> EchoTech POS is not declaring itself ZRA-certified here. ZRA says third-party POS/ERP solutions use the VSDC bridge after certification. The live invoice API belongs in Phase 2.</div>
-    <div style="margin-top:14px" class="linkbox"><div><b>1. Complete taxpayer profile</b><span>TPIN, VAT and tax registrations</span></div><i class="fa-solid fa-check"></i></div>
-    <div class="linkbox"><div><b>2. Register each branch/device</b><span>Branch Smart Invoice and VSDC information</span></div><i class="fa-solid fa-check"></i></div>
-    <div class="linkbox"><div><b>3. Track obligations</b><span>VAT, PAYE and other tax periods</span></div><i class="fa-solid fa-check"></i></div>
-    <div class="linkbox"><div><b>4. Integrate VSDC</b><span>Phase 2 after test/UAT/certification</span></div><i class="fa-solid fa-lock"></i></div>
-  </div></div>
-</div>
+<?php if ($view === 'overview'): ?>
+    <div class="grid-2">
+        <section class="panel">
+            <div class="panel-head"><div><h2>Compliance readiness</h2><p>Phase 1 records that must be completed before live Smart Invoice integration.</p></div><strong><?= $readinessPercent ?>%</strong></div>
+            <div class="panel-body">
+                <div class="readiness-list">
+                    <div class="readiness-item"><div><strong>Taxpayer TPIN</strong><small>ZRA taxpayer identification number</small></div><span class="state <?= $readiness['tpin'] ? 'ok':'bad' ?>"><?= $readiness['tpin'] ? 'Complete':'Missing' ?></span></div>
+                    <div class="readiness-item"><div><strong>VAT registration</strong><small>VAT number / registration record</small></div><span class="state <?= $readiness['vat'] ? 'ok':'warn' ?>"><?= $readiness['vat'] ? 'Registered':'Not marked registered' ?></span></div>
+                    <div class="readiness-item"><div><strong>Tax registration status</strong><small>Taxpayer registration must be active/valid</small></div><span class="state <?= $readiness['tax_registration'] ? 'ok':'warn' ?>"><?= compliance_h(ucwords(str_replace('_',' ',$tax_registration_status))) ?></span></div>
+                    <div class="readiness-item"><div><strong>Smart Invoice configuration</strong><small>VSDC/device information for Phase 1 readiness</small></div><span class="state <?= $readiness['smart_invoice'] ? 'ok':'warn' ?>"><?= compliance_h(ucwords(str_replace('_',' ',$smart_invoice_status))) ?></span></div>
+                </div>
+                <div style="margin-top:13px"><a class="section-link" href="compliance.php?view=taxpayer">Open taxpayer profile <i class="fas fa-arrow-right"></i></a></div>
+            </div>
+        </section>
+        <section class="panel">
+            <div class="panel-head"><div><h2>ZRA workflow</h2><p>Phase 1 prepares the compliance layer without sending live data.</p></div><i class="fas fa-route"></i></div>
+            <div class="panel-body">
+                <div class="info-box"><strong>Important:</strong> EchoTech POS does not declare itself ZRA-certified from this screen. The live Smart Invoice/VSDC integration should only be enabled after the applicable ZRA registration and certification requirements have been completed.</div>
+                <div class="readiness-list" style="margin-top:11px">
+                    <div class="readiness-item"><div><strong>1. Complete taxpayer profile</strong><small>TPIN, VAT and tax registrations</small></div><i class="fas fa-check"></i></div>
+                    <div class="readiness-item"><div><strong>2. Register each branch/device</strong><small>Branch Smart Invoice and VSDC information</small></div><i class="fas fa-check"></i></div>
+                    <div class="readiness-item"><div><strong>3. Track obligations</strong><small>VAT, PAYE and other tax periods</small></div><i class="fas fa-check"></i></div>
+                    <div class="readiness-item"><div><strong>4. Maintain evidence</strong><small>Payment references and compliance audit history</small></div><i class="fas fa-check"></i></div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <div class="grid-2">
+        <section class="panel"><div class="panel-head"><div><h3>Taxpayer profile</h3><p><?= compliance_h($taxpayer_name) ?></p></div><a class="section-link" href="compliance.php?view=taxpayer">Manage</a></div><div class="panel-body"><div class="metric-row"><div class="metric"><b><?= $tpin !== '' ? compliance_h($tpin) : 'â€”' ?></b><span>TPIN</span></div><div class="metric"><b><?= $vat_number !== '' ? compliance_h($vat_number) : 'â€”' ?></b><span>VAT Number</span></div><div class="metric"><b><?= compliance_h(ucwords(str_replace('_',' ',$smart_invoice_status))) ?></b><span>Smart Invoice</span></div></div></div></section>
+        <section class="panel"><div class="panel-head"><div><h3>Recent compliance activity</h3><p>Latest Phase 1 changes</p></div><a class="section-link" href="compliance.php?view=audit">View audit</a></div><div class="panel-body">
+            <?php if (!$auditRows): ?><div class="empty">No compliance activity recorded yet.</div><?php else: ?>
+                <?php foreach (array_slice($auditRows,0,5) as $a): ?><div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #edf0f4"><div><strong style="font-size:10px"><?= compliance_h($a['action']) ?></strong><div class="muted" style="font-size:9px"><?= compliance_h($a['actor']) ?></div></div><span class="muted" style="font-size:9px"><?= compliance_h(date('d M Y H:i',strtotime($a['created_at']))) ?></span></div><?php endforeach; ?>
+            <?php endif; ?>
+        </div></section>
+    </div>
+
+<?php elseif ($view === 'taxpayer'): ?>
+    <section class="panel"><div class="panel-head"><div><h2>Taxpayer / ZRA registration profile</h2><p>Store the official registration information used for compliance readiness.</p></div></div><div class="panel-body">
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= compliance_h($csrf) ?>"><input type="hidden" name="action" value="save_taxpayer">
+            <div class="form-grid">
+                <div class="field"><label>Taxpayer Name</label><input name="taxpayer_name" value="<?= compliance_h($taxpayer_name) ?>" required></div>
+                <div class="field"><label>TPIN</label><input name="tpin" value="<?= compliance_h($tpin) ?>" placeholder="ZRA TPIN"></div>
+                <div class="field"><label>VAT Number</label><input name="vat_number" value="<?= compliance_h($vat_number) ?>" placeholder="VAT registration number"></div>
+                <div class="field"><label>PACRA / Registration Number</label><input name="pacra_number" value="<?= compliance_h($pacra_number) ?>"></div>
+                <div class="field"><label>Tax Registration Status</label><select name="tax_registration_status"><?php foreach(['not_registered','pending','registered','active','expired'] as $s): ?><option value="<?= $s ?>" <?= $tax_registration_status===$s?'selected':'' ?>><?= compliance_h(ucwords(str_replace('_',' ',$s))) ?></option><?php endforeach; ?></select></div>
+                <div class="field"><label>Default Tax Type</label><select name="default_tax_type"><?php foreach(['VAT','Turnover Tax','Income Tax','Other'] as $s): ?><option value="<?= compliance_h($s) ?>" <?= $default_tax_type===$s?'selected':'' ?>><?= compliance_h($s) ?></option><?php endforeach; ?></select></div>
+                <div class="field"><label>Smart Invoice Status</label><select name="smart_invoice_status"><?php foreach(['not_configured','pending','configured','registered','active'] as $s): ?><option value="<?= $s ?>" <?= $smart_invoice_status===$s?'selected':'' ?>><?= compliance_h(ucwords(str_replace('_',' ',$s))) ?></option><?php endforeach; ?></select></div>
+                <div class="field"><label>VSDC Serial / Device Reference</label><input name="vsdc_serial" value="<?= compliance_h($vsdc_serial) ?>"></div>
+                <div class="field full"><label>Compliance Notes</label><textarea name="notes" placeholder="Registration notes, certificates, references, etc."><?= compliance_h($compliance_notes) ?></textarea></div>
+            </div>
+            <div class="form-actions"><button class="btn green" type="submit"><i class="fas fa-save"></i>Save Compliance Profile</button></div>
+        </form>
+    </div></section>
+    <div class="info-box"><strong>Phase 1 boundary:</strong> this record stores compliance configuration and readiness information. It does not make live VSDC/ZRA submissions.</div>
+
+<?php elseif ($view === 'smart_invoice'): ?>
+    <div class="grid-2">
+        <section class="panel"><div class="panel-head"><div><h2>Tax configuration</h2><p>Current POS tax configuration used for compliance preparation.</p></div></div><div class="panel-body"><div class="metric-row"><div class="metric"><b><?= compliance_h($default_tax_type) ?></b><span>Default tax type</span></div><div class="metric"><b>16%</b><span>Current POS VAT rate</span></div><div class="metric"><b><?= $vat_number !== '' ? 'ON':'OFF' ?></b><span>VAT registration recorded</span></div></div><div class="info-box" style="margin-top:14px">The production sale processor currently calculates VAT-inclusive POS pricing at 16%. îˆ€fileciteîˆ‚turn199file4îˆ‚L454-L468îˆ</div></div></section>
+        <section class="panel"><div class="panel-head"><div><h2>Smart Invoice status</h2><p>Configuration readiness before live integration.</p></div></div><div class="panel-body"><div class="readiness-item"><div><strong>Smart Invoice</strong><small>VSDC/device configuration state</small></div><span class="state <?= $readiness['smart_invoice']?'ok':'warn' ?>"><?= compliance_h(ucwords(str_replace('_',' ',$smart_invoice_status))) ?></span></div><div style="margin-top:12px"><a class="btn primary" href="compliance.php?view=taxpayer">Edit registration configuration</a></div></div></section>
+    </div>
+
+<?php elseif ($view === 'branches'): ?>
+    <section class="panel"><div class="panel-head"><div><h2>Branch / VSDC device register</h2><p>Register each branch/device record required for the Phase 1 compliance checklist.</p></div></div><div class="panel-body">
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= compliance_h($csrf) ?>"><input type="hidden" name="action" value="save_branch_device"><input type="hidden" name="record_id" value="0">
+            <div class="form-grid">
+                <div class="field"><label>Branch</label><select name="branch_id" required><option value="">Select branch</option><?php foreach($branches as $b): ?><option value="<?= (int)$b['id'] ?>"><?= compliance_h($b['branch_name']) ?></option><?php endforeach; ?></select></div>
+                <div class="field"><label>Device Name</label><input name="device_name" placeholder="e.g. Main Till 01" required></div>
+                <div class="field"><label>VSDC Serial / Reference</label><input name="vsdc_serial"></div>
+                <div class="field"><label>Registration Status</label><select name="registration_status"><?php foreach(['pending','submitted','registered','active'] as $s): ?><option value="<?= $s ?>"><?= compliance_h(ucwords($s)) ?></option><?php endforeach; ?></select></div>
+                <div class="field full"><label>Notes</label><textarea name="notes"></textarea></div>
+            </div>
+            <div class="form-actions"><button class="btn green"><i class="fas fa-plus"></i>Add Device Record</button></div>
+        </form>
+    </div></section>
+    <section class="panel"><div class="panel-head"><div><h3>Registered branch/device records</h3><p><?= count($branchDevices) ?> record(s)</p></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Branch</th><th>Device</th><th>VSDC Reference</th><th>Status</th><th>Registered</th><th>Action</th></tr></thead><tbody>
+    <?php if(!$branchDevices): ?><tr><td colspan="6" class="empty">No branch/device compliance records yet.</td></tr><?php else: foreach($branchDevices as $d): ?><tr><td><strong><?= compliance_h($d['branch_name'] ?? 'Unknown') ?></strong></td><td><?= compliance_h($d['device_name']) ?></td><td><?= $d['vsdc_serial']!==''?compliance_h($d['vsdc_serial']):'<span class="muted">â€”</span>' ?></td><td><span class="badge <?= $d['registration_status']==='registered'||$d['registration_status']==='active'?'green':($d['registration_status']==='pending'?'amber':'') ?>"><?= compliance_h($d['registration_status']) ?></span></td><td><?= !empty($d['registered_at'])?compliance_h(date('d M Y',strtotime($d['registered_at']))):'â€”' ?></td><td><form class="inline-form" method="post" onsubmit="return confirm('Remove this branch/device compliance record?')"><input type="hidden" name="csrf_token" value="<?= compliance_h($csrf) ?>"><input type="hidden" name="action" value="delete_branch_device"><input type="hidden" name="record_id" value="<?= (int)$d['id'] ?>"><button class="danger-link">Delete</button></form></td></tr><?php endforeach; endif; ?></tbody></table></div></section>
+
+<?php elseif ($view === 'invoices'): ?>
+    <section class="panel"><div class="panel-head"><div><h2>ZRA invoice readiness register</h2><p>Recent POS sales visible to the Phase 1 compliance layer. No live ZRA/VSDC submission is performed here.</p></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Sale</th><th>Invoice</th><th>Date</th><th>Total</th><th>Payment</th><th>Compliance</th></tr></thead><tbody>
+    <?php if(!$zraInvoices): ?><tr><td colspan="6" class="empty">No sales records were found for this pharmacy/branch.</td></tr><?php else: foreach($zraInvoices as $s): ?><tr><td>#<?= (int)$s['id'] ?></td><td><?= compliance_h($s['invoice'] ?? 'â€”') ?></td><td><?= !empty($s['created_at'])?compliance_h(date('d M Y H:i',strtotime($s['created_at']))):'â€”' ?></td><td><?= compliance_money((float)($s['total'] ?? 0)) ?></td><td><?= compliance_h($s['payment_method'] ?? 'â€”') ?></td><td><span class="badge amber">Phase 1 only</span></td></tr><?php endforeach; endif; ?></tbody></table></div></section>
+
+<?php elseif ($view === 'obligations'): ?>
+    <section class="panel"><div class="panel-head"><div><h2>Tax obligations</h2><p>Track filing periods, due dates and outstanding amounts.</p></div></div><div class="panel-body">
+        <form method="post"><input type="hidden" name="csrf_token" value="<?= compliance_h($csrf) ?>"><input type="hidden" name="action" value="save_obligation"><input type="hidden" name="record_id" value="0"><div class="form-grid"><div class="field"><label>Obligation</label><select name="obligation_type"><option>VAT</option><option>PAYE</option><option>Withholding Tax</option><option>Income Tax</option><option>Other</option></select></div><div class="field"><label>Period</label><input name="period_label" value="<?= compliance_h(date('F Y')) ?>"></div><div class="field"><label>Due Date</label><input type="date" name="due_date"></div><div class="field"><label>Amount</label><input type="number" step="0.01" min="0" name="amount" value="0"></div><div class="field"><label>Status</label><select name="status"><option>pending</option><option>submitted</option><option>paid</option><option>overdue</option><option>settled</option></select></div><div class="field"><label>Reference</label><input name="reference"></div><div class="field full"><label>Notes</label><textarea name="notes"></textarea></div></div><div class="form-actions"><button class="btn green"><i class="fas fa-plus"></i>Add Obligation</button></div></form>
+    </div></section>
+    <section class="panel"><div class="panel-head"><div><h3>Obligation register</h3></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Obligation</th><th>Period</th><th>Due</th><th>Amount</th><th>Status</th><th>Reference</th></tr></thead><tbody><?php if(!$obligations): ?><tr><td colspan="6" class="empty">No obligations recorded.</td></tr><?php else: foreach($obligations as $o): $isOverdue=!empty($o['due_date'])&&$o['due_date']<$today&&!in_array($o['status'],['paid','settled','complete'],true); ?><tr><td><strong><?= compliance_h($o['obligation_type']) ?></strong></td><td><?= compliance_h($o['period_label']) ?></td><td class="<?= $isOverdue?'':'muted' ?>"><?= !empty($o['due_date'])?compliance_h(date('d M Y',strtotime($o['due_date']))):'â€”' ?></td><td><?= compliance_money((float)$o['amount']) ?></td><td><span class="badge <?= $isOverdue?'red':($o['status']==='paid'||$o['status']==='settled'?'green':'amber') ?>"><?= compliance_h($o['status']) ?></span></td><td><?= $o['reference']!==''?compliance_h($o['reference']):'â€”' ?></td></tr><?php endforeach; endif; ?></tbody></table></div></section>
+
+<?php elseif ($view === 'payments'): ?>
+    <section class="panel"><div class="panel-head"><div><h2>Tax payments</h2><p>Record completed filings/payments and preserve payment references.</p></div></div><div class="panel-body">
+        <form method="post"><input type="hidden" name="csrf_token" value="<?= compliance_h($csrf) ?>"><input type="hidden" name="action" value="save_payment"><input type="hidden" name="record_id" value="0"><div class="form-grid"><div class="field"><label>Payment Type</label><input name="payment_type" value="VAT"></div><div class="field"><label>Obligation</label><select name="obligation_id"><option value="0">â€” Not linked â€”</option><?php foreach($obligations as $o): ?><option value="<?= (int)$o['id'] ?>"><?= compliance_h($o['obligation_type'].' / '.$o['period_label']) ?> â€” <?= compliance_money((float)$o['amount']) ?></option><?php endforeach; ?></select></div><div class="field"><label>Payment Date</label><input type="date" name="payment_date" value="<?= date('Y-m-d') ?>"></div><div class="field"><label>Amount</label><input type="number" step="0.01" min="0" name="amount" value="0"></div><div class="field"><label>Payment Reference</label><input name="payment_reference" placeholder="ZRA / bank / portal reference"></div><div class="field"><label>Status</label><select name="status"><option>recorded</option><option>submitted</option><option>confirmed</option></select></div><div class="field full"><label>Notes</label><textarea name="notes"></textarea></div></div><div class="form-actions"><button class="btn green"><i class="fas fa-save"></i>Record Payment</button></div></form>
+    </div></section>
+    <section class="panel"><div class="panel-head"><div><h3>Payment register</h3><p>Total recorded: <?= compliance_money($totalPayments) ?></p></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Type</th><th>Period</th><th>Date</th><th>Amount</th><th>Reference</th><th>Status</th></tr></thead><tbody><?php if(!$payments): ?><tr><td colspan="6" class="empty">No tax payments recorded.</td></tr><?php else: foreach($payments as $p): ?><tr><td><?= compliance_h($p['payment_type']) ?></td><td><?= compliance_h(($p['obligation_type']??'').' '.($p['period_label']??'')) ?></td><td><?= !empty($p['payment_date'])?compliance_h(date('d M Y',strtotime($p['payment_date']))):'â€”' ?></td><td><?= compliance_money((float)$p['amount']) ?></td><td><?= $p['payment_reference']!==''?compliance_h($p['payment_reference']):'â€”' ?></td><td><span class="badge green"><?= compliance_h($p['status']) ?></span></td></tr><?php endforeach; endif; ?></tbody></table></div></section>
+
+<?php elseif ($view === 'audit'): ?>
+    <section class="panel"><div class="panel-head"><div><h2>Compliance audit trail</h2><p>Administrative changes made through the Phase 1 Compliance module.</p></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead><tbody><?php if(!$auditRows): ?><tr><td colspan="5" class="empty">No audit records found.</td></tr><?php else: foreach($auditRows as $a): ?><tr><td><?= compliance_h(date('d M Y H:i:s',strtotime($a['created_at']))) ?></td><td><?= compliance_h($a['actor']) ?></td><td><strong><?= compliance_h($a['action']) ?></strong></td><td><?= compliance_h($a['entity_type']) ?><?= $a['entity_id']?' #'.(int)$a['entity_id']:'' ?></td><td><?= $a['details']!==''?compliance_h($a['details']):'â€”' ?></td></tr><?php endforeach; endif; ?></tbody></table></div></section>
 <?php endif; ?>
 
-<?php if ($tab==='zra' || $tab==='tax'): ?>
-<div class="panel">
-<div class="panel-head"><h2><?= $tab==='zra'?'ZRA / Smart Invoice Configuration':'Tax Configuration' ?></h2><p>Store taxpayer configuration safely. No live ZRA submission occurs in Phase 1.</p></div>
-<div class="panel-body">
-<form method="post">
-<input type="hidden" name="action" value="save_settings">
-<div class="grid2">
-<div>
-<div class="field"><label>Business / Taxpayer Name</label><input name="business_name" value="<?= compliance_h($settings['business_name']??'') ?>"></div>
-<div class="field"><label>ZRA TPIN</label><input name="tpin" value="<?= compliance_h($settings['tpin']??'') ?>" placeholder="Enter taxpayer TPIN"></div>
-<div class="field"><label>VAT Number / Registration Reference</label><input name="vat_number" value="<?= compliance_h($settings['vat_number']??'') ?>"></div>
-<div class="grid2">
-<div class="check"><input type="checkbox" name="vat_registered" value="1" <?= !empty($settings['vat_registered'])?'checked':'' ?>><label>VAT registered</label></div>
-<div class="check"><input type="checkbox" name="income_tax_registered" value="1" <?= !empty($settings['income_tax_registered'])?'checked':'' ?>><label>Income Tax registered</label></div>
-</div>
-<div class="check" style="margin-top:10px"><input type="checkbox" name="turnover_tax_registered" value="1" <?= !empty($settings['turnover_tax_registered'])?'checked':'' ?>><label>Turnover Tax registered</label></div>
-</div>
-<div>
-<div class="field"><label>Smart Invoice status</label><select name="smart_invoice_status">
-<?php foreach(['not_configured','pending','test','connected','suspended'] as $v): ?><option value="<?= $v ?>" <?= (($settings['smart_invoice_status']??'not_configured')===$v)?'selected':'' ?>><?= ucwords(str_replace('_',' ',$v)) ?></option><?php endforeach; ?>
-</select></div>
-<div class="field"><label>Smart Invoice environment</label><select name="smart_invoice_environment"><option value="test" <?= (($settings['smart_invoice_environment']??'test')==='test')?'selected':'' ?>>Test</option><option value="production" <?= (($settings['smart_invoice_environment']??'test')==='production')?'selected':'' ?>>Production</option></select></div>
-<div class="field"><label>CIS Code</label><input name="cis_code" value="<?= compliance_h($settings['cis_code']??'') ?>"></div>
-<div class="field"><label>VSDC Serial Number</label><input name="vsdc_serial" value="<?= compliance_h($settings['vsdc_serial']??'') ?>"></div>
-<div class="field"><label>VSDC Status</label><select name="vsdc_status"><?php foreach(['not_configured','offline','online','error'] as $v): ?><option value="<?= $v ?>" <?= (($settings['vsdc_status']??'not_configured')===$v)?'selected':'' ?>><?= ucwords(str_replace('_',' ',$v)) ?></option><?php endforeach; ?></select></div>
-<div class="field"><label>VSDC Endpoint</label><input name="vsdc_endpoint" value="<?= compliance_h($settings['vsdc_endpoint']??'') ?>" placeholder="Leave blank until Phase 2"></div>
-</div>
-</div>
-<div class="grid3">
-<div class="field"><label>Tax Account Reference</label><input name="tax_account_reference" value="<?= compliance_h($settings['tax_account_reference']??'') ?>"></div>
-<div class="field"><label>Compliance Contact</label><input name="compliance_contact_name" value="<?= compliance_h($settings['compliance_contact_name']??'') ?>"></div>
-<div class="field"><label>Contact Phone</label><input name="compliance_contact_phone" value="<?= compliance_h($settings['compliance_contact_phone']??'') ?>"></div>
-</div>
-<div class="field"><label>Contact Email</label><input type="email" name="compliance_contact_email" value="<?= compliance_h($settings['compliance_contact_email']??'') ?>"></div>
-<div class="field"><label>Compliance Notes</label><textarea name="notes"><?= compliance_h($settings['notes']??'') ?></textarea></div>
-<div class="actions"><button class="btn primary" type="submit"><i class="fa-solid fa-floppy-disk"></i> Save Compliance Settings</button><a class="btn" target="_blank" rel="noopener" href="https://siportal.zra.org.zm/main/signup/indexLearnMore"><i class="fa-solid fa-arrow-up-right-from-square"></i> ZRA Registration Portal</a></div>
-</form>
-</div></div>
-<?php endif; ?>
-
-<?php if ($tab==='branches'): ?>
-<div class="panel"><div class="panel-head"><h2>Branch Compliance Register</h2><p>Phase 1 stores branch-level Smart Invoice/VSDC readiness. Branch discovery is intentionally not automatic to avoid guessing your existing branches schema.</p></div><div class="panel-body">
-<div class="notice">Use this register to record each existing POS branch and its ZRA/Smart Invoice status. We can connect it directly to your existing <code>branches</code> table in Phase 2 after confirming its columns.</div>
-<?php if ($branches): ?><div style="overflow:auto;margin-top:14px"><table><thead><tr><th>Branch</th><th>Branch TPIN</th><th>Smart Invoice</th><th>VSDC</th><th>Device</th><th>Notes</th></tr></thead><tbody>
-<?php foreach($branches as $b): ?><tr><td><?= compliance_h($b['branch_name']) ?></td><td><?= compliance_h($b['branch_tpin']??'-') ?></td><td><span class="badge <?= $b['smart_invoice_registered']?'green':'orange' ?>"><?= $b['smart_invoice_registered']?'Registered':'Not registered' ?></span></td><td><?= compliance_h($b['vsdc_status']) ?></td><td><?= compliance_h($b['device_serial']??'-') ?></td><td><?= compliance_h($b['notes']??'') ?></td></tr><?php endforeach; ?>
-</tbody></table></div><?php else: ?><div class="empty">No branch compliance records have been created yet.</div><?php endif; ?>
-</div></div>
-<?php endif; ?>
-
-<?php if ($tab==='invoices'): ?>
-<div class="panel"><div class="panel-head"><h2>ZRA Invoice Register</h2><p>Phase 1 audit/register view. Live Smart Invoice submission is a Phase 2 function.</p></div><div class="panel-body">
-<div class="notice">When Phase 2 is connected, each completed POS sale will be linked to its ZRA response, including the ZRA invoice number, SDC ID, signature and internal data. ZRA describes the fiscal signature as the authenticity/integrity mark for electronic invoices.</div>
-<div style="overflow:auto;margin-top:14px"><?php if($invoices): ?><table><thead><tr><th>Local Invoice</th><th>ZRA Invoice</th><th>Status</th><th>Gross</th><th>VAT</th><th>SDC</th><th>Submitted</th></tr></thead><tbody>
-<?php foreach($invoices as $i): ?><tr><td><?= compliance_h($i['local_invoice_no']??'-') ?></td><td><?= compliance_h($i['zra_invoice_no']??'-') ?></td><td><span class="badge <?= $i['status']==='accepted'?'green':($i['status']==='rejected'?'red':'orange') ?>"><?= compliance_h($i['status']) ?></span></td><td><?= compliance_money($i['gross_amount']) ?></td><td><?= compliance_money($i['vat_amount']) ?></td><td><?= compliance_h($i['zra_sdc_id']??'-') ?></td><td><?= compliance_h($i['submitted_at']??'-') ?></td></tr><?php endforeach; ?>
-</tbody></table><?php else: ?><div class="empty">No ZRA invoice records yet. Existing POS sales are not altered by Phase 1.</div><?php endif; ?></div>
-</div></div>
-<?php endif; ?>
-
-<?php if ($tab==='obligations'): ?>
-<div class="grid2">
-<div class="panel"><div class="panel-head"><h2>Add Tax Obligation</h2><p>Use this to create a tracked return/payment period.</p></div><div class="panel-body">
-<form method="post"><input type="hidden" name="action" value="add_obligation">
-<div class="field"><label>Tax Type</label><select name="tax_type"><option>VAT</option><option>PAYE</option><option>Withholding Tax</option><option>Turnover Tax</option><option>Income Tax</option><option>Skills Development Levy</option><option>Other</option></select></div>
-<div class="grid2"><div class="field"><label>Year</label><input type="number" name="period_year" value="<?= date('Y') ?>"></div><div class="field"><label>Month</label><select name="period_month"><option value="">Annual / N/A</option><?php for($m=1;$m<=12;$m++): ?><option value="<?= $m ?>"><?= date('F',mktime(0,0,0,$m,1)) ?></option><?php endfor; ?></select></div></div>
-<div class="grid2"><div class="field"><label>Return due date</label><input type="date" name="return_due_date"></div><div class="field"><label>Payment due date</label><input type="date" name="payment_due_date"></div></div>
-<div class="field"><label>Amount due</label><input type="number" step="0.01" min="0" name="amount_due" value="0"></div>
-<div class="field"><label>Notes</label><textarea name="notes"></textarea></div>
-<button class="btn primary" type="submit"><i class="fa-solid fa-plus"></i> Add Obligation</button>
-</form>
-</div></div>
-<div class="panel"><div class="panel-head"><h2>ZRA Due-Date Reference</h2><p>Official ZRA dates used as the Phase 1 planning reference.</p></div><div class="panel-body">
-<div class="linkbox"><div><b>PAYE</b><span>Return and payment by the 10th of the following month</span></div><span class="badge green">10TH</span></div>
-<div class="linkbox"><div><b>VAT â€” electronic</b><span>Payment due by the 18th of the following month</span></div><span class="badge green">18TH</span></div>
-<div class="linkbox"><div><b>Withholding Tax</b><span>Return/payment by the 14th of the following month</span></div><span class="badge green">14TH</span></div>
-<div class="notice">Always verify the applicable obligation and current ZRA guidance before filing. Phase 1 is a management tracker, not a tax filing engine.</div>
-</div></div>
-</div>
-<div class="panel"><div class="panel-head"><h2>Tracked Obligations</h2><p>Open, filed and paid compliance periods.</p></div><div class="panel-body" style="overflow:auto">
-<?php if($obligations): ?><table><thead><tr><th>Tax</th><th>Period</th><th>Return Due</th><th>Payment Due</th><th>Amount</th><th>Return</th><th>Payment</th><th>Actions</th></tr></thead><tbody>
-<?php foreach($obligations as $o): ?><tr>
-<td><?= compliance_h($o['tax_type']) ?></td><td><?= compliance_h($o['period_year'].' / '.($o['period_month']?$o['period_month']:'Annual')) ?></td>
-<td><?= compliance_h($o['return_due_date']??'-') ?></td><td><?= compliance_h($o['payment_due_date']??'-') ?></td><td><?= compliance_money($o['amount_due']) ?></td>
-<td><span class="badge <?= $o['return_status']==='filed'?'green':'orange' ?>"><?= compliance_h($o['return_status']) ?></span></td>
-<td><span class="badge <?= $o['payment_status']==='paid'?'green':($o['payment_status']==='partial'?'orange':'red') ?>"><?= compliance_h($o['payment_status']) ?></span></td>
-<td><div class="actions">
-<?php if($o['return_status']!=='filed'): ?><form method="post"><input type="hidden" name="action" value="mark_obligation_filed"><input type="hidden" name="id" value="<?= (int)$o['id'] ?>"><button class="btn" type="submit">Mark Filed</button></form><?php endif; ?>
-<?php if($o['payment_status']!=='paid'): ?><form method="post"><input type="hidden" name="action" value="mark_obligation_paid"><input type="hidden" name="id" value="<?= (int)$o['id'] ?>"><button class="btn" type="submit">Mark Paid</button></form><?php endif; ?>
-</div></td></tr><?php endforeach; ?>
-</tbody></table><?php else: ?><div class="empty">No tax obligations have been entered.</div><?php endif; ?>
-</div></div>
-<?php endif; ?>
-
-<?php if ($tab==='payments'): ?>
-<div class="panel"><div class="panel-head"><h2>Tax Payments</h2><p>Phase 1 payment register reserved for ZRA reconciliation.</p></div><div class="panel-body">
-<div class="notice">Payments are intentionally kept separate from the obligation tracker so that future ZRA payment references can be reconciled without changing payroll or sales tables.</div>
-<div class="empty">No payment records yet. Payment capture/reconciliation will be expanded in Phase 2.</div>
-</div></div>
-<?php endif; ?>
-
-<?php if ($tab==='audit'): ?>
-<div class="panel"><div class="panel-head"><h2>Compliance Audit Log</h2><p>Administrative changes made inside the compliance module.</p></div><div class="panel-body" style="overflow:auto">
-<?php if($audits): ?><table><thead><tr><th>Date</th><th>Action</th><th>Entity</th><th>Description</th><th>IP</th></tr></thead><tbody>
-<?php foreach($audits as $a): ?><tr><td><?= compliance_h($a['created_at']) ?></td><td><?= compliance_h($a['action']) ?></td><td><?= compliance_h($a['entity_type']??'-') ?></td><td><?= compliance_h($a['description']??'') ?></td><td><?= compliance_h($a['ip_address']??'-') ?></td></tr><?php endforeach; ?>
-</tbody></table><?php else: ?><div class="empty">No compliance audit entries yet.</div><?php endif; ?>
-</div></div>
-<?php endif; ?>
-
+<div class="mini-note">EchoTech POS Compliance Phase 1 â€¢ Compliance administration only â€¢ Live ZRA/VSDC submission is intentionally disabled in this module.</div>
 </section>
 </main>
 </div>
