@@ -1987,7 +1987,7 @@ foreach ($tabs as $key => $tab):
         <div class="metric-row">
 
             <div class="metric">
-                <b><?= $tpin !== '' ? compliance_h($tpin) : '—' ?></b>
+                <b><?= $tpin !== '' ? compliance_h($tpin) : 'â€”' ?></b>
                 <span>TPIN</span>
             </div>
 
@@ -2055,7 +2055,7 @@ foreach ($tabs as $key => $tab):
                     ? compliance_h(
                         date('d M Y H:i', strtotime($audit['created_at']))
                     )
-                    : '—' ?>
+                    : 'â€”' ?>
             </span>
         </div>
 
@@ -2529,7 +2529,7 @@ foreach ($tabs as $key => $tab):
                 <td>
                     <?= ($device['vsdc_serial'] ?? '') !== ''
                         ? compliance_h($device['vsdc_serial'])
-                        : '<span class="muted">—</span>' ?>
+                        : '<span class="muted">â€”</span>' ?>
                 </td>
 
                 <td>
@@ -2546,7 +2546,7 @@ foreach ($tabs as $key => $tab):
                                 strtotime($device['registered_at'])
                             )
                         )
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
                 <td>
@@ -2645,19 +2645,19 @@ foreach ($tabs as $key => $tab):
 
                 <td>
                     <?= compliance_h(
-                        $invoice['local_invoice_no'] ?? '—'
+                        $invoice['local_invoice_no'] ?? 'â€”'
                     ) ?>
                 </td>
 
                 <td>
                     <?= compliance_h(
-                        $invoice['zra_invoice_no'] ?? '—'
+                        $invoice['zra_invoice_no'] ?? 'â€”'
                     ) ?>
                 </td>
 
                 <td>
                     <?= compliance_h(
-                        $invoice['branch_name'] ?? '—'
+                        $invoice['branch_name'] ?? 'â€”'
                     ) ?>
                 </td>
 
@@ -2693,7 +2693,7 @@ foreach ($tabs as $key => $tab):
                                 strtotime($invoice['created_at'])
                             )
                         )
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
             </tr>
@@ -2942,7 +2942,7 @@ foreach ($tabs as $key => $tab):
                                 strtotime($obligation['return_due_date'])
                             )
                         )
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
                 <td class="<?= $overdue ? '' : 'muted' ?>">
@@ -2950,7 +2950,7 @@ foreach ($tabs as $key => $tab):
                         ? compliance_h(
                             date('d M Y', strtotime($paymentDue))
                         )
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
                 <td><?= compliance_money($dueAmount) ?></td>
@@ -2966,7 +2966,7 @@ foreach ($tabs as $key => $tab):
                 <td>
                     <?= !empty($obligation['reference_no'])
                         ? compliance_h($obligation['reference_no'])
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
             </tr>
@@ -3015,7 +3015,7 @@ foreach ($tabs as $key => $tab):
             <div class="field">
                 <label>Obligation</label>
                 <select name="obligation_id">
-                    <option value="0">— Not linked —</option>
+                    <option value="0">â€” Not linked â€”</option>
 
                     <?php foreach ($obligations as $obligation): ?>
 
@@ -3044,7 +3044,7 @@ foreach ($tabs as $key => $tab):
                             ' / ' .
                             $period
                         ) ?>
-                        — <?= compliance_money(
+                        â€” <?= compliance_money(
                             $obligation['amount_due'] ?? 0
                         ) ?>
                     </option>
@@ -3170,7 +3170,7 @@ foreach ($tabs as $key => $tab):
                     ) ?>
                 </td>
 
-                <td><?= compliance_h($period ?: '—') ?></td>
+                <td><?= compliance_h($period ?: 'â€”') ?></td>
 
                 <td>
                     <?= !empty($payment['payment_date'])
@@ -3180,7 +3180,7 @@ foreach ($tabs as $key => $tab):
                                 strtotime($payment['payment_date'])
                             )
                         )
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
                 <td>
@@ -3192,13 +3192,13 @@ foreach ($tabs as $key => $tab):
                 <td>
                     <?= !empty($payment['payment_reference'])
                         ? compliance_h($payment['payment_reference'])
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
                 <td>
                     <?= !empty($payment['method'])
                         ? compliance_h($payment['method'])
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
             </tr>
@@ -3264,7 +3264,7 @@ foreach ($tabs as $key => $tab):
                                 strtotime($audit['created_at'])
                             )
                         )
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
                 <td>
@@ -3292,13 +3292,13 @@ foreach ($tabs as $key => $tab):
                 <td>
                     <?= !empty($audit['description'])
                         ? compliance_h($audit['description'])
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
                 <td>
                     <?= !empty($audit['ip_address'])
                         ? compliance_h($audit['ip_address'])
-                        : '—' ?>
+                        : 'â€”' ?>
                 </td>
 
             </tr>
@@ -3315,7 +3315,7 @@ foreach ($tabs as $key => $tab):
 <?php endif; ?>
 
 <div class="mini-note">
-    EchoTech POS Compliance Phase 1 • Administrative compliance layer only •
+    EchoTech POS Compliance Phase 1 â€¢ Administrative compliance layer only â€¢
     Live ZRA/VSDC submission is intentionally disabled.
 </div>
 
