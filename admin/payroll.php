@@ -1,49 +1,38 @@
 <?php
 /**
  * ============================================================
- * EchoTech POS
- * Payroll Browser Entry Point
+ * EchoTech POS - ADMIN PAYROLL ENTRY
  * ============================================================
  *
- * URL:
+ * Browser URL:
  *     /admin/payroll.php
  *
- * The complete Payroll module is handled by:
+ * Complete Payroll controller:
  *     /admin/actions/payroll.php
  *
- * IMPORTANT:
- * - Do NOT duplicate authentication here.
- * - Do NOT call require_admin() here.
- * - Human Resource must be allowed to enter Payroll.
- * - Final payroll approval is handled inside the Payroll controller.
- * - Admin and Human Resource use their respective sidebars.
+ * Admin and Human Resource share the controller, but the
+ * controller renders the correct interface and permissions
+ * according to the authenticated role.
+ *
+ * Admin retains final payroll approval.
  * ============================================================
  */
-
 declare(strict_types=1);
 
+if (session_status() === PHP_SESSION_NONE) {
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443);
 
-/*
-|--------------------------------------------------------------------------
-| Load the actual Payroll controller
-|--------------------------------------------------------------------------
-|
-| The controller is responsible for:
-|
-|  - session initialization
-|  - authentication
-|  - role verification
-|  - pharmacy verification
-|  - Admin / HR permissions
-|  - payroll calculations
-|  - employee payroll
-|  - loans and advances
-|  - deductions
-|  - payslips
-|  - final Admin approval
-|
-*/
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => $https,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+
+    session_start();
+}
 
 require_once __DIR__ . '/actions/payroll.php';
-
 exit;
