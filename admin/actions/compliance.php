@@ -111,7 +111,7 @@ if ($pharmacy_id <= 0) {
 /* ------------------------------------------------------------
  | Helpers
  * ------------------------------------------------------------ */
-function compliance_h(mixed $value): string
+function compliance_h($value): string
 {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
@@ -215,7 +215,7 @@ function compliance_actor(): string
     );
 }
 
-function compliance_redirect(string $view = 'overview', string $message = '', string $type = 'success'): never
+function compliance_redirect(string $view = 'overview', string $message = '', string $type = 'success')
 {
     $url = 'compliance.php?view=' . rawurlencode($view);
     if ($message !== '') {
@@ -550,7 +550,7 @@ if (compliance_table_exists($conn, 'sales')) {
 
 $csrf = compliance_csrf();
 
-if (is_file(__DIR__ . '/admin_header.php')) {
+if (is_file(__DIR__ . '/../admin_header.php')) {
     // The existing header expects the variables above.
     // It is loaded below after the page CSS begins.
 }
@@ -570,11 +570,11 @@ if (is_file(__DIR__ . '/admin_header.php')) {
 <body>
 <div class="app">
 <?php
-if (is_file(__DIR__ . '/admin_aside.php')) require __DIR__ . '/admin_aside.php';
+if (is_file(__DIR__ . '/../admin_aside.php')) require __DIR__ . '/../admin_aside.php';
 ?>
 <main class="main">
 <?php
-if (is_file(__DIR__ . '/admin_header.php')) require __DIR__ . '/admin_header.php';
+if (is_file(__DIR__ . '/../admin_header.php')) require __DIR__ . '/../admin_header.php';
 ?>
 <section class="compliance-content">
     <div class="page-head">
