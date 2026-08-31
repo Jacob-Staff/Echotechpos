@@ -409,15 +409,10 @@ function payroll_complete_user(): string {
 }
 
 function payroll_complete_redirect(array $params = []): never {
-    $isHrRoute = basename((string)($_SERVER['PHP_SELF'] ?? '')) === 'hr_payroll.php'
-        || (strpos((string)($_SERVER['HTTP_REFERER'] ?? ''), '/admin/hr_payroll.php') !== false);
-
-    $url = $isHrRoute ? '/admin/hr_payroll.php' : '/admin/payroll.php';
-
+    $url = '/admin/payroll.php';
     if ($params) {
         $url .= '?' . http_build_query($params);
     }
-
     header('Location: ' . $url, true, 303);
     exit;
 }
