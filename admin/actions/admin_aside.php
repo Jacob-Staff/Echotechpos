@@ -179,10 +179,44 @@ a{text-decoration:none;color:inherit}
         </div>
 
         <?php if ($user_role === 'Admin'): ?>
-        <a class="<?= $current_admin_page === 'compliance.php' ? 'active' : '' ?>"
-           href="compliance.php">
-            <i class="fas fa-shield-halved"></i>Compliance
-        </a>
+        <?php
+            // Compliance / ZRA navigation is Admin-only.
+            // Keep these pages under the Admin control panel.
+            $complianceNavOpen = in_array($current_admin_page, [
+                'compliance.php',
+                'zra.php',
+                'zra_items.php'
+            ], true);
+        ?>
+        <div class="nav-group">
+            <button type="button"
+                    class="nav-parent <?= $complianceNavOpen ? 'open active' : '' ?>"
+                    id="complianceNavParent"
+                    aria-expanded="<?= $complianceNavOpen ? 'true' : 'false' ?>">
+                <i class="fas fa-shield-halved"></i>
+                <span>Compliance</span>
+                <i class="fas fa-chevron-down nav-chevron"></i>
+            </button>
+
+            <div class="nav-subnav"
+                 id="complianceNavSubnav"
+                 style="<?= $complianceNavOpen ? '' : 'display:none;' ?>">
+                <a class="<?= $current_admin_page === 'compliance.php' ? 'active' : '' ?>"
+                   href="compliance.php">
+                    <i class="fas fa-shield-halved"></i>Compliance Overview
+                </a>
+
+                <a class="<?= $current_admin_page === 'zra.php' ? 'active' : '' ?>"
+                   href="zra.php">
+                    <i class="fas fa-file-invoice"></i>ZRA / Smart Invoice
+                </a>
+
+                <a class="<?= $current_admin_page === 'zra_items.php' ? 'active' : '' ?>"
+                   href="zra_items.php">
+                    <i class="fas fa-box-open"></i>ZRA Items
+                </a>
+            </div>
+        </div>
         <?php endif; ?>
 
         <a href="sales_report.php"><i class="fas fa-chart-line"></i>Sales Analytics</a>
@@ -228,14 +262,20 @@ a{text-decoration:none;color:inherit}
 </aside>
 <script>
 (function(){
-    var parent=document.getElementById('payrollNavParent');
-    var sub=document.getElementById('payrollNavSubnav');
-    if(!parent || !sub) return;
-    parent.addEventListener('click',function(){
-        var open=sub.style.display!=='none';
-        sub.style.display=open?'none':'flex';
-        parent.classList.toggle('open',!open);
-        parent.setAttribute('aria-expanded',!open?'true':'false');
-    });
+    function setupNavGroup(parentId, subId){
+        var parent=document.getElementById(parentId);
+        var sub=document.getElementById(subId);
+        if(!parent || !sub) return;
+
+        parent.addEventListener('click',function(){
+            var open=sub.style.display!=='none';
+            sub.style.display=open?'none':'flex';
+            parent.classList.toggle('open',!open);
+            parent.setAttribute('aria-expanded',!open?'true':'false');
+        });
+    }
+
+    setupNavGroup('payrollNavParent','payrollNavSubnav');
+    setupNavGroup('complianceNavParent','complianceNavSubnav');
 })();
 </script>
