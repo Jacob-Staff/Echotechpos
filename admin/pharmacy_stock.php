@@ -58,8 +58,6 @@ try{
  $s=$conn->prepare($sql);$bind=[$types];foreach($params as $k=>$v)$bind[]=&$params[$k];call_user_func_array([$s,'bind_param'],$bind);$s->execute();$r=$s->get_result();while($x=$r->fetch_assoc())$rows[]=$x;$s->close();
 }catch(Throwable $e){error_log('ADMIN STOCK QUERY '.$e->getMessage());}
 
-require_once __DIR__.'/actions/admin_aside.php';
-require_once __DIR__.'/actions/admin_header.php';
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($pharmacy_name)?> - Admin Inventory</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 <style>
@@ -69,7 +67,12 @@ require_once __DIR__.'/actions/admin_header.php';
 .filters{padding:15px;margin-bottom:16px}.grid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1fr auto;gap:9px;align-items:end}.field label{display:block;font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:5px}.field input,.field select{width:100%;height:40px;border:1px solid var(--border);border-radius:8px;padding:0 10px;background:#fff}.btn{height:40px;border:1px solid var(--border);background:#fff;border-radius:8px;padding:0 13px;font-weight:800;cursor:pointer}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
 .table-card{overflow:hidden}.table-head{padding:15px 17px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between}.table-head h2{margin:0;font-size:16px}.responsive{overflow:auto}table{width:100%;border-collapse:collapse;min-width:950px}th,td{padding:11px 12px;border-bottom:1px solid #edf0f4;text-align:left;font-size:12px}th{background:#fafbfc;color:#667789;font-size:10px;text-transform:uppercase;white-space:nowrap}.badge{display:inline-block;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:800}.good{background:#e8f7f0;color:#08754f}.low{background:#fff6df;color:#9a6700}.out{background:#fff0f2;color:#b4233b}.soon{color:#b45309;font-weight:800}.num{text-align:right;font-weight:700}.empty{text-align:center;padding:40px;color:var(--muted)}
 @media(max-width:1250px){.kpis{grid-template-columns:repeat(3,1fr)}.grid{grid-template-columns:repeat(3,1fr)}}@media(max-width:900px){.main{margin-left:0}.page{padding:16px}.heading{flex-direction:column}.grid{grid-template-columns:1fr 1fr}}@media(max-width:600px){.kpis{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}.heading h1{font-size:23px}}@media print{.admin-aside,.admin-header,.no-print{display:none!important}.main{margin-left:0}.page{padding:0}.card{box-shadow:none}}
-</style></head><body><main class="main"><div class="page">
+</style></head><body><main class="main">
+<?php
+require_once __DIR__ . '/actions/admin_aside.php';
+require_once __DIR__ . '/actions/admin_header.php';
+?>
+<div class="page">
 <div class="heading"><div><h1><i class="fas fa-boxes-stacked" style="color:var(--blue)"></i> Inventory</h1><p><?=h($pharmacy_name)?> &mdash; consolidated stock across the pharmacy group.</p></div><button class="btn no-print" onclick="window.print()"><i class="fas fa-print"></i> Print</button></div>
 <div class="kpis">
 <div class="card kpi blue"><small>Active Products</small><strong><?=number_format((int)$summary['products'])?></strong></div>
@@ -90,6 +93,6 @@ require_once __DIR__.'/actions/admin_header.php';
 <?php if($rows):foreach($rows as $i=>$r):
 $q=(int)$r['quantity'];$expiry=$r['expiry_date']??'';$expired=$expiry && $expiry!=='0000-00-00' && strtotime($expiry)<strtotime(date('Y-m-d'));$soon=$expiry && !$expired && $expiry!=='0000-00-00' && strtotime($expiry)<=strtotime('+90 days');
 ?>
-<tr><td><?=$i+1?></td><td><strong><?=h($r['item_name'])?></strong></td><td><?=h($r['barcode']?:'—')?></td><td><?=h($r['category']?:'General')?></td><td><?=h($r['branch_name']?:'Unassigned')?></td><td><?=money((float)$r['cost'])?></td><td><?=money((float)$r['price'])?></td><td><span class="badge <?=$q<=0?'out':($q<=10?'low':'good')?>"><?=$q?></span></td><td class="num"><?=money($q*(float)$r['price'])?></td><td class="<?=$expired?'out':($soon?'soon':'')?>"><?= $expiry&&$expiry!=='0000-00-00'?h(date('d M Y',strtotime($expiry))):'No expiry'?></td><td><span class="badge <?=$expired||$q<=0?'out':($q<=10||$soon?'low':'good')?>"><?=$expired?'Expired':($q<=0?'Out of stock':($q<=10?'Low stock':($soon?'Expiring soon':'Healthy'))) ?></span></td></tr>
+<tr><td><?=$i+1?></td><td><strong><?=h($r['item_name'])?></strong></td><td><?=h($r['barcode']?:'â€”')?></td><td><?=h($r['category']?:'General')?></td><td><?=h($r['branch_name']?:'Unassigned')?></td><td><?=money((float)$r['cost'])?></td><td><?=money((float)$r['price'])?></td><td><span class="badge <?=$q<=0?'out':($q<=10?'low':'good')?>"><?=$q?></span></td><td class="num"><?=money($q*(float)$r['price'])?></td><td class="<?=$expired?'out':($soon?'soon':'')?>"><?= $expiry&&$expiry!=='0000-00-00'?h(date('d M Y',strtotime($expiry))):'No expiry'?></td><td><span class="badge <?=$expired||$q<=0?'out':($q<=10||$soon?'low':'good')?>"><?=$expired?'Expired':($q<=0?'Out of stock':($q<=10?'Low stock':($soon?'Expiring soon':'Healthy'))) ?></span></td></tr>
 <?php endforeach;else:?><tr><td colspan="11" class="empty">No inventory records match the selected criteria.</td></tr><?php endif;?></tbody></table></div></div>
 </div></main></body></html>
