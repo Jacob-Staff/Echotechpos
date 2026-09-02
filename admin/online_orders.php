@@ -23,13 +23,15 @@ if ($pharmacy_id <= 0) {
 }
 
 /* =========================================================
-   ECHOTECH POS — ADMIN ONLINE ORDERS
-   Report-style admin architecture:
-   - shared admin_header.php
-   - shared admin_aside.php
-   - pharmacy/branch tenancy enforced in every query
-   - Processing -> Completed is the only stock-deducting step
-   - Completed orders create a normal sales transaction
+   ECHOTECH POS â€” ADMIN ONLINE ORDERS
+   Report-style admin architecture.
+
+   Important:
+   - Uses the SAME shared admin header + aside as the dashboard.
+   - The page itself supplies only its content.
+   - Pharmacy-wide admin view with optional branch filter.
+   - Processing -> Completed is the only stock-deducting step.
+   - Completed orders are recorded in sales + sales_items.
 ========================================================= */
 
 function oo_e(mixed $value): string
@@ -83,6 +85,24 @@ function oo_rows(
     return $rows;
 }
 
+function oo_scalar(
+    mysqli $conn,
+    string $sql,
+    string $types = '',
+    array $params = [],
+    mixed $default = 0
+): mixed {
+    $rows = oo_rows($conn, $sql, $types, $params);
+
+    if (!$rows) {
+        return $default;
+    }
+
+    $value = array_values($rows[0])[0] ?? $default;
+
+    return $value;
+}
+
 function oo_json(array $payload, int $status = 200): never
 {
     http_response_code($status);
@@ -96,44 +116,47 @@ function oo_json(array $payload, int $status = 200): never
     exit;
 }
 
-function oo_payment_method(string $value): string
+function oo_payment_display(string $value): string
 {
     $normalized = strtolower(trim($value));
-    $normalized = preg_replace('/[\s_\-\/]+/', ' ', $normalized);
-    $normalized = trim((string)$normalized);
 
-    if (
-        $normalized === 'cash' ||
-        $normalized === 'cod' ||
-        $normalized === 'cash on delivery' ||
-        $normalized === 'cash delivery'
-    ) {
-        return 'Online/Cash on Delivery';
-    }
+    return match ($normalized) {
+        'cash',
+        'cod',
+        'cash on delivery',
+        'cash delivery'
+            => 'Cash on Delivery',
 
-    if (
-        $normalized === 'bank' ||
-        $normalized === 'bank transfer' ||
-        $normalized === 'banktransfer'
-    ) {
-        return 'Online/Bank Transfer';
-    }
+        'bank',
+        'bank transfer',
+        'bank / transfer',
+        'bank/transfer'
+            => 'Bank Transfer',
 
-    if (
-        $normalized === 'mobile' ||
-        $normalized === 'mobile money' ||
-        $normalized === 'mobilemoney'
-    ) {
-        return 'Online/Mobile Money';
-    }
+        'mobile',
+        'mobile money',
+        'momo'
+            => 'Mobile Money',
 
-    return '';
+        default => $value !== '' ? $value : 'Not specified'
+    };
+}
+
+function oo_payment_db_value(string $value): string
+{
+    return match ($value) {
+        'Cash on Delivery' => 'Cash on Delivery',
+        'Bank Transfer' => 'Bank Transfer',
+        'Mobile Money' => 'Mobile Money',
+        default => ''
+    };
 }
 
 function oo_csrf_token(): string
 {
     if (empty($_SESSION['admin_online_orders_csrf'])) {
-        $_SESSION['admin_online_orders_csrf'] = bin2hex(random_bytes(32));
+        $_SESSION['admin_online_orders_csrf'] =
+            bin2hex(random_bytes(32));
     }
 
     return (string)$_SESSION['admin_online_orders_csrf'];
@@ -151,15 +174,232 @@ function oo_require_csrf(): void
     ) {
         oo_json([
             'success' => false,
-            'message' => 'Security token expired. Please refresh the page and try again.'
+            'message' =>
+                'Security token expired. Refresh the page and try again.'
         ], 419);
     }
+}
+
+function oo_date_filter(
+    string $period,
+    string $date_from,
+    string $date_to
+): array {
+    $today = new DateTimeImmutable('today');
+
+    $from = '';
+    $to = '';
+    $label = 'All dates';
+
+    $validDate = static function (string $value): bool {
+        if ($value === '') {
+            return false;
+        }
+
+        $date = DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            $value
+        );
+
+        return $date !== false &&
+            $date->format('Y-m-d') === $value;
+    };
+
+    if ($period === 'today') {
+        $from = $today->format('Y-m-d');
+        $to = $from;
+        $label = 'Today';
+    } elseif ($period === 'yesterday') {
+        $day = $today->modify('-1 day');
+        $from = $day->format('Y-m-d');
+        $to = $from;
+        $label = 'Yesterday';
+    } elseif ($period === 'this_week') {
+        $fromDate = $today->modify('monday this week');
+        $toDate = $fromDate->modify('+6 days');
+
+        $from = $fromDate->format('Y-m-d');
+        $to = $toDate->format('Y-m-d');
+        $label = 'This Week';
+    } elseif ($period === 'last_week') {
+        $fromDate = $today->modify('monday last week');
+        $toDate = $fromDate->modify('+6 days');
+
+        $from = $fromDate->format('Y-m-d');
+        $to = $toDate->format('Y-m-d');
+        $label = 'Last Week';
+    } elseif ($period === 'this_month') {
+        $fromDate = $today->modify('first day of this month');
+        $toDate = $today->modify('last day of this month');
+
+        $from = $fromDate->format('Y-m-d');
+        $to = $toDate->format('Y-m-d');
+        $label = 'This Month';
+    } elseif ($period === 'last_month') {
+        $fromDate = $today
+            ->modify('first day of last month');
+
+        $toDate = $today
+            ->modify('last day of last month');
+
+        $from = $fromDate->format('Y-m-d');
+        $to = $toDate->format('Y-m-d');
+        $label = 'Last Month';
+    } elseif ($period === 'this_year') {
+        $fromDate = $today->setDate(
+            (int)$today->format('Y'),
+            1,
+            1
+        );
+
+        $toDate = $today->setDate(
+            (int)$today->format('Y'),
+            12,
+            31
+        );
+
+        $from = $fromDate->format('Y-m-d');
+        $to = $toDate->format('Y-m-d');
+        $label = 'This Year';
+    } elseif ($period === 'last_year') {
+        $year = (int)$today->format('Y') - 1;
+
+        $from = sprintf('%04d-01-01', $year);
+        $to = sprintf('%04d-12-31', $year);
+        $label = 'Last Year';
+    } elseif ($period === 'custom') {
+        if ($validDate($date_from)) {
+            $from = $date_from;
+        }
+
+        if ($validDate($date_to)) {
+            $to = $date_to;
+        }
+
+        if ($from !== '' && $to === '') {
+            $to = $from;
+        }
+
+        if ($to !== '' && $from === '') {
+            $from = $to;
+        }
+
+        if ($from !== '' && $to !== '' && $from > $to) {
+            [$from, $to] = [$to, $from];
+        }
+
+        if ($from !== '' || $to !== '') {
+            $label = 'Custom Range';
+        }
+    }
+
+    return [
+        'from' => $from,
+        'to' => $to,
+        'label' => $label
+    ];
+}
+
+function oo_query_params(
+    int $pharmacy_id,
+    int $branch_id,
+    string $status,
+    string $payment,
+    string $customer_search,
+    string $order_search,
+    string $date_from,
+    string $date_to,
+    string $min_amount,
+    string $max_amount,
+    bool $include_status = true
+): array {
+    $where = [
+        'co.pharmacy_id = ?'
+    ];
+
+    $types = 'i';
+    $params = [$pharmacy_id];
+
+    if ($branch_id > 0) {
+        $where[] = 'co.branch_id = ?';
+        $types .= 'i';
+        $params[] = $branch_id;
+    }
+
+    if ($include_status && $status !== '') {
+        $where[] = 'co.status = ?';
+        $types .= 's';
+        $params[] = $status;
+    }
+
+    if ($payment !== '') {
+        $where[] = 'co.payment_method = ?';
+        $types .= 's';
+        $params[] = $payment;
+    }
+
+    if ($customer_search !== '') {
+        $where[] = '
+            (
+                c.full_name LIKE ?
+                OR c.phone LIKE ?
+                OR c.email LIKE ?
+            )
+        ';
+
+        $needle = '%' . $customer_search . '%';
+
+        $types .= 'sss';
+        $params[] = $needle;
+        $params[] = $needle;
+        $params[] = $needle;
+    }
+
+    if ($order_search !== '') {
+        $where[] = 'co.order_number LIKE ?';
+        $types .= 's';
+        $params[] = '%' . $order_search . '%';
+    }
+
+    if ($date_from !== '') {
+        $where[] = 'co.order_date >= ?';
+        $types .= 's';
+        $params[] = $date_from . ' 00:00:00';
+    }
+
+    if ($date_to !== '') {
+        $where[] = 'co.order_date < DATE_ADD(?, INTERVAL 1 DAY)';
+        $types .= 's';
+        $params[] = $date_to . ' 00:00:00';
+    }
+
+    if ($min_amount !== '') {
+        $where[] = 'co.total_amount >= ?';
+        $types .= 'd';
+        $params[] = (float)$min_amount;
+    }
+
+    if ($max_amount !== '') {
+        $where[] = 'co.total_amount <= ?';
+        $types .= 'd';
+        $params[] = (float)$max_amount;
+    }
+
+    return [
+        'sql' => implode(' AND ', $where),
+        'types' => $types,
+        'params' => $params
+    ];
 }
 
 $csrf_token = oo_csrf_token();
 
 $action = strtolower(
-    trim((string)($_POST['action'] ?? $_GET['action'] ?? ''))
+    trim((string)(
+        $_POST['action'] ??
+        $_GET['action'] ??
+        ''
+    ))
 );
 
 /* =========================================================
@@ -167,7 +407,11 @@ $action = strtolower(
 ========================================================= */
 
 if ($action === 'order') {
-    $order_id = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
+    $order_id = (int)(
+        $_GET['id'] ??
+        $_POST['id'] ??
+        0
+    );
 
     if ($order_id <= 0) {
         oo_json([
@@ -205,7 +449,10 @@ if ($action === 'order') {
             LIMIT 1
             ",
             'ii',
-            [$order_id, $pharmacy_id]
+            [
+                $order_id,
+                $pharmacy_id
+            ]
         );
 
         if (!$orders) {
@@ -227,8 +474,7 @@ if ($action === 'order') {
                 oi.price_at_purchase,
                 si.item_name,
                 si.strength,
-                si.barcode,
-                si.image_path
+                si.barcode
             FROM clients_order_items oi
             LEFT JOIN store_items si
                 ON si.id = oi.product_id
@@ -251,6 +497,11 @@ if ($action === 'order') {
             'items' => $items
         ]);
     } catch (Throwable $e) {
+        error_log(
+            'ECHOTECH ADMIN ONLINE ORDER VIEW: ' .
+            $e->getMessage()
+        );
+
         oo_json([
             'success' => false,
             'message' => 'Unable to load this order.'
@@ -259,7 +510,7 @@ if ($action === 'order') {
 }
 
 /* =========================================================
-   POST: CHANGE STATUS
+   POST: CHANGE ORDER STATUS
 ========================================================= */
 
 if ($action === 'update_status') {
@@ -272,8 +523,13 @@ if ($action === 'update_status') {
 
     oo_require_csrf();
 
-    $order_id = (int)($_POST['order_id'] ?? 0);
-    $new_status = trim((string)($_POST['status'] ?? ''));
+    $order_id = (int)(
+        $_POST['order_id'] ?? 0
+    );
+
+    $new_status = trim(
+        (string)($_POST['status'] ?? '')
+    );
 
     $allowed_statuses = [
         'Processing',
@@ -283,7 +539,11 @@ if ($action === 'update_status') {
 
     if (
         $order_id <= 0 ||
-        !in_array($new_status, $allowed_statuses, true)
+        !in_array(
+            $new_status,
+            $allowed_statuses,
+            true
+        )
     ) {
         oo_json([
             'success' => false,
@@ -298,10 +558,8 @@ if ($action === 'update_status') {
         $transaction_started = true;
 
         /*
-         * Lock the order and use its own branch_id.
-         * Admin users can manage orders across branches belonging
-         * to the same pharmacy, while stock is always changed
-         * only in the order's branch.
+         * Lock the order first. We deliberately use the order's
+         * branch_id for all stock operations.
          */
         $stmt = $conn->prepare(
             "
@@ -322,10 +580,16 @@ if ($action === 'update_status') {
         );
 
         if (!$stmt) {
-            throw new RuntimeException('Unable to prepare order lookup.');
+            throw new RuntimeException(
+                'Unable to prepare order lookup.'
+            );
         }
 
-        $stmt->bind_param('ii', $order_id, $pharmacy_id);
+        $stmt->bind_param(
+            'ii',
+            $order_id,
+            $pharmacy_id
+        );
 
         if (!$stmt->execute()) {
             $error = $stmt->error;
@@ -333,11 +597,16 @@ if ($action === 'update_status') {
             throw new RuntimeException($error);
         }
 
-        $order = $stmt->get_result()->fetch_assoc();
+        $order = $stmt
+            ->get_result()
+            ->fetch_assoc();
+
         $stmt->close();
 
         if (!$order) {
-            throw new RuntimeException('Order not found.');
+            throw new RuntimeException(
+                'Order not found.'
+            );
         }
 
         $current_status = (string)$order['status'];
@@ -349,64 +618,50 @@ if ($action === 'update_status') {
             );
         }
 
-        /*
-         * Verify the branch belongs to this pharmacy.
-         */
-        $branchStmt = $conn->prepare(
+        $branch_rows = oo_rows(
+            $conn,
             "
-            SELECT id, branch_name
+            SELECT id
             FROM branches
             WHERE id = ?
               AND pharmacy_id = ?
             LIMIT 1
-            "
-        );
-
-        if (!$branchStmt) {
-            throw new RuntimeException('Unable to verify order branch.');
-        }
-
-        $branchStmt->bind_param(
+            ",
             'ii',
-            $order_branch_id,
-            $pharmacy_id
+            [
+                $order_branch_id,
+                $pharmacy_id
+            ]
         );
 
-        if (!$branchStmt->execute()) {
-            $error = $branchStmt->error;
-            $branchStmt->close();
-            throw new RuntimeException($error);
-        }
-
-        $branch = $branchStmt->get_result()->fetch_assoc();
-        $branchStmt->close();
-
-        if (!$branch) {
+        if (!$branch_rows) {
             throw new RuntimeException(
                 'The order branch does not belong to this pharmacy.'
             );
         }
 
         /*
-         * Valid workflow:
-         *
-         * Pending -> Processing
-         * Pending -> Cancelled
-         * Processing -> Completed
-         * Processing -> Cancelled
-         *
-         * Completed and Cancelled are terminal.
+         * Allowed workflow:
+         * Pending    -> Processing / Cancelled
+         * Processing -> Completed / Cancelled
+         * Completed  -> terminal
+         * Cancelled  -> terminal
          */
         $valid_transition = false;
 
         if ($new_status === 'Processing') {
-            $valid_transition = ($current_status === 'Pending');
+            $valid_transition =
+                $current_status === 'Pending';
         } elseif ($new_status === 'Completed') {
-            $valid_transition = ($current_status === 'Processing');
+            $valid_transition =
+                $current_status === 'Processing';
         } elseif ($new_status === 'Cancelled') {
             $valid_transition = in_array(
                 $current_status,
-                ['Pending', 'Processing'],
+                [
+                    'Pending',
+                    'Processing'
+                ],
                 true
             );
         }
@@ -424,14 +679,13 @@ if ($action === 'update_status') {
         $sale_id = null;
 
         /*
-         * =========================================================
-         * COMPLETION WORKFLOW
+         * =====================================================
+         * COMPLETION
          *
-         * ONLY Processing -> Completed deducts stock.
-         * Every item is checked before the status is changed.
-         * If one item cannot be fulfilled, the entire transaction
-         * rolls back and the order remains Processing.
-         * =========================================================
+         * Stock is deducted only here.
+         * Every item must be fulfilled or the entire transaction
+         * is rolled back.
+         * =====================================================
          */
         if ($new_status === 'Completed') {
             $itemsStmt = $conn->prepare(
@@ -481,9 +735,6 @@ if ($action === 'update_status') {
                 );
             }
 
-            /*
-             * Lock/check each product in the order branch.
-             */
             $stockStmt = $conn->prepare(
                 "
                 UPDATE store_items
@@ -503,10 +754,16 @@ if ($action === 'update_status') {
             }
 
             foreach ($order_items as $item) {
-                $product_id = (int)($item['product_id'] ?? 0);
-                $quantity = (int)($item['quantity'] ?? 0);
+                $product_id =
+                    (int)($item['product_id'] ?? 0);
 
-                if ($product_id <= 0 || $quantity <= 0) {
+                $quantity =
+                    (int)($item['quantity'] ?? 0);
+
+                if (
+                    $product_id <= 0 ||
+                    $quantity <= 0
+                ) {
                     $stockStmt->close();
 
                     throw new RuntimeException(
@@ -527,12 +784,11 @@ if ($action === 'update_status') {
                     !$stockStmt->execute() ||
                     $stockStmt->affected_rows !== 1
                 ) {
-                    /*
-                     * Fetch a useful product name for the error.
-                     */
                     $nameStmt = $conn->prepare(
                         "
-                        SELECT item_name, quantity
+                        SELECT
+                            item_name,
+                            quantity
                         FROM store_items
                         WHERE id = ?
                           AND pharmacy_id = ?
@@ -541,7 +797,9 @@ if ($action === 'update_status') {
                         "
                     );
 
-                    $product_name = 'One of the products';
+                    $product_name =
+                        'One of the products';
+
                     $available_qty = null;
 
                     if ($nameStmt) {
@@ -558,13 +816,19 @@ if ($action === 'update_status') {
                                 ->fetch_assoc();
 
                             if ($product) {
-                                if (!empty($product['item_name'])) {
+                                if (
+                                    !empty(
+                                        $product['item_name']
+                                    )
+                                ) {
                                     $product_name =
                                         (string)$product['item_name'];
                                 }
 
                                 $available_qty =
-                                    (int)($product['quantity'] ?? 0);
+                                    (int)(
+                                        $product['quantity'] ?? 0
+                                    );
                             }
                         }
 
@@ -595,21 +859,28 @@ if ($action === 'update_status') {
             $stockStmt->close();
 
             /*
-             * =====================================================
-             * COMPLETED ONLINE ORDER -> REAL POS SALES TRANSACTION
+             * =================================================
+             * RECORD COMPLETED ORDER IN NORMAL POS SALES
              *
-             * This makes the completed order appear in the normal
-             * Transactions/Sales Report workflow.
-             *
-             * client_reference is unique per online order logically:
-             * ONLINE_ORDER_{order_id}
-             * =====================================================
+             * The supplied schema contains:
+             * issued_by, invoice, client_reference, total,
+             * payment, user_id, total_amount, subtotal,
+             * vat_amount, payment_method, amount_received,
+             * change_due, sale_date and created_at.
+             * =================================================
              */
-            $client_reference = 'ONLINE_ORDER_' . $order_id;
 
-            $online_payment_method = oo_payment_method(
-                (string)($order['payment_method'] ?? '')
-            );
+            $client_reference =
+                'ONLINE_ORDER_' . $order_id;
+
+            $online_payment_method =
+                oo_payment_db_value(
+                    oo_payment_display(
+                        (string)(
+                            $order['payment_method'] ?? ''
+                        )
+                    )
+                );
 
             if ($online_payment_method === '') {
                 throw new RuntimeException(
@@ -618,7 +889,9 @@ if ($action === 'update_status') {
             }
 
             $sale_total = round(
-                (float)($order['total_amount'] ?? 0),
+                (float)(
+                    $order['total_amount'] ?? 0
+                ),
                 2
             );
 
@@ -629,9 +902,10 @@ if ($action === 'update_status') {
             }
 
             /*
-             * Prevent duplicate sales records.
+             * Duplicate protection.
              */
-            $existingSaleStmt = $conn->prepare(
+            $existingSale = oo_rows(
+                $conn,
                 "
                 SELECT id
                 FROM sales
@@ -640,49 +914,35 @@ if ($action === 'update_status') {
                   AND client_reference = ?
                 LIMIT 1
                 FOR UPDATE
-                "
-            );
-
-            if (!$existingSaleStmt) {
-                throw new RuntimeException(
-                    'Unable to verify existing transaction.'
-                );
-            }
-
-            $existingSaleStmt->bind_param(
+                ",
                 'iis',
-                $pharmacy_id,
-                $order_branch_id,
-                $client_reference
+                [
+                    $pharmacy_id,
+                    $order_branch_id,
+                    $client_reference
+                ]
             );
 
-            if (!$existingSaleStmt->execute()) {
-                $error = $existingSaleStmt->error;
-                $existingSaleStmt->close();
-                throw new RuntimeException($error);
-            }
-
-            $existing_sale = $existingSaleStmt
-                ->get_result()
-                ->fetch_assoc();
-
-            $existingSaleStmt->close();
-
-            if ($existing_sale) {
-                $sale_id = (int)$existing_sale['id'];
+            if ($existingSale) {
+                $sale_id =
+                    (int)$existingSale[0]['id'];
             } else {
-                $issued_by = 'Online Customer';
-                $invoice = (string)$order['order_number'];
-                $user_id = (int)($_SESSION['user_id'] ?? 0);
+                $issued_by =
+                    'Online Customer';
+
+                $invoice =
+                    (string)$order['order_number'];
+
+                $user_id =
+                    (int)(
+                        $_SESSION['user_id'] ?? 0
+                    );
+
                 $subtotal = $sale_total;
                 $vat_amount = 0.00;
                 $amount_received = $sale_total;
                 $change_due = 0.00;
 
-                /*
-                 * Keep the same sales columns used by the existing
-                 * EchoTech transaction/report workflow.
-                 */
                 $saleStmt = $conn->prepare(
                     "
                     INSERT INTO sales
@@ -748,7 +1008,9 @@ if ($action === 'update_status') {
                     );
                 }
 
-                $sale_id = (int)$conn->insert_id;
+                $sale_id =
+                    (int)$conn->insert_id;
+
                 $saleStmt->close();
 
                 if ($sale_id <= 0) {
@@ -757,9 +1019,6 @@ if ($action === 'update_status') {
                     );
                 }
 
-                /*
-                 * Copy the order items into sales_items.
-                 */
                 $saleItemStmt = $conn->prepare(
                     "
                     INSERT INTO sales_items
@@ -824,7 +1083,8 @@ if ($action === 'update_status') {
         }
 
         /*
-         * Change order status only after all completion work succeeds.
+         * Only change the order status after all completion
+         * operations have succeeded.
          */
         $statusStmt = $conn->prepare(
             "
@@ -869,13 +1129,16 @@ if ($action === 'update_status') {
 
         oo_json([
             'success' => true,
-            'message' => $new_status === 'Completed'
-                ? 'Order completed successfully. Stock was deducted and the sale was recorded.'
-                : (
-                    $new_status === 'Processing'
-                        ? 'Order accepted and moved to Processing.'
-                        : 'Order cancelled successfully.'
-                ),
+            'message' => match ($new_status) {
+                'Processing' =>
+                    'Order accepted and moved to Processing.',
+
+                'Completed' =>
+                    'Order completed successfully. Stock was deducted and the sale was recorded.',
+
+                default =>
+                    'Order cancelled successfully.'
+            },
             'status' => $new_status,
             'sale_id' => $sale_id
         ]);
@@ -900,14 +1163,53 @@ if ($action === 'update_status') {
 }
 
 /* =========================================================
-   FILTERS
+   FILTER INPUT
 ========================================================= */
+
+$period = trim(
+    (string)($_GET['period'] ?? '')
+);
+
+$allowed_periods = [
+    '',
+    'today',
+    'yesterday',
+    'this_week',
+    'last_week',
+    'this_month',
+    'last_month',
+    'this_year',
+    'last_year',
+    'custom'
+];
+
+if (!in_array($period, $allowed_periods, true)) {
+    $period = '';
+}
+
+$date_from_input = trim(
+    (string)($_GET['date_from'] ?? '')
+);
+
+$date_to_input = trim(
+    (string)($_GET['date_to'] ?? '')
+);
+
+$date_range = oo_date_filter(
+    $period,
+    $date_from_input,
+    $date_to_input
+);
+
+$date_from = $date_range['from'];
+$date_to = $date_range['to'];
+$date_range_label = $date_range['label'];
 
 $filter_status = trim(
     (string)($_GET['status'] ?? '')
 );
 
-$allowed_filters = [
+$allowed_statuses = [
     '',
     'Pending',
     'Processing',
@@ -915,11 +1217,96 @@ $allowed_filters = [
     'Cancelled'
 ];
 
-if (!in_array($filter_status, $allowed_filters, true)) {
+if (!in_array(
+    $filter_status,
+    $allowed_statuses,
+    true
+)) {
     $filter_status = '';
 }
 
-$filter_branch = (int)($_GET['branch_id'] ?? 0);
+$filter_payment = trim(
+    (string)($_GET['payment'] ?? '')
+);
+
+$allowed_payments = [
+    '',
+    'Cash on Delivery',
+    'Bank Transfer',
+    'Mobile Money'
+];
+
+if (!in_array(
+    $filter_payment,
+    $allowed_payments,
+    true
+)) {
+    $filter_payment = '';
+}
+
+$filter_branch = (int)(
+    $_GET['branch_id'] ?? 0
+);
+
+$customer_search = trim(
+    (string)($_GET['customer'] ?? '')
+);
+
+$order_search = trim(
+    (string)($_GET['order'] ?? '')
+);
+
+$min_amount = trim(
+    (string)($_GET['min_amount'] ?? '')
+);
+
+$max_amount = trim(
+    (string)($_GET['max_amount'] ?? '')
+);
+
+if (
+    $min_amount !== '' &&
+    (!is_numeric($min_amount) || (float)$min_amount < 0)
+) {
+    $min_amount = '';
+}
+
+if (
+    $max_amount !== '' &&
+    (!is_numeric($max_amount) || (float)$max_amount < 0)
+) {
+    $max_amount = '';
+}
+
+/* =========================================================
+   PHARMACY NAME â€” REQUIRED BY SHARED DASHBOARD HEADER
+========================================================= */
+
+$pharmacy_name = 'PHARMACY POS';
+
+$pharmacy_rows = oo_rows(
+    $conn,
+    "
+    SELECT name
+    FROM pharmacies
+    WHERE id = ?
+    LIMIT 1
+    ",
+    'i',
+    [$pharmacy_id]
+);
+
+if (
+    $pharmacy_rows &&
+    !empty($pharmacy_rows[0]['name'])
+) {
+    $pharmacy_name =
+        (string)$pharmacy_rows[0]['name'];
+}
+
+/* =========================================================
+   BRANCHES
+========================================================= */
 
 $branches = oo_rows(
     $conn,
@@ -940,40 +1327,60 @@ $branches = oo_rows(
 $valid_branch_ids = [];
 
 foreach ($branches as $branch) {
-    $valid_branch_ids[] = (int)$branch['id'];
+    $valid_branch_ids[] =
+        (int)$branch['id'];
 }
 
 if (
     $filter_branch > 0 &&
-    !in_array($filter_branch, $valid_branch_ids, true)
+    !in_array(
+        $filter_branch,
+        $valid_branch_ids,
+        true
+    )
 ) {
     $filter_branch = 0;
 }
 
 /* =========================================================
-   ORDER LIST
+   BASE FILTER
+   Status is intentionally excluded from KPI counts so the
+   dashboard cards continue to show all statuses in the
+   currently selected date/branch/payment/customer/amount
+   scope.
 ========================================================= */
 
-$where = [
-    'co.pharmacy_id = ?'
-];
+$base = oo_query_params(
+    $pharmacy_id,
+    $filter_branch,
+    '',
+    $filter_payment,
+    $customer_search,
+    $order_search,
+    $date_from,
+    $date_to,
+    $min_amount,
+    $max_amount,
+    false
+);
 
-$types = 'i';
-$params = [$pharmacy_id];
+$order_filter = oo_query_params(
+    $pharmacy_id,
+    $filter_branch,
+    $filter_status,
+    $filter_payment,
+    $customer_search,
+    $order_search,
+    $date_from,
+    $date_to,
+    $min_amount,
+    $max_amount,
+    true
+);
 
-if ($filter_branch > 0) {
-    $where[] = 'co.branch_id = ?';
-    $types .= 'i';
-    $params[] = $filter_branch;
-}
-
-if ($filter_status !== '') {
-    $where[] = 'co.status = ?';
-    $types .= 's';
-    $params[] = $filter_status;
-}
-
-$where_sql = implode(' AND ', $where);
+/* =========================================================
+   ORDER LIST
+========================================================= */
 
 $orders = oo_rows(
     $conn,
@@ -996,16 +1403,16 @@ $orders = oo_rows(
        AND b.pharmacy_id = co.pharmacy_id
     LEFT JOIN clients c
         ON c.id = co.client_id
-    WHERE {$where_sql}
+    WHERE {$order_filter['sql']}
     ORDER BY co.id DESC
     LIMIT 300
     ",
-    $types,
-    $params
+    $order_filter['types'],
+    $order_filter['params']
 );
 
 /* =========================================================
-   SUMMARY COUNTS
+   SUMMARY COUNTS / VALUES
 ========================================================= */
 
 $counts = [
@@ -1015,61 +1422,60 @@ $counts = [
     'Cancelled' => 0
 ];
 
-$summary_where = 'pharmacy_id = ?';
-$summary_types = 'i';
-$summary_params = [$pharmacy_id];
-
-if ($filter_branch > 0) {
-    $summary_where .= ' AND branch_id = ?';
-    $summary_types .= 'i';
-    $summary_params[] = $filter_branch;
-}
-
-$summary_rows = oo_rows(
+$count_rows = oo_rows(
     $conn,
     "
     SELECT
         status,
         COUNT(*) AS total
-    FROM clients_orders
-    WHERE {$summary_where}
+    FROM clients_orders co
+    LEFT JOIN clients c
+        ON c.id = co.client_id
+    WHERE {$base['sql']}
     GROUP BY status
     ",
-    $summary_types,
-    $summary_params
+    $base['types'],
+    $base['params']
 );
 
-foreach ($summary_rows as $row) {
+foreach ($count_rows as $row) {
     $status = (string)$row['status'];
 
     if (isset($counts[$status])) {
-        $counts[$status] = (int)$row['total'];
+        $counts[$status] =
+            (int)$row['total'];
     }
 }
-
-$total_online_orders = array_sum($counts);
-
-$pending_value = 0.00;
-$processing_value = 0.00;
-$completed_value = 0.00;
 
 $value_rows = oo_rows(
     $conn,
     "
     SELECT
         status,
-        COALESCE(SUM(total_amount), 0) AS total_value
-    FROM clients_orders
-    WHERE {$summary_where}
+        COALESCE(SUM(co.total_amount), 0) AS total_value
+    FROM clients_orders co
+    LEFT JOIN clients c
+        ON c.id = co.client_id
+    WHERE {$base['sql']}
     GROUP BY status
     ",
-    $summary_types,
-    $summary_params
+    $base['types'],
+    $base['params']
 );
 
+$pending_value = 0.00;
+$processing_value = 0.00;
+$completed_value = 0.00;
+$all_order_value = 0.00;
+
 foreach ($value_rows as $row) {
-    $status = (string)$row['status'];
-    $value = (float)$row['total_value'];
+    $status =
+        (string)$row['status'];
+
+    $value =
+        (float)$row['total_value'];
+
+    $all_order_value += $value;
 
     if ($status === 'Pending') {
         $pending_value = $value;
@@ -1080,24 +1486,142 @@ foreach ($value_rows as $row) {
     }
 }
 
+$total_online_orders =
+    array_sum($counts);
+
+/* =========================================================
+   HEADER / ASIDE VARIABLES
+========================================================= */
+
 $user_role = current_role();
 $user_display_name = current_user();
 $branch_count = count($branches);
-$total_orders = $total_online_orders;
 
-$current_admin_page = 'online_orders.php';
-$admin_page_title = 'Online Orders';
+/*
+ * The shared aside uses total_orders for its Transactions badge.
+ * This must be the normal POS sales count, not online order count.
+ */
+$total_orders = (int)oo_scalar(
+    $conn,
+    "
+    SELECT COUNT(id)
+    FROM sales
+    WHERE pharmacy_id = ?
+    ",
+    'i',
+    [$pharmacy_id],
+    0
+);
+
+$current_admin_page =
+    'online_orders.php';
+
+$admin_page_title =
+    'Online Orders';
+
+/* =========================================================
+   QUERY STRING HELPERS FOR TABS
+========================================================= */
+
+$common_query = [];
+
+if ($filter_branch > 0) {
+    $common_query['branch_id'] =
+        $filter_branch;
+}
+
+if ($period !== '') {
+    $common_query['period'] =
+        $period;
+}
+
+if ($period === 'custom') {
+    if ($date_from_input !== '') {
+        $common_query['date_from'] =
+            $date_from_input;
+    }
+
+    if ($date_to_input !== '') {
+        $common_query['date_to'] =
+            $date_to_input;
+    }
+}
+
+if ($filter_payment !== '') {
+    $common_query['payment'] =
+        $filter_payment;
+}
+
+if ($customer_search !== '') {
+    $common_query['customer'] =
+        $customer_search;
+}
+
+if ($order_search !== '') {
+    $common_query['order'] =
+        $order_search;
+}
+
+if ($min_amount !== '') {
+    $common_query['min_amount'] =
+        $min_amount;
+}
+
+if ($max_amount !== '') {
+    $common_query['max_amount'] =
+        $max_amount;
+}
+
+function oo_tab_url(
+    array $common_query,
+    string $status
+): string {
+    $query = $common_query;
+
+    if ($status !== '') {
+        $query['status'] = $status;
+    }
+
+    if (!$query) {
+        return 'online_orders.php';
+    }
+
+    return 'online_orders.php?' .
+        http_build_query($query);
+}
 
 ?>
 <!doctype html>
 <html lang="en">
+
 <head>
+
     <meta charset="utf-8">
+
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1"
     >
-    <title>Online Orders | PHARMACY POS</title>
+
+    <title>
+        Online Orders | <?= oo_e($pharmacy_name) ?>
+    </title>
+
+    <link
+        rel="preconnect"
+        href="https://fonts.googleapis.com"
+    >
+
+    <link
+        rel="preconnect"
+        href="https://fonts.gstatic.com"
+        crossorigin
+    >
+
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet"
+    >
 
     <link
         rel="stylesheet"
@@ -1105,210 +1629,286 @@ $admin_page_title = 'Online Orders';
     >
 
     <style>
-        :root{
-            --oo-blue:#17324d;
-            --oo-blue-2:#214a70;
-            --oo-bg:#f4f6f9;
-            --oo-card:#ffffff;
-            --oo-text:#17202a;
-            --oo-muted:#718096;
-            --oo-border:#e5e9ef;
-            --oo-green:#0f9d67;
-            --oo-red:#c0392b;
-            --oo-yellow:#a66a00;
-            --oo-purple:#5b50b6;
-        }
-
-        *{
-            box-sizing:border-box;
-        }
-
-        body{
-            margin:0;
-            background:var(--oo-bg);
-            color:var(--oo-text);
-            font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
-        }
-
+        /*
+         * IMPORTANT:
+         * admin_header.php and admin_aside.php supply the global
+         * dashboard shell. This page only supplies page content.
+         */
         .admin-main{
+            margin-left:var(--sidebar);
             min-height:100vh;
         }
 
         .content{
-            padding:24px;
+            max-width:1600px;
+            margin:0 auto;
+            padding:26px 28px 40px;
         }
 
         .oo-page-head{
             display:flex;
-            align-items:flex-start;
+            align-items:flex-end;
             justify-content:space-between;
             gap:18px;
-            margin-bottom:20px;
-            flex-wrap:wrap;
+            margin-bottom:17px;
         }
 
-        .oo-page-title{
+        .oo-page-head h1{
             margin:0;
-            color:var(--oo-blue);
-            font-size:25px;
-            line-height:1.2;
+            color:var(--charcoal);
+            font-size:27px;
+            line-height:1.15;
             font-weight:800;
+            letter-spacing:-.6px;
         }
 
-        .oo-page-subtitle{
-            margin-top:6px;
-            color:var(--oo-muted);
-            font-size:13px;
+        .oo-page-head p{
+            margin:6px 0 0;
+            color:var(--muted);
+            font-size:12px;
+            line-height:1.55;
+            max-width:900px;
         }
 
-        .oo-refresh{
-            border:1px solid var(--oo-border);
+        .oo-head-actions{
+            display:flex;
+            gap:8px;
+            flex-shrink:0;
+        }
+
+        .oo-btn{
+            height:38px;
+            padding:0 13px;
+            border-radius:8px;
+            border:1px solid var(--border);
             background:#fff;
-            color:var(--oo-blue);
-            border-radius:9px;
-            padding:9px 13px;
+            color:#4e5a66;
+            font-size:12px;
             font-weight:700;
-            cursor:pointer;
-            text-decoration:none;
             display:inline-flex;
             align-items:center;
+            justify-content:center;
             gap:7px;
+            cursor:pointer;
+            text-decoration:none;
         }
 
-        .oo-refresh:hover{
-            background:#f8fafc;
+        .oo-btn:hover{
+            box-shadow:0 3px 10px rgba(30,50,80,.1);
         }
 
-        .oo-kpis{
-            display:grid;
-            grid-template-columns:repeat(4,minmax(0,1fr));
-            gap:14px;
-            margin-bottom:18px;
+        .oo-btn.primary{
+            background:var(--blue);
+            border-color:var(--blue);
+            color:#fff;
         }
 
-        .oo-kpi{
-            background:var(--oo-card);
-            border:1px solid var(--oo-border);
-            border-radius:13px;
-            padding:16px;
-            box-shadow:0 2px 10px rgba(15,23,42,.035);
+        .oo-btn.success{
+            background:var(--green);
+            border-color:var(--green);
+            color:#fff;
         }
 
-        .oo-kpi-top{
+        .oo-btn.danger{
+            background:var(--red);
+            border-color:var(--red);
+            color:#fff;
+        }
+
+        .oo-filter-card,
+        .oo-orders-card{
+            background:#fff;
+            border:1px solid var(--border);
+            border-radius:var(--radius);
+            box-shadow:var(--shadow);
+        }
+
+        .oo-filter-card{
+            margin-bottom:14px;
+            padding:15px 17px 16px;
+        }
+
+        .oo-filter-title{
             display:flex;
             align-items:center;
             justify-content:space-between;
             gap:10px;
+            margin-bottom:12px;
         }
 
-        .oo-kpi-label{
-            color:var(--oo-muted);
-            font-size:12px;
-            font-weight:700;
+        .oo-filter-title b{
+            color:var(--charcoal);
+            font-size:13px;
         }
 
-        .oo-kpi-icon{
-            width:34px;
-            height:34px;
-            border-radius:9px;
-            display:grid;
-            place-items:center;
-            background:#edf3f8;
-            color:var(--oo-blue);
-        }
-
-        .oo-kpi-value{
-            margin-top:8px;
-            font-size:25px;
-            font-weight:800;
-            color:var(--oo-blue);
-        }
-
-        .oo-kpi-note{
-            margin-top:4px;
-            font-size:11px;
-            color:var(--oo-muted);
-        }
-
-        .oo-card{
-            background:#fff;
-            border:1px solid var(--oo-border);
-            border-radius:14px;
-            box-shadow:0 2px 12px rgba(15,23,42,.035);
-        }
-
-        .oo-filter-card{
-            padding:16px;
-            margin-bottom:16px;
+        .oo-filter-title span{
+            color:var(--muted);
+            font-size:10px;
         }
 
         .oo-filter-grid{
             display:grid;
-            grid-template-columns:1.2fr 1fr auto;
-            gap:12px;
+            grid-template-columns:1.05fr 1fr 1fr 1fr;
+            gap:11px;
             align-items:end;
         }
 
         .oo-field label{
             display:block;
             margin-bottom:6px;
-            font-size:11px;
-            color:#697586;
-            font-weight:800;
+            color:#707b86;
+            font-size:9px;
             text-transform:uppercase;
-            letter-spacing:.04em;
+            letter-spacing:.75px;
+            font-weight:800;
         }
 
-        .oo-select{
+        .oo-control{
             width:100%;
-            min-height:40px;
-            border:1px solid #dce3ea;
+            height:38px;
+            padding:0 10px;
+            border:1px solid var(--border);
             border-radius:8px;
             background:#fff;
-            padding:8px 11px;
-            color:#253142;
+            color:var(--text);
+            font-size:12px;
             outline:none;
+        }
+
+        .oo-control:focus{
+            border-color:#8bb0ff;
+            box-shadow:0 0 0 3px var(--blue-soft);
+        }
+
+        .oo-filter-wide{
+            grid-column:span 2;
         }
 
         .oo-filter-actions{
             display:flex;
             gap:8px;
+            align-items:end;
+            justify-content:flex-end;
         }
 
-        .oo-btn{
-            border:0;
-            border-radius:8px;
-            padding:9px 13px;
-            font-size:12px;
+        .oo-quick-periods{
+            display:flex;
+            flex-wrap:wrap;
+            gap:6px;
+            margin-top:12px;
+            padding-top:11px;
+            border-top:1px solid #edf0f3;
+        }
+
+        .oo-quick{
+            height:29px;
+            padding:0 10px;
+            border:1px solid var(--border);
+            background:#fff;
+            color:#65717d;
+            border-radius:7px;
+            font-size:10px;
             font-weight:800;
-            cursor:pointer;
             text-decoration:none;
             display:inline-flex;
             align-items:center;
-            justify-content:center;
-            gap:7px;
-            white-space:nowrap;
         }
 
-        .oo-btn-primary{
-            background:var(--oo-blue);
-            color:#fff;
+        .oo-quick:hover{
+            color:var(--blue);
+            border-color:#a9c0ec;
         }
 
-        .oo-btn-light{
+        .oo-quick.active{
+            background:var(--blue-soft);
+            border-color:#b8ccf8;
+            color:var(--blue);
+        }
+
+        .oo-date-row{
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:8px;
+        }
+
+        .oo-kpis{
+            display:grid;
+            grid-template-columns:repeat(4,1fr);
+            gap:13px;
+            margin-bottom:14px;
+        }
+
+        .oo-kpi{
+            position:relative;
+            overflow:hidden;
             background:#fff;
-            color:#4a5568;
-            border:1px solid var(--oo-border);
+            border:1px solid var(--border);
+            border-radius:var(--radius);
+            padding:17px;
+            min-height:116px;
+            box-shadow:var(--shadow);
         }
 
-        .oo-btn-success{
-            background:var(--oo-green);
-            color:#fff;
+        .oo-kpi:after{
+            content:"";
+            position:absolute;
+            width:90px;
+            height:90px;
+            border-radius:50%;
+            right:-34px;
+            bottom:-43px;
+            background:rgba(36,107,254,.055);
         }
 
-        .oo-btn-danger{
-            background:var(--oo-red);
-            color:#fff;
+        .oo-kpi-head{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            color:#727d88;
+            font-size:10px;
+            text-transform:uppercase;
+            letter-spacing:.8px;
+            font-weight:800;
+        }
+
+        .oo-kpi-icon{
+            width:34px;
+            height:34px;
+            border-radius:8px;
+            background:var(--blue-soft);
+            display:grid;
+            place-items:center;
+            color:var(--blue);
+            font-size:13px;
+        }
+
+        .oo-kpi-value{
+            color:var(--charcoal);
+            font-size:25px;
+            font-weight:800;
+            margin-top:9px;
+            letter-spacing:-.5px;
+        }
+
+        .oo-kpi-sub{
+            color:var(--muted);
+            font-size:10px;
+            margin-top:4px;
+        }
+
+        .oo-kpi.green .oo-kpi-icon{
+            color:var(--green);
+            background:var(--green-soft);
+        }
+
+        .oo-kpi.yellow .oo-kpi-icon{
+            color:var(--yellow);
+            background:var(--yellow-soft);
+        }
+
+        .oo-kpi.purple .oo-kpi-icon{
+            color:var(--purple);
+            background:#f0edff;
         }
 
         .oo-orders-card{
@@ -1316,25 +1916,24 @@ $admin_page_title = 'Online Orders';
         }
 
         .oo-card-head{
-            padding:16px 18px;
-            border-bottom:1px solid var(--oo-border);
+            min-height:54px;
+            padding:0 17px;
             display:flex;
-            justify-content:space-between;
             align-items:center;
+            justify-content:space-between;
             gap:12px;
-            flex-wrap:wrap;
+            background:#fff;
+            border-bottom:1px solid var(--border);
         }
 
-        .oo-card-title{
-            margin:0;
-            color:var(--oo-blue);
-            font-size:15px;
-            font-weight:800;
+        .oo-card-head b{
+            color:var(--charcoal);
+            font-size:13px;
         }
 
-        .oo-card-meta{
-            color:var(--oo-muted);
-            font-size:12px;
+        .oo-card-head span{
+            color:var(--muted);
+            font-size:10px;
         }
 
         .oo-tabs{
@@ -1345,21 +1944,26 @@ $admin_page_title = 'Online Orders';
         }
 
         .oo-tab{
-            border:1px solid #dfe6ed;
+            border:1px solid var(--border);
             background:#fff;
-            color:#526173;
+            color:#5c6975;
             border-radius:999px;
-            padding:7px 12px;
+            padding:7px 11px;
             text-decoration:none;
+            font-size:10px;
             font-weight:800;
-            font-size:11px;
             white-space:nowrap;
         }
 
+        .oo-tab:hover{
+            border-color:#a9c0ec;
+            color:var(--blue);
+        }
+
         .oo-tab.active{
-            background:var(--oo-blue);
+            background:var(--blue);
+            border-color:var(--blue);
             color:#fff;
-            border-color:var(--oo-blue);
         }
 
         .oo-table-wrap{
@@ -1369,7 +1973,7 @@ $admin_page_title = 'Online Orders';
         .oo-table{
             width:100%;
             border-collapse:collapse;
-            min-width:850px;
+            min-width:980px;
         }
 
         .oo-table th{
@@ -1377,16 +1981,16 @@ $admin_page_title = 'Online Orders';
             text-align:left;
             color:#7b8794;
             background:#fbfcfd;
-            border-bottom:1px solid var(--oo-border);
-            font-size:10px;
+            border-bottom:1px solid var(--border);
+            font-size:9px;
             text-transform:uppercase;
-            letter-spacing:.055em;
+            letter-spacing:.06em;
             font-weight:800;
         }
 
         .oo-table td{
             padding:13px 15px;
-            border-bottom:1px solid #edf1f5;
+            border-bottom:1px solid #edf0f3;
             vertical-align:middle;
             font-size:12px;
         }
@@ -1396,24 +2000,30 @@ $admin_page_title = 'Online Orders';
         }
 
         .oo-order-number{
-            color:var(--oo-blue);
+            color:var(--blue);
             font-weight:800;
         }
 
         .oo-customer{
+            color:var(--charcoal);
             font-weight:800;
-            color:#263445;
         }
 
-        .oo-small{
-            color:var(--oo-muted);
-            font-size:11px;
-            margin-top:2px;
+        .oo-muted{
+            color:var(--muted);
+            font-size:10px;
+            margin-top:3px;
+        }
+
+        .oo-payment{
+            color:#526170;
+            font-weight:700;
+            white-space:nowrap;
         }
 
         .oo-money{
+            color:var(--charcoal);
             font-weight:800;
-            color:#243447;
             white-space:nowrap;
         }
 
@@ -1422,69 +2032,106 @@ $admin_page_title = 'Online Orders';
             align-items:center;
             padding:5px 9px;
             border-radius:999px;
-            font-size:10px;
+            font-size:9px;
             font-weight:900;
             white-space:nowrap;
         }
 
         .oo-status-pending{
-            background:#fff3cd;
             color:#8a5a00;
+            background:#fff3cd;
         }
 
         .oo-status-processing{
-            background:#e9e8ff;
             color:#5147a5;
+            background:#e9e8ff;
         }
 
         .oo-status-completed{
-            background:#dcfce7;
             color:#166534;
+            background:#dcfce7;
         }
 
         .oo-status-cancelled{
-            background:#fee2e2;
             color:#991b1b;
-        }
-
-        .oo-payment{
-            color:#465568;
-            font-weight:700;
+            background:#fee2e2;
         }
 
         .oo-actions{
             display:flex;
-            gap:6px;
             flex-wrap:wrap;
+            gap:6px;
+        }
+
+        .oo-action{
+            height:30px;
+            padding:0 9px;
+            border-radius:7px;
+            border:1px solid var(--border);
+            background:#fff;
+            color:#526170;
+            font-size:10px;
+            font-weight:800;
+            display:inline-flex;
+            align-items:center;
+            gap:5px;
+            cursor:pointer;
+        }
+
+        .oo-action:hover{
+            box-shadow:0 2px 8px rgba(30,50,80,.08);
+        }
+
+        .oo-action.accept{
+            color:var(--green);
+            border-color:#bce7d4;
+            background:#f3fbf7;
+        }
+
+        .oo-action.complete{
+            color:#126a47;
+            border-color:#bce7d4;
+            background:#f3fbf7;
+        }
+
+        .oo-action.cancel{
+            color:var(--red);
+            border-color:#f2c8cf;
+            background:#fff8f9;
+        }
+
+        .oo-action:disabled{
+            opacity:.55;
+            cursor:not-allowed;
         }
 
         .oo-empty{
             padding:55px 20px;
             text-align:center;
-            color:var(--oo-muted);
+            color:var(--muted);
         }
 
         .oo-empty-icon{
             width:52px;
             height:52px;
             margin:0 auto 12px;
-            border-radius:14px;
+            border-radius:12px;
             display:grid;
             place-items:center;
-            background:#eef3f7;
-            color:#75879a;
+            background:#f0f3f6;
+            color:#7b8794;
             font-size:20px;
         }
 
         .oo-modal{
             position:fixed;
             inset:0;
-            background:rgba(15,23,42,.52);
+            z-index:9999;
             display:none;
             align-items:center;
             justify-content:center;
             padding:18px;
-            z-index:9999;
+            background:rgba(15,23,42,.52);
         }
 
         .oo-modal.open{
@@ -1496,157 +2143,206 @@ $admin_page_title = 'Online Orders';
             max-height:92vh;
             overflow:auto;
             background:#fff;
-            border-radius:16px;
+            border-radius:14px;
             box-shadow:0 25px 70px rgba(0,0,0,.22);
         }
 
         .oo-dialog-head{
-            padding:16px 18px;
-            border-bottom:1px solid var(--oo-border);
+            min-height:54px;
+            padding:0 17px;
             display:flex;
             align-items:center;
             justify-content:space-between;
-            gap:12px;
+            border-bottom:1px solid var(--border);
         }
 
         .oo-dialog-title{
-            color:var(--oo-blue);
+            color:var(--charcoal);
+            font-size:14px;
             font-weight:900;
-            font-size:16px;
         }
 
         .oo-close{
-            border:0;
-            background:#f1f4f7;
-            color:#536273;
-            width:34px;
-            height:34px;
+            width:33px;
+            height:33px;
+            border:1px solid var(--border);
             border-radius:50%;
+            background:#fff;
+            color:#65717d;
             cursor:pointer;
-            font-size:18px;
+            font-size:17px;
         }
 
         .oo-dialog-body{
-            padding:18px;
+            padding:17px;
         }
 
         .oo-detail-grid{
             display:grid;
-            grid-template-columns:repeat(2,minmax(0,1fr));
-            gap:10px;
+            grid-template-columns:repeat(2,1fr);
+            gap:9px;
             margin-bottom:16px;
         }
 
         .oo-detail{
+            padding:10px;
+            border:1px solid #edf0f3;
+            border-radius:8px;
             background:#f8fafc;
-            border:1px solid #edf1f5;
-            border-radius:10px;
-            padding:11px;
         }
 
         .oo-detail-label{
             color:#7b8794;
-            font-size:10px;
-            font-weight:800;
+            font-size:9px;
             text-transform:uppercase;
-            letter-spacing:.04em;
+            letter-spacing:.05em;
+            font-weight:800;
         }
 
         .oo-detail-value{
             margin-top:4px;
-            color:#263445;
-            font-size:12px;
+            color:var(--charcoal);
+            font-size:11px;
             font-weight:800;
         }
 
         .oo-items{
-            border-top:1px solid var(--oo-border);
+            border-top:1px solid var(--border);
         }
 
         .oo-item{
             display:flex;
-            align-items:center;
             justify-content:space-between;
-            gap:15px;
+            align-items:center;
+            gap:14px;
             padding:12px 0;
-            border-bottom:1px solid #edf1f5;
+            border-bottom:1px solid #edf0f3;
         }
 
         .oo-item-name{
+            color:var(--charcoal);
+            font-size:12px;
             font-weight:800;
-            color:#263445;
         }
 
         .oo-item-meta{
+            color:var(--muted);
+            font-size:10px;
             margin-top:3px;
-            color:var(--oo-muted);
-            font-size:11px;
         }
 
         .oo-item-price{
+            color:var(--charcoal);
+            font-size:12px;
+            font-weight:800;
             text-align:right;
             white-space:nowrap;
-            font-weight:800;
-            color:#263445;
         }
 
         .oo-total{
             display:flex;
             justify-content:flex-end;
-            margin-top:15px;
+            margin-top:14px;
+            color:var(--charcoal);
             font-size:17px;
-            color:var(--oo-blue);
             font-weight:900;
         }
 
         .oo-loading{
             padding:35px;
             text-align:center;
-            color:var(--oo-muted);
+            color:var(--muted);
         }
 
-        @media(max-width:1000px){
+        .oo-filter-summary{
+            display:flex;
+            align-items:center;
+            flex-wrap:wrap;
+            gap:7px;
+            margin-top:9px;
+        }
+
+        .oo-summary-chip{
+            display:inline-flex;
+            align-items:center;
+            gap:5px;
+            height:25px;
+            padding:0 8px;
+            border:1px solid #dfe7ef;
+            border-radius:999px;
+            background:#f8fafc;
+            color:#637181;
+            font-size:9px;
+            font-weight:800;
+        }
+
+        @media(max-width:1200px){
             .oo-kpis{
-                grid-template-columns:repeat(2,minmax(0,1fr));
+                grid-template-columns:repeat(2,1fr);
             }
 
             .oo-filter-grid{
-                grid-template-columns:1fr 1fr;
+                grid-template-columns:repeat(2,1fr);
+            }
+
+            .oo-filter-wide{
+                grid-column:span 1;
             }
 
             .oo-filter-actions{
-                grid-column:1/-1;
+                justify-content:flex-start;
             }
         }
 
-        @media(max-width:700px){
-            .content{
-                padding:15px;
+        @media(max-width:900px){
+            .admin-main{
+                margin-left:0;
             }
 
-            .oo-page-title{
-                font-size:21px;
+            .content{
+                padding:20px 16px 32px;
+            }
+
+            .oo-page-head{
+                align-items:flex-start;
+            }
+
+            .oo-head-actions{
+                width:100%;
+            }
+
+            .oo-head-actions .oo-btn{
+                flex:1;
+            }
+        }
+
+        @media(max-width:650px){
+            .oo-page-head{
+                flex-direction:column;
+            }
+
+            .oo-page-head h1{
+                font-size:23px;
             }
 
             .oo-kpis{
-                grid-template-columns:1fr 1fr;
-                gap:9px;
-            }
-
-            .oo-kpi{
-                padding:13px;
-            }
-
-            .oo-kpi-value{
-                font-size:21px;
+                grid-template-columns:1fr;
             }
 
             .oo-filter-grid{
                 grid-template-columns:1fr;
             }
 
-            .oo-filter-actions{
+            .oo-filter-wide{
                 grid-column:auto;
+            }
+
+            .oo-date-row{
+                grid-template-columns:1fr 1fr;
+            }
+
+            .oo-filter-actions{
+                width:100%;
             }
 
             .oo-filter-actions .oo-btn{
@@ -1656,12 +2352,38 @@ $admin_page_title = 'Online Orders';
             .oo-detail-grid{
                 grid-template-columns:1fr;
             }
+        }
 
-            .oo-dialog-body{
-                padding:14px;
+        @media print{
+            .admin-aside,
+            .admin-header,
+            .oo-head-actions,
+            .oo-filter-card,
+            .oo-tabs,
+            .oo-actions{
+                display:none !important;
+            }
+
+            .admin-main{
+                margin-left:0;
+            }
+
+            .content{
+                padding:0;
+                max-width:none;
+            }
+
+            body{
+                background:#fff;
+            }
+
+            .oo-kpi,
+            .oo-orders-card{
+                box-shadow:none;
             }
         }
     </style>
+
 </head>
 
 <body>
@@ -1675,139 +2397,341 @@ $admin_page_title = 'Online Orders';
     <main class="content">
 
         <div class="oo-page-head">
+
             <div>
-                <h1 class="oo-page-title">
+
+                <h1>
                     Online Orders
                 </h1>
 
-                <div class="oo-page-subtitle">
-                    Manage customer orders received from the online pharmacy store.
-                    Completing an order deducts stock and records it in Transactions and Sales Report.
-                </div>
+                <p>
+                    Centralized management of online customer orders across
+                    <?= oo_e($pharmacy_name) ?>. Use the filters below to
+                    review daily, weekly, monthly or yearly activity.
+                    Completing an order deducts stock and records the sale.
+                </p>
+
+                <?php if ($date_range_label !== 'All dates' || $filter_branch > 0 || $filter_payment !== '' || $customer_search !== '' || $order_search !== '' || $min_amount !== '' || $max_amount !== ''): ?>
+
+                    <div class="oo-filter-summary">
+
+                        <?php if ($date_range_label !== 'All dates'): ?>
+                            <span class="oo-summary-chip">
+                                <i class="fas fa-calendar"></i>
+                                <?= oo_e($date_range_label) ?>
+                                <?php if ($date_from !== ''): ?>
+                                    Â· <?= oo_e($date_from) ?>
+                                <?php endif; ?>
+                                <?php if ($date_to !== '' && $date_to !== $date_from): ?>
+                                    â†’ <?= oo_e($date_to) ?>
+                                <?php endif; ?>
+                            </span>
+                        <?php endif; ?>
+
+                        <?php if ($filter_branch > 0): ?>
+                            <?php foreach ($branches as $branch): ?>
+                                <?php if ((int)$branch['id'] === $filter_branch): ?>
+                                    <span class="oo-summary-chip">
+                                        <i class="fas fa-store"></i>
+                                        <?= oo_e($branch['branch_name']) ?>
+                                    </span>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+
+                        <?php if ($filter_payment !== ''): ?>
+                            <span class="oo-summary-chip">
+                                <i class="fas fa-wallet"></i>
+                                <?= oo_e($filter_payment) ?>
+                            </span>
+                        <?php endif; ?>
+
+                        <?php if ($customer_search !== ''): ?>
+                            <span class="oo-summary-chip">
+                                <i class="fas fa-user"></i>
+                                <?= oo_e($customer_search) ?>
+                            </span>
+                        <?php endif; ?>
+
+                        <?php if ($order_search !== ''): ?>
+                            <span class="oo-summary-chip">
+                                <i class="fas fa-hashtag"></i>
+                                <?= oo_e($order_search) ?>
+                            </span>
+                        <?php endif; ?>
+
+                    </div>
+
+                <?php endif; ?>
+
             </div>
 
-            <button
-                type="button"
-                class="oo-refresh"
-                onclick="window.location.reload()"
-            >
-                <i class="fas fa-rotate"></i>
-                Refresh
-            </button>
+            <div class="oo-head-actions">
+
+                <button
+                    type="button"
+                    class="oo-btn"
+                    onclick="window.print()"
+                >
+                    <i class="fas fa-print"></i>
+                    Print
+                </button>
+
+                <button
+                    type="button"
+                    class="oo-btn primary"
+                    onclick="window.location.reload()"
+                >
+                    <i class="fas fa-rotate"></i>
+                    Refresh
+                </button>
+
+            </div>
+
         </div>
 
         <section class="oo-kpis">
 
             <div class="oo-kpi">
-                <div class="oo-kpi-top">
-                    <div class="oo-kpi-label">Pending Orders</div>
-                    <div class="oo-kpi-icon">
+
+                <div class="oo-kpi-head">
+                    <span>Pending Orders</span>
+
+                    <span class="oo-kpi-icon">
                         <i class="fas fa-clock"></i>
-                    </div>
+                    </span>
                 </div>
 
                 <div class="oo-kpi-value">
                     <?= number_format($counts['Pending']) ?>
                 </div>
 
-                <div class="oo-kpi-note">
-                    K<?= number_format($pending_value, 2) ?> order value
+                <div class="oo-kpi-sub">
+                    K<?= number_format($pending_value, 2) ?>
+                    pending value
                 </div>
+
             </div>
 
-            <div class="oo-kpi">
-                <div class="oo-kpi-top">
-                    <div class="oo-kpi-label">Processing</div>
-                    <div class="oo-kpi-icon">
+            <div class="oo-kpi green">
+
+                <div class="oo-kpi-head">
+                    <span>Processing</span>
+
+                    <span class="oo-kpi-icon">
                         <i class="fas fa-box-open"></i>
-                    </div>
+                    </span>
                 </div>
 
                 <div class="oo-kpi-value">
                     <?= number_format($counts['Processing']) ?>
                 </div>
 
-                <div class="oo-kpi-note">
-                    K<?= number_format($processing_value, 2) ?> order value
+                <div class="oo-kpi-sub">
+                    K<?= number_format($processing_value, 2) ?>
+                    processing value
                 </div>
+
             </div>
 
-            <div class="oo-kpi">
-                <div class="oo-kpi-top">
-                    <div class="oo-kpi-label">Completed</div>
-                    <div class="oo-kpi-icon">
+            <div class="oo-kpi yellow">
+
+                <div class="oo-kpi-head">
+                    <span>Completed</span>
+
+                    <span class="oo-kpi-icon">
                         <i class="fas fa-circle-check"></i>
-                    </div>
+                    </span>
                 </div>
 
                 <div class="oo-kpi-value">
                     <?= number_format($counts['Completed']) ?>
                 </div>
 
-                <div class="oo-kpi-note">
-                    K<?= number_format($completed_value, 2) ?> completed value
+                <div class="oo-kpi-sub">
+                    K<?= number_format($completed_value, 2) ?>
+                    completed value
                 </div>
+
             </div>
 
-            <div class="oo-kpi">
-                <div class="oo-kpi-top">
-                    <div class="oo-kpi-label">All Online Orders</div>
-                    <div class="oo-kpi-icon">
+            <div class="oo-kpi purple">
+
+                <div class="oo-kpi-head">
+                    <span>Online Orders</span>
+
+                    <span class="oo-kpi-icon">
                         <i class="fas fa-bag-shopping"></i>
-                    </div>
+                    </span>
                 </div>
 
                 <div class="oo-kpi-value">
                     <?= number_format($total_online_orders) ?>
                 </div>
 
-                <div class="oo-kpi-note">
-                    Pharmacy-wide order count
+                <div class="oo-kpi-sub">
+                    K<?= number_format($all_order_value, 2) ?>
+                    total order value
                 </div>
+
             </div>
 
         </section>
 
-        <section class="oo-card oo-filter-card">
+        <section class="oo-filter-card">
+
+            <div class="oo-filter-title">
+
+                <b>
+                    <i class="fas fa-sliders"></i>
+                    Order Filters
+                </b>
+
+                <span>
+                    Filter by period, branch, status, payment, customer and value
+                </span>
+
+            </div>
 
             <form method="get">
 
                 <div class="oo-filter-grid">
 
                     <div class="oo-field">
-                        <label for="ooBranch">Branch</label>
+
+                        <label for="ooPeriod">
+                            Time Period
+                        </label>
 
                         <select
-                            class="oo-select"
+                            class="oo-control"
+                            id="ooPeriod"
+                            name="period"
+                            onchange="toggleCustomDates()"
+                        >
+
+                            <option
+                                value=""
+                                <?= $period === '' ? 'selected' : '' ?>
+                            >
+                                All Time
+                            </option>
+
+                            <option
+                                value="today"
+                                <?= $period === 'today' ? 'selected' : '' ?>
+                            >
+                                Today
+                            </option>
+
+                            <option
+                                value="yesterday"
+                                <?= $period === 'yesterday' ? 'selected' : '' ?>
+                            >
+                                Yesterday
+                            </option>
+
+                            <option
+                                value="this_week"
+                                <?= $period === 'this_week' ? 'selected' : '' ?>
+                            >
+                                This Week
+                            </option>
+
+                            <option
+                                value="last_week"
+                                <?= $period === 'last_week' ? 'selected' : '' ?>
+                            >
+                                Last Week
+                            </option>
+
+                            <option
+                                value="this_month"
+                                <?= $period === 'this_month' ? 'selected' : '' ?>
+                            >
+                                This Month
+                            </option>
+
+                            <option
+                                value="last_month"
+                                <?= $period === 'last_month' ? 'selected' : '' ?>
+                            >
+                                Last Month
+                            </option>
+
+                            <option
+                                value="this_year"
+                                <?= $period === 'this_year' ? 'selected' : '' ?>
+                            >
+                                This Year
+                            </option>
+
+                            <option
+                                value="last_year"
+                                <?= $period === 'last_year' ? 'selected' : '' ?>
+                            >
+                                Last Year
+                            </option>
+
+                            <option
+                                value="custom"
+                                <?= $period === 'custom' ? 'selected' : '' ?>
+                            >
+                                Custom Date Range
+                            </option>
+
+                        </select>
+
+                    </div>
+
+                    <div class="oo-field">
+
+                        <label for="ooBranch">
+                            Branch
+                        </label>
+
+                        <select
+                            class="oo-control"
                             id="ooBranch"
                             name="branch_id"
                         >
+
                             <option value="0">
                                 All Branches
                             </option>
 
                             <?php foreach ($branches as $branch): ?>
+
                                 <option
                                     value="<?= (int)$branch['id'] ?>"
                                     <?= $filter_branch === (int)$branch['id'] ? 'selected' : '' ?>
                                 >
                                     <?= oo_e($branch['branch_name']) ?>
+
                                     <?php if (!empty($branch['branch_code'])): ?>
-                                        — <?= oo_e($branch['branch_code']) ?>
+                                        â€” <?= oo_e($branch['branch_code']) ?>
                                     <?php endif; ?>
+
                                 </option>
+
                             <?php endforeach; ?>
+
                         </select>
+
                     </div>
 
                     <div class="oo-field">
-                        <label for="ooStatus">Status</label>
+
+                        <label for="ooStatus">
+                            Status
+                        </label>
 
                         <select
-                            class="oo-select"
+                            class="oo-control"
                             id="ooStatus"
                             name="status"
                         >
+
                             <option
                                 value=""
                                 <?= $filter_status === '' ? 'selected' : '' ?>
@@ -1816,37 +2740,171 @@ $admin_page_title = 'Online Orders';
                             </option>
 
                             <?php foreach (array_keys($counts) as $status): ?>
+
                                 <option
                                     value="<?= oo_e($status) ?>"
                                     <?= $filter_status === $status ? 'selected' : '' ?>
                                 >
                                     <?= oo_e($status) ?>
-                                    (<?= number_format($counts[$status]) ?>)
                                 </option>
+
                             <?php endforeach; ?>
+
                         </select>
+
+                    </div>
+
+                    <div class="oo-field">
+
+                        <label for="ooPayment">
+                            Payment Method
+                        </label>
+
+                        <select
+                            class="oo-control"
+                            id="ooPayment"
+                            name="payment"
+                        >
+
+                            <option
+                                value=""
+                                <?= $filter_payment === '' ? 'selected' : '' ?>
+                            >
+                                All Payment Methods
+                            </option>
+
+                            <?php foreach (array_slice($allowed_payments, 1) as $payment): ?>
+
+                                <option
+                                    value="<?= oo_e($payment) ?>"
+                                    <?= $filter_payment === $payment ? 'selected' : '' ?>
+                                >
+                                    <?= oo_e($payment) ?>
+                                </option>
+
+                            <?php endforeach; ?>
+
+                        </select>
+
+                    </div>
+
+                    <div
+                        class="oo-field oo-filter-wide"
+                        id="customDates"
+                        style="<?= $period === 'custom' ? '' : 'display:none;' ?>"
+                    >
+
+                        <label>
+                            Custom Dates
+                        </label>
+
+                        <div class="oo-date-row">
+
+                            <input
+                                type="date"
+                                class="oo-control"
+                                name="date_from"
+                                value="<?= oo_e($date_from_input) ?>"
+                                aria-label="Date from"
+                            >
+
+                            <input
+                                type="date"
+                                class="oo-control"
+                                name="date_to"
+                                value="<?= oo_e($date_to_input) ?>"
+                                aria-label="Date to"
+                            >
+
+                        </div>
+
+                    </div>
+
+                    <div class="oo-field">
+
+                        <label for="ooCustomer">
+                            Customer Search
+                        </label>
+
+                        <input
+                            type="search"
+                            class="oo-control"
+                            id="ooCustomer"
+                            name="customer"
+                            value="<?= oo_e($customer_search) ?>"
+                            placeholder="Name, phone or email"
+                            autocomplete="off"
+                        >
+
+                    </div>
+
+                    <div class="oo-field">
+
+                        <label for="ooOrder">
+                            Order Number
+                        </label>
+
+                        <input
+                            type="search"
+                            class="oo-control"
+                            id="ooOrder"
+                            name="order"
+                            value="<?= oo_e($order_search) ?>"
+                            placeholder="Search order number"
+                            autocomplete="off"
+                        >
+
+                    </div>
+
+                    <div class="oo-field">
+
+                        <label>
+                            Order Value
+                        </label>
+
+                        <div class="oo-date-row">
+
+                            <input
+                                type="number"
+                                class="oo-control"
+                                name="min_amount"
+                                min="0"
+                                step="0.01"
+                                value="<?= oo_e($min_amount) ?>"
+                                placeholder="Min K"
+                            >
+
+                            <input
+                                type="number"
+                                class="oo-control"
+                                name="max_amount"
+                                min="0"
+                                step="0.01"
+                                value="<?= oo_e($max_amount) ?>"
+                                placeholder="Max K"
+                            >
+
+                        </div>
+
                     </div>
 
                     <div class="oo-filter-actions">
 
                         <button
                             type="submit"
-                            class="oo-btn oo-btn-primary"
+                            class="oo-btn primary"
                         >
                             <i class="fas fa-filter"></i>
                             Apply Filters
                         </button>
 
-                        <?php if ($filter_branch > 0 || $filter_status !== ''): ?>
-                            <a
-                                href="online_orders.php"
-                                class="oo-btn oo-btn-light"
-                                title="Clear filters"
-                            >
-                                <i class="fas fa-xmark"></i>
-                                Reset
-                            </a>
-                        <?php endif; ?>
+                        <a
+                            href="online_orders.php"
+                            class="oo-btn"
+                        >
+                            <i class="fas fa-xmark"></i>
+                            Clear
+                        </a>
 
                     </div>
 
@@ -1854,47 +2912,95 @@ $admin_page_title = 'Online Orders';
 
             </form>
 
+            <div class="oo-quick-periods">
+
+                <a
+                    href="online_orders.php"
+                    class="oo-quick <?= $period === '' ? 'active' : '' ?>"
+                >
+                    All Time
+                </a>
+
+                <?php
+                $quick_periods = [
+                    'today' => 'Today',
+                    'yesterday' => 'Yesterday',
+                    'this_week' => 'This Week',
+                    'last_week' => 'Last Week',
+                    'this_month' => 'This Month',
+                    'last_month' => 'Last Month',
+                    'this_year' => 'This Year',
+                    'last_year' => 'Last Year'
+                ];
+                ?>
+
+                <?php foreach ($quick_periods as $key => $label): ?>
+
+                    <?php
+                    $quick_query = $common_query;
+                    $quick_query['period'] = $key;
+                    unset(
+                        $quick_query['status']
+                    );
+                    ?>
+
+                    <a
+                        href="online_orders.php?<?= oo_e(http_build_query($quick_query)) ?>"
+                        class="oo-quick <?= $period === $key ? 'active' : '' ?>"
+                    >
+                        <?= oo_e($label) ?>
+                    </a>
+
+                <?php endforeach; ?>
+
+                <a
+                    href="online_orders.php?<?= oo_e(http_build_query(
+                        array_merge(
+                            $common_query,
+                            ['period' => 'custom']
+                        )
+                    )) ?>"
+                    class="oo-quick <?= $period === 'custom' ? 'active' : '' ?>"
+                >
+                    Custom
+                </a>
+
+            </div>
+
         </section>
 
-        <section class="oo-card oo-orders-card">
+        <section class="oo-orders-card">
 
             <div class="oo-card-head">
 
                 <div>
-                    <h2 class="oo-card-title">
-                        Customer Orders
-                    </h2>
+                    <b>
+                        Online Customer Orders
+                    </b>
 
-                    <div class="oo-card-meta">
-                        Showing up to 300 latest orders for the selected scope.
-                    </div>
+                    <span style="display:block;margin-top:3px">
+                        <?= oo_e($date_range_label) ?>
+                        Â· Up to 300 latest matching orders
+                    </span>
                 </div>
 
-                <div class="oo-card-meta">
-                    <?= number_format(count($orders)) ?> displayed
-                </div>
+                <span>
+                    <?= number_format(count($orders)) ?>
+                    displayed
+                </span>
 
             </div>
 
             <div class="oo-tabs">
 
-                <?php
-                $all_query = [];
-
-                if ($filter_branch > 0) {
-                    $all_query['branch_id'] = $filter_branch;
-                }
-
-                $all_url = 'online_orders.php';
-
-                if ($all_query) {
-                    $all_url .= '?' . http_build_query($all_query);
-                }
-                ?>
-
                 <a
                     class="oo-tab <?= $filter_status === '' ? 'active' : '' ?>"
-                    href="<?= oo_e($all_url) ?>"
+                    href="<?= oo_e(
+                        oo_tab_url(
+                            $common_query,
+                            ''
+                        )
+                    ) ?>"
                 >
                     All
                     (<?= number_format($total_online_orders) ?>)
@@ -1902,23 +3008,14 @@ $admin_page_title = 'Online Orders';
 
                 <?php foreach (array_keys($counts) as $status): ?>
 
-                    <?php
-                    $status_query = [
-                        'status' => $status
-                    ];
-
-                    if ($filter_branch > 0) {
-                        $status_query['branch_id'] = $filter_branch;
-                    }
-
-                    $status_url =
-                        'online_orders.php?' .
-                        http_build_query($status_query);
-                    ?>
-
                     <a
                         class="oo-tab <?= $filter_status === $status ? 'active' : '' ?>"
-                        href="<?= oo_e($status_url) ?>"
+                        href="<?= oo_e(
+                            oo_tab_url(
+                                $common_query,
+                                $status
+                            )
+                        ) ?>"
                     >
                         <?= oo_e($status) ?>
                         (<?= number_format($counts[$status]) ?>)
@@ -1933,6 +3030,7 @@ $admin_page_title = 'Online Orders';
                 <table class="oo-table">
 
                     <thead>
+
                         <tr>
                             <th>Order</th>
                             <th>Customer</th>
@@ -1943,6 +3041,7 @@ $admin_page_title = 'Online Orders';
                             <th>Status</th>
                             <th>Actions</th>
                         </tr>
+
                     </thead>
 
                     <tbody>
@@ -1950,7 +3049,9 @@ $admin_page_title = 'Online Orders';
                     <?php if (!$orders): ?>
 
                         <tr>
+
                             <td colspan="8">
+
                                 <div class="oo-empty">
 
                                     <div class="oo-empty-icon">
@@ -1961,12 +3062,15 @@ $admin_page_title = 'Online Orders';
                                         No online orders found
                                     </strong>
 
-                                    <div class="oo-small">
-                                        Try changing the branch or status filter.
+                                    <div class="oo-muted">
+                                        Try changing the date, branch,
+                                        payment, status or search filters.
                                     </div>
 
                                 </div>
+
                             </td>
+
                         </tr>
 
                     <?php else: ?>
@@ -1978,110 +3082,126 @@ $admin_page_title = 'Online Orders';
                                 (string)$order['status'];
 
                             $status_class = match ($status) {
-                                'Pending' => 'oo-status-pending',
-                                'Processing' => 'oo-status-processing',
-                                'Completed' => 'oo-status-completed',
-                                'Cancelled' => 'oo-status-cancelled',
-                                default => 'oo-status-pending'
+                                'Pending' =>
+                                    'oo-status-pending',
+
+                                'Processing' =>
+                                    'oo-status-processing',
+
+                                'Completed' =>
+                                    'oo-status-completed',
+
+                                'Cancelled' =>
+                                    'oo-status-cancelled',
+
+                                default =>
+                                    'oo-status-pending'
                             };
 
                             $payment =
-                                (string)($order['payment_method'] ?? '');
+                                (string)(
+                                    $order['payment_method'] ?? ''
+                                );
 
-                            $payment_display = match (
-                                strtolower(trim($payment))
-                            ) {
-                                'cash',
-                                'cod',
-                                'cash on delivery'
-                                    => 'Cash on Delivery',
-
-                                'bank',
-                                'bank transfer',
-                                'bank / transfer'
-                                    => 'Bank Transfer',
-
-                                'mobile',
-                                'mobile money',
-                                'momo'
-                                    => 'Mobile Money',
-
-                                default => (
-                                    $payment !== ''
-                                        ? $payment
-                                        : 'Not specified'
-                                )
-                            };
+                            $payment_display =
+                                oo_payment_display($payment);
                             ?>
 
                             <tr>
 
                                 <td>
+
                                     <div class="oo-order-number">
-                                        #<?= oo_e($order['order_number']) ?>
+                                        #<?= oo_e(
+                                            $order['order_number']
+                                        ) ?>
                                     </div>
 
-                                    <div class="oo-small">
+                                    <div class="oo-muted">
                                         ID <?= (int)$order['id'] ?>
                                     </div>
+
                                 </td>
 
                                 <td>
+
                                     <div class="oo-customer">
                                         <?= oo_e(
-                                            $order['full_name'] ?: 'Customer'
+                                            $order['full_name'] ?:
+                                            'Customer'
                                         ) ?>
                                     </div>
 
                                     <?php if (!empty($order['phone'])): ?>
-                                        <div class="oo-small">
-                                            <?= oo_e($order['phone']) ?>
+
+                                        <div class="oo-muted">
+                                            <?= oo_e(
+                                                $order['phone']
+                                            ) ?>
                                         </div>
+
                                     <?php endif; ?>
+
                                 </td>
 
                                 <td>
+
                                     <div class="oo-customer">
                                         <?= oo_e(
-                                            $order['branch_name'] ?: 'Unknown branch'
+                                            $order['branch_name'] ?:
+                                            'Unknown branch'
                                         ) ?>
                                     </div>
+
                                 </td>
 
                                 <td>
+
                                     <div class="oo-payment">
-                                        <?= oo_e($payment_display) ?>
+                                        <?= oo_e(
+                                            $payment_display
+                                        ) ?>
                                     </div>
+
                                 </td>
 
                                 <td>
-                                    <div>
-                                        <?= oo_e($order['order_date']) ?>
-                                    </div>
+                                    <?= oo_e(
+                                        $order['order_date']
+                                    ) ?>
                                 </td>
 
                                 <td>
+
                                     <div class="oo-money">
                                         K<?= number_format(
                                             (float)$order['total_amount'],
                                             2
                                         ) ?>
                                     </div>
+
                                 </td>
 
                                 <td>
-                                    <span class="oo-status <?= $status_class ?>">
+
+                                    <span
+                                        class="oo-status <?= $status_class ?>"
+                                    >
                                         <?= oo_e($status) ?>
                                     </span>
+
                                 </td>
 
                                 <td>
+
                                     <div class="oo-actions">
 
                                         <button
                                             type="button"
-                                            class="oo-btn oo-btn-light"
-                                            onclick="viewOrder(<?= (int)$order['id'] ?>)"
+                                            class="oo-action"
+                                            onclick="viewOrder(
+                                                <?= (int)$order['id'] ?>
+                                            )"
                                         >
                                             <i class="fas fa-eye"></i>
                                             View
@@ -2091,7 +3211,7 @@ $admin_page_title = 'Online Orders';
 
                                             <button
                                                 type="button"
-                                                class="oo-btn oo-btn-success"
+                                                class="oo-action accept"
                                                 onclick="changeStatus(
                                                     <?= (int)$order['id'] ?>,
                                                     'Processing'
@@ -2103,7 +3223,7 @@ $admin_page_title = 'Online Orders';
 
                                             <button
                                                 type="button"
-                                                class="oo-btn oo-btn-danger"
+                                                class="oo-action cancel"
                                                 onclick="changeStatus(
                                                     <?= (int)$order['id'] ?>,
                                                     'Cancelled'
@@ -2117,7 +3237,7 @@ $admin_page_title = 'Online Orders';
 
                                             <button
                                                 type="button"
-                                                class="oo-btn oo-btn-success"
+                                                class="oo-action complete"
                                                 onclick="changeStatus(
                                                     <?= (int)$order['id'] ?>,
                                                     'Completed'
@@ -2129,7 +3249,7 @@ $admin_page_title = 'Online Orders';
 
                                             <button
                                                 type="button"
-                                                class="oo-btn oo-btn-danger"
+                                                class="oo-action cancel"
                                                 onclick="changeStatus(
                                                     <?= (int)$order['id'] ?>,
                                                     'Cancelled'
@@ -2142,6 +3262,7 @@ $admin_page_title = 'Online Orders';
                                         <?php endif; ?>
 
                                     </div>
+
                                 </td>
 
                             </tr>
@@ -2167,6 +3288,7 @@ $admin_page_title = 'Online Orders';
     id="ooModal"
     aria-hidden="true"
 >
+
     <div class="oo-dialog">
 
         <div class="oo-dialog-head">
@@ -2199,10 +3321,12 @@ $admin_page_title = 'Online Orders';
         </div>
 
     </div>
+
 </div>
 
 <script>
-const OO_CSRF = <?= json_encode($csrf_token) ?>;
+const OO_CSRF =
+    <?= json_encode($csrf_token) ?>;
 
 function ooEsc(value) {
     return String(value ?? '').replace(
@@ -2220,15 +3344,17 @@ function ooEsc(value) {
 }
 
 function ooMoney(value) {
-    const number = Number(value ?? 0);
+    const number =
+        Number(value ?? 0);
 
-    return 'K' + number.toLocaleString(
-        'en-ZM',
-        {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        }
-    );
+    return 'K' +
+        number.toLocaleString(
+            'en-ZM',
+            {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }
+        );
 }
 
 function ooStatusClass(status) {
@@ -2247,119 +3373,171 @@ function ooStatusClass(status) {
     return 'oo-status oo-status-cancelled';
 }
 
-function openOrderModal() {
-    const modal = document.getElementById('ooModal');
+function toggleCustomDates() {
+    const period =
+        document.getElementById('ooPeriod');
 
-    modal.classList.add('open');
-    modal.setAttribute('aria-hidden', 'false');
-}
+    const custom =
+        document.getElementById('customDates');
 
-function closeOrder() {
-    const modal = document.getElementById('ooModal');
+    if (!period || !custom) {
+        return;
+    }
 
-    modal.classList.remove('open');
-    modal.setAttribute('aria-hidden', 'true');
+    custom.style.display =
+        period.value === 'custom'
+            ? ''
+            : 'none';
 }
 
 async function viewOrder(id) {
-    const body = document.getElementById('ooBody');
+    const body =
+        document.getElementById('ooBody');
 
     body.innerHTML =
         '<div class="oo-loading">' +
-        '<i class="fas fa-spinner fa-spin"></i> Loading order...' +
+        '<i class="fas fa-spinner fa-spin"></i> ' +
+        'Loading order...' +
         '</div>';
 
-    openOrderModal();
+    const modal =
+        document.getElementById('ooModal');
+
+    modal.classList.add('open');
+    modal.setAttribute(
+        'aria-hidden',
+        'false'
+    );
 
     try {
-        const response = await fetch(
-            'online_orders.php?action=order&id=' +
-            encodeURIComponent(id),
-            {
-                headers: {
-                    'Accept': 'application/json'
-                },
-                cache: 'no-store'
-            }
-        );
+        const response =
+            await fetch(
+                'online_orders.php?action=order&id=' +
+                encodeURIComponent(id),
+                {
+                    headers: {
+                        'Accept':
+                            'application/json'
+                    },
+                    cache: 'no-store'
+                }
+            );
 
-        const data = await response.json();
+        const data =
+            await response.json();
 
         if (!data.success) {
             throw new Error(
-                data.message || 'Unable to load order.'
+                data.message ||
+                'Unable to load order.'
             );
         }
 
-        const order = data.order;
-        const items = Array.isArray(data.items)
-            ? data.items
-            : [];
+        const order =
+            data.order;
 
-        document.getElementById('ooTitle').textContent =
-            '#' + (order.order_number || order.id);
+        const items =
+            Array.isArray(data.items)
+                ? data.items
+                : [];
 
-        const payment = order.payment_method || 'Not specified';
+        document.getElementById(
+            'ooTitle'
+        ).textContent =
+            '#' +
+            (order.order_number || order.id);
 
-        let html = '';
-
-        html += '<div class="oo-detail-grid">';
+        let html =
+            '<div class="oo-detail-grid">';
 
         html +=
             '<div class="oo-detail">' +
-            '<div class="oo-detail-label">Customer</div>' +
+            '<div class="oo-detail-label">' +
+            'Customer' +
+            '</div>' +
             '<div class="oo-detail-value">' +
-            ooEsc(order.full_name || 'Customer') +
+            ooEsc(
+                order.full_name ||
+                'Customer'
+            ) +
             '</div>' +
             '</div>';
 
         html +=
             '<div class="oo-detail">' +
-            '<div class="oo-detail-label">Phone</div>' +
+            '<div class="oo-detail-label">' +
+            'Phone' +
+            '</div>' +
             '<div class="oo-detail-value">' +
-            ooEsc(order.phone || 'Not provided') +
+            ooEsc(
+                order.phone ||
+                'Not provided'
+            ) +
             '</div>' +
             '</div>';
 
         html +=
             '<div class="oo-detail">' +
-            '<div class="oo-detail-label">Branch</div>' +
+            '<div class="oo-detail-label">' +
+            'Email' +
+            '</div>' +
             '<div class="oo-detail-value">' +
-            ooEsc(order.branch_name || 'Unknown branch') +
+            ooEsc(
+                order.email ||
+                'Not provided'
+            ) +
             '</div>' +
             '</div>';
 
         html +=
             '<div class="oo-detail">' +
-            '<div class="oo-detail-label">Payment Method</div>' +
+            '<div class="oo-detail-label">' +
+            'Branch' +
+            '</div>' +
             '<div class="oo-detail-value">' +
-            ooEsc(payment) +
+            ooEsc(
+                order.branch_name ||
+                'Unknown branch'
+            ) +
             '</div>' +
             '</div>';
 
         html +=
             '<div class="oo-detail">' +
-            '<div class="oo-detail-label">Order Date</div>' +
+            '<div class="oo-detail-label">' +
+            'Payment Method' +
+            '</div>' +
             '<div class="oo-detail-value">' +
-            ooEsc(order.order_date || '') +
+            ooEsc(
+                order.payment_method ||
+                'Not specified'
+            ) +
             '</div>' +
             '</div>';
 
         html +=
             '<div class="oo-detail">' +
-            '<div class="oo-detail-label">Status</div>' +
+            '<div class="oo-detail-label">' +
+            'Status' +
+            '</div>' +
             '<div class="oo-detail-value">' +
             '<span class="' +
-            ooStatusClass(order.status) +
+            ooStatusClass(
+                order.status
+            ) +
             '">' +
-            ooEsc(order.status || '') +
+            ooEsc(
+                order.status ||
+                ''
+            ) +
             '</span>' +
             '</div>' +
             '</div>';
 
         html += '</div>';
 
-        html += '<div class="oo-items">';
+        html +=
+            '<div class="oo-items">';
 
         if (!items.length) {
             html +=
@@ -2367,33 +3545,63 @@ async function viewOrder(id) {
                 'This order has no items.' +
                 '</div>';
         } else {
-            items.forEach(function (item) {
-                const qty = Number(item.quantity || 0);
-                const price = Number(item.price_at_purchase || 0);
-                const lineTotal = qty * price;
+            items.forEach(
+                function (item) {
+                    const qty =
+                        Number(
+                            item.quantity || 0
+                        );
 
-                html +=
-                    '<div class="oo-item">' +
-                    '<div>' +
-                    '<div class="oo-item-name">' +
-                    ooEsc(item.item_name || 'Product') +
-                    '</div>' +
-                    '<div class="oo-item-meta">' +
-                    ooEsc(item.strength || '') +
-                    (item.strength ? ' · ' : '') +
-                    'Qty: ' + qty +
-                    (item.barcode ? ' · Barcode: ' + ooEsc(item.barcode) : '') +
-                    '</div>' +
-                    '</div>' +
-                    '<div class="oo-item-price">' +
-                    ooMoney(lineTotal) +
-                    '<div class="oo-item-meta">' +
-                    ooMoney(price) +
-                    ' each' +
-                    '</div>' +
-                    '</div>' +
-                    '</div>';
-            });
+                    const price =
+                        Number(
+                            item.price_at_purchase ||
+                            0
+                        );
+
+                    const lineTotal =
+                        qty * price;
+
+                    html +=
+                        '<div class="oo-item">' +
+                        '<div>' +
+                        '<div class="oo-item-name">' +
+                        ooEsc(
+                            item.item_name ||
+                            'Product'
+                        ) +
+                        '</div>' +
+                        '<div class="oo-item-meta">' +
+                        ooEsc(
+                            item.strength ||
+                            ''
+                        ) +
+                        (
+                            item.strength
+                                ? ' Â· '
+                                : ''
+                        ) +
+                        'Qty: ' +
+                        qty +
+                        (
+                            item.barcode
+                                ? ' Â· Barcode: ' +
+                                  ooEsc(
+                                      item.barcode
+                                  )
+                                : ''
+                        ) +
+                        '</div>' +
+                        '</div>' +
+                        '<div class="oo-item-price">' +
+                        ooMoney(lineTotal) +
+                        '<div class="oo-item-meta">' +
+                        ooMoney(price) +
+                        ' each' +
+                        '</div>' +
+                        '</div>' +
+                        '</div>';
+                }
+            );
         }
 
         html += '</div>';
@@ -2401,7 +3609,9 @@ async function viewOrder(id) {
         html +=
             '<div class="oo-total">' +
             'Total: ' +
-            ooMoney(order.total_amount) +
+            ooMoney(
+                order.total_amount
+            ) +
             '</div>';
 
         body.innerHTML = html;
@@ -2412,16 +3622,39 @@ async function viewOrder(id) {
             '<div class="oo-empty-icon">' +
             '<i class="fas fa-triangle-exclamation"></i>' +
             '</div>' +
-            '<strong>Unable to load order</strong>' +
-            '<div class="oo-small">' +
-            ooEsc(error.message || 'Please try again.') +
+            '<strong>' +
+            'Unable to load order' +
+            '</strong>' +
+            '<div class="oo-muted">' +
+            ooEsc(
+                error.message ||
+                'Please try again.'
+            ) +
             '</div>' +
             '</div>';
     }
 }
 
-async function changeStatus(id, status) {
-    let message = 'Change this order to ' + status + '?';
+function closeOrder() {
+    const modal =
+        document.getElementById('ooModal');
+
+    modal.classList.remove('open');
+
+    modal.setAttribute(
+        'aria-hidden',
+        'true'
+    );
+}
+
+async function changeStatus(
+    id,
+    status
+) {
+    let message =
+        'Change this order to ' +
+        status +
+        '?';
 
     if (status === 'Processing') {
         message =
@@ -2431,9 +3664,9 @@ async function changeStatus(id, status) {
     if (status === 'Completed') {
         message =
             'Complete this order?\n\n' +
-            'This will deduct the ordered quantities from the ' +
-            'order branch stock and record the completed sale in ' +
-            'Transactions and Sales Report.';
+            'The ordered quantities will be deducted ' +
+            'from the order branch stock and the completed ' +
+            'sale will be recorded in Transactions and Sales Report.';
     }
 
     if (status === 'Cancelled') {
@@ -2446,44 +3679,57 @@ async function changeStatus(id, status) {
         return;
     }
 
-    const buttons = document.querySelectorAll(
-        'button[onclick*="changeStatus(' +
-        id +
-        ',"]'
+    const formData =
+        new FormData();
+
+    formData.append(
+        'action',
+        'update_status'
     );
 
-    buttons.forEach(function (button) {
-        button.disabled = true;
-    });
+    formData.append(
+        'order_id',
+        String(id)
+    );
 
-    const formData = new FormData();
+    formData.append(
+        'status',
+        status
+    );
 
-    formData.append('action', 'update_status');
-    formData.append('order_id', String(id));
-    formData.append('status', status);
-    formData.append('csrf_token', OO_CSRF);
+    formData.append(
+        'csrf_token',
+        OO_CSRF
+    );
 
     try {
-        const response = await fetch(
-            'online_orders.php',
-            {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'Accept': 'application/json'
+        const response =
+            await fetch(
+                'online_orders.php',
+                {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'Accept':
+                            'application/json'
+                    }
                 }
-            }
-        );
+            );
 
-        const data = await response.json();
+        const data =
+            await response.json();
 
         if (!data.success) {
             throw new Error(
-                data.message || 'Unable to update order.'
+                data.message ||
+                'Unable to update order.'
             );
         }
 
-        window.alert(data.message || 'Order updated successfully.');
+        window.alert(
+            data.message ||
+            'Order updated successfully.'
+        );
 
         window.location.reload();
 
@@ -2492,34 +3738,45 @@ async function changeStatus(id, status) {
             error.message ||
             'Unable to update the order.'
         );
-
-        buttons.forEach(function (button) {
-            button.disabled = false;
-        });
     }
 }
 
 document
     .getElementById('ooModal')
-    .addEventListener('click', function (event) {
-        if (event.target.id === 'ooModal') {
+    .addEventListener(
+        'click',
+        function (event) {
+            if (
+                event.target.id ===
+                'ooModal'
+            ) {
+                closeOrder();
+            }
+        }
+    );
+
+document.addEventListener(
+    'keydown',
+    function (event) {
+        if (event.key === 'Escape') {
             closeOrder();
         }
-    });
-
-document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape') {
-        closeOrder();
     }
-});
+);
+
+toggleCustomDates();
 
 /*
- * Refresh every 60 seconds so newly submitted online orders
- * appear without requiring manual navigation.
+ * Refresh online order status every 60 seconds.
+ * This is intentionally the same lightweight refresh behaviour
+ * as the previous online-order workflow.
  */
-setTimeout(function () {
-    window.location.reload();
-}, 60000);
+setTimeout(
+    function () {
+        window.location.reload();
+    },
+    60000
+);
 </script>
 
 </body>
