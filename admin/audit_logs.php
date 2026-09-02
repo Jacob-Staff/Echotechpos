@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * EchoTech POS — Admin Audit & Security
+ * EchoTech POS â€” Admin Audit & Security
  *
  * Uses:
  *   - compliance_audit_log for general/admin/compliance audit events
@@ -284,7 +284,7 @@ if ($source !== 'zra' && al_table_exists($adminDb, 'compliance_audit_log')) {
             l.id,
             "ADMIN" AS source,
             l.action,
-            "—" AS status,
+            "â€”" AS status,
             l.entity_type,
             l.entity_id,
             l.description,
@@ -292,7 +292,7 @@ if ($source !== 'zra' && al_table_exists($adminDb, 'compliance_audit_log')) {
             l.created_at,
             l.user_id,
             COALESCE(NULLIF(u.full_name,""),u.username,"System") AS user_name,
-            COALESCE(eb.branch_name, ub.branch_name, "—") AS branch_name
+            COALESCE(eb.branch_name, ub.branch_name, "â€”") AS branch_name
          FROM compliance_audit_log l
          LEFT JOIN users u ON u.id=l.user_id AND u.pharmacy_id=l.pharmacy_id
          LEFT JOIN branches ub ON ub.id=u.branch_id AND ub.pharmacy_id=l.pharmacy_id
@@ -348,7 +348,7 @@ if ($source !== 'admin' && al_table_exists($adminDb, 'pos_zra_audit_log')) {
             l.created_at,
             NULL AS user_id,
             "ZRA / System" AS user_name,
-            COALESCE(b.branch_name,"—") AS branch_name
+            COALESCE(b.branch_name,"â€”") AS branch_name
          FROM pos_zra_audit_log l
          LEFT JOIN branches b ON b.id=l.branch_id AND b.pharmacy_id=l.pharmacy_id
          WHERE ' . implode(' AND ', $where) . '
@@ -431,7 +431,7 @@ $admin_page_title = 'Audit & Security';
         <section class="security-grid">
             <div class="security-card">
                 <div class="security-icon blue"><i class="fas fa-shield-halved"></i></div>
-                <div><span>Audit Events</span><strong><?= number_format(count($events)) ?></strong><small><?= number_format($audit_count) ?> admin · <?= number_format($zra_count) ?> ZRA in period</small></div>
+                <div><span>Audit Events</span><strong><?= number_format(count($events)) ?></strong><small><?= number_format($audit_count) ?> admin Â· <?= number_format($zra_count) ?> ZRA in period</small></div>
             </div>
             <div class="security-card">
                 <div class="security-icon green"><i class="fas fa-user-check"></i></div>
@@ -490,7 +490,7 @@ $admin_page_title = 'Audit & Security';
                 <label class="field"><span>User</span><select name="user_id">
                     <option value="0">All users</option>
                     <?php foreach ($users as $user): ?>
-                        <option value="<?= (int)$user['id'] ?>" <?= $user_id_filter===(int)$user['id']?'selected':'' ?>><?= al_h($user['display_name']) ?> · <?= al_h($user['role']) ?></option>
+                        <option value="<?= (int)$user['id'] ?>" <?= $user_id_filter===(int)$user['id']?'selected':'' ?>><?= al_h($user['display_name']) ?> Â· <?= al_h($user['role']) ?></option>
                     <?php endforeach; ?>
                 </select></label>
                 <label class="field"><span>Branch</span><select name="branch_id">
@@ -516,7 +516,7 @@ $admin_page_title = 'Audit & Security';
 
         <section class="card">
             <div class="card-head">
-                <div><h2><i class="fas fa-list-check"></i> Audit Event Register</h2><span><?= al_h(date('d M Y', strtotime($start_date))) ?> — <?= al_h(date('d M Y', strtotime($end_date))) ?> · maximum 500 displayed events</span></div>
+                <div><h2><i class="fas fa-list-check"></i> Audit Event Register</h2><span><?= al_h(date('d M Y', strtotime($start_date))) ?> â€” <?= al_h(date('d M Y', strtotime($end_date))) ?> Â· maximum 500 displayed events</span></div>
                 <div class="register-meta"><span><b><?= number_format(count($events)) ?></b> shown</span></div>
             </div>
             <div class="table-wrap">
@@ -528,7 +528,7 @@ $admin_page_title = 'Audit & Security';
                     <?php else: ?>
                         <?php foreach ($events as $event): ?>
                             <?php
-                            $statusText = trim((string)($event['status'] ?? '—'));
+                            $statusText = trim((string)($event['status'] ?? 'â€”'));
                             $statusLower = strtolower($statusText);
                             $statusClass = in_array($statusLower, ['success','ok','completed','posted','online'], true) ? 'success' :
                                 (in_array($statusLower, ['error','failed','failure','offline'], true) ? 'danger' : 'neutral');
@@ -540,9 +540,9 @@ $admin_page_title = 'Audit & Security';
                                 <td><?= al_h($event['user_name']) ?></td>
                                 <td><?= al_h($event['branch_name']) ?></td>
                                 <td><span class="status-pill <?= $statusClass ?>"><?= al_h($statusText) ?></span></td>
-                                <td><?= $event['entity_id'] !== null && $event['entity_id'] !== '' ? al_h($event['entity_type'] . ' #' . $event['entity_id']) : '—' ?></td>
+                                <td><?= $event['entity_id'] !== null && $event['entity_id'] !== '' ? al_h($event['entity_type'] . ' #' . $event['entity_id']) : 'â€”' ?></td>
                                 <td class="description"><?= al_h($event['description'] ?: 'No description recorded.') ?></td>
-                                <td class="ip"><?= al_h($event['ip_address'] ?: '—') ?></td>
+                                <td class="ip"><?= al_h($event['ip_address'] ?: 'â€”') ?></td>
                             </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
