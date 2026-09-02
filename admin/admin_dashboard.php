@@ -28,6 +28,114 @@ if ($stmt = $conn->prepare("SELECT name FROM pharmacies WHERE id = ? LIMIT 1")) 
     $stmt->close();
 }
 
+/* ---------- Admin dashboard visual upload ---------- */
+function dbm_csrf(): string {
+    if (empty($_SESSION['dashboard_media_csrf'])) {
+        $_SESSION['dashboard_media_csrf'] = bin2hex(random_bytes(32));
+    }
+    return (string)$_SESSION['dashboard_media_csrf'];
+}
+
+function dbm_csrf_ok(): bool {
+    return !empty($_POST['csrf_token'])
+        && hash_equals(
+            (string)($_SESSION['dashboard_media_csrf'] ?? ''),
+            (string)$_POST['csrf_token']
+        );
+}
+
+function dbm_media_files(): array {
+    $dir = __DIR__ . '/../uploads/admin/';
+    $files = [];
+
+    foreach (['jpg','jpeg','png','webp','gif','mp4','webm'] as $ext) {
+        $path = $dir . 'admin_dashboard.' . $ext;
+        if (is_file($path)) {
+            $files[] = [
+                'path' => $path,
+                'url'  => '../uploads/admin/admin_dashboard.' . $ext,
+                'ext'  => $ext,
+                'kind' => in_array($ext, ['mp4','webm'], true) ? 'video' : 'image'
+            ];
+        }
+    }
+
+    return $files;
+}
+
+$dashboard_media_message = '';
+$dashboard_media_error = '';
+$dashboard_media_csrf = dbm_csrf();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['dashboard_media_action'])) {
+    if (!dbm_csrf_ok()) {
+        $dashboard_media_error = 'Security token expired. Please refresh the dashboard and try again.';
+    } elseif ($user_role !== 'Admin') {
+        $dashboard_media_error = 'Only an administrator can change the dashboard visual.';
+    } else {
+        $mediaAction = (string)$_POST['dashboard_media_action'];
+
+        if ($mediaAction === 'remove') {
+            foreach (dbm_media_files() as $mediaFile) {
+                @unlink($mediaFile['path']);
+            }
+            $dashboard_media_message = 'Dashboard visual removed. The default placeholder is now shown.';
+        } elseif ($mediaAction === 'upload') {
+            $uploadError = (int)($_FILES['dashboard_media']['error'] ?? UPLOAD_ERR_NO_FILE);
+
+            if (
+                !isset($_FILES['dashboard_media'])
+                || !is_array($_FILES['dashboard_media'])
+                || $uploadError === UPLOAD_ERR_NO_FILE
+            ) {
+                $dashboard_media_error = 'Choose a photo, GIF or animation/video file first.';
+            } elseif ($uploadError !== UPLOAD_ERR_OK) {
+                $dashboard_media_error = 'The selected file could not be uploaded.';
+            } elseif ((int)$_FILES['dashboard_media']['size'] > 25 * 1024 * 1024) {
+                $dashboard_media_error = 'The dashboard visual must be 25 MB or smaller.';
+            } else {
+                $tmp = (string)$_FILES['dashboard_media']['tmp_name'];
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $mime = (string)$finfo->file($tmp);
+
+                $allowed = [
+                    'image/jpeg' => 'jpg',
+                    'image/png'  => 'png',
+                    'image/webp' => 'webp',
+                    'image/gif'  => 'gif',
+                    'video/mp4'  => 'mp4',
+                    'video/webm' => 'webm',
+                ];
+
+                if (!isset($allowed[$mime])) {
+                    $dashboard_media_error = 'Unsupported file type. Use JPG, PNG, WEBP, GIF, MP4 or WEBM.';
+                } else {
+                    $dir = __DIR__ . '/../uploads/admin/';
+
+                    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+                        $dashboard_media_error = 'The admin upload directory could not be created.';
+                    } else {
+                        foreach (dbm_media_files() as $mediaFile) {
+                            @unlink($mediaFile['path']);
+                        }
+
+                        $target = $dir . 'admin_dashboard.' . $allowed[$mime];
+
+                        if (!move_uploaded_file($tmp, $target)) {
+                            $dashboard_media_error = 'The dashboard visual could not be saved.';
+                        } else {
+                            $dashboard_media_message = 'Dashboard visual updated successfully.';
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+$dashboard_media = dbm_media_files();
+$current_dashboard_media = $dashboard_media[0] ?? null;
+
 /* ---------- Helpers ---------- */
 function scalar_query($conn, $sql, $types = '', $params = [], $default = 0) {
     $stmt = @$conn->prepare($sql);
@@ -535,32 +643,103 @@ a{text-decoration:none;color:inherit}
     .side-analytics{display:grid;grid-template-columns:1fr 1fr}
     .four{grid-template-columns:repeat(2,1fr)}
 }
+
+.dashboard-media{width:100%;height:100%;min-height:320px;display:block;object-fit:cover}
+.image-box video.dashboard-media{background:#10151b}
+.visual-admin-panel{
+    position:absolute;
+    left:14px;
+    right:14px;
+    top:14px;
+    display:flex;
+    align-items:center;
+    gap:7px;
+    flex-wrap:wrap;
+    padding:8px;
+    background:rgba(255,255,255,.97);
+    border:1px solid rgba(223,228,233,.96);
+    border-radius:9px;
+    box-shadow:0 8px 24px rgba(31,40,49,.12);
+    z-index:5
+}
+.visual-upload-form,.visual-remove-form{display:flex;align-items:center;gap:6px;margin:0}
+.visual-file-label{
+    position:relative;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    height:34px;
+    padding:0 10px;
+    border:1px solid var(--border);
+    border-radius:7px;
+    background:#fff;
+    color:#4d5a67;
+    font-size:10px;
+    font-weight:800;
+    cursor:pointer;
+    overflow:hidden
+}
+.visual-file-label input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.visual-file-label i{color:var(--blue)}
+.visual-btn{
+    height:34px;
+    border:1px solid var(--blue);
+    border-radius:7px;
+    padding:0 10px;
+    background:var(--blue);
+    color:#fff;
+    font-size:10px;
+    font-weight:800;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    cursor:pointer
+}
+.visual-btn.danger{background:#fff;border-color:#efc1c8;color:var(--red)}
+.dashboard-alert{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    border:1px solid;
+    border-radius:9px;
+    padding:10px 12px;
+    margin-bottom:14px;
+    font-size:11px;
+    font-weight:700
+}
+.dashboard-alert button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:18px;line-height:1}
+.dashboard-alert.success{background:var(--green-soft);border-color:#bce6d2;color:#19764f}
+.dashboard-alert.error{background:var(--red-soft);border-color:#f1c3ca;color:#b43d4e}
+
 @media(max-width:900px){
-    :root{--sidebar:0px}
-    .sidebar{
-        width:250px;transform:translateX(-100%);transition:.22s;
-        box-shadow:15px 0 35px rgba(0,0,0,.22)
-    }
-    .sidebar.open{transform:translateX(0)}
-    .mobile-btn{display:grid;place-items:center}
-    .search-mini{display:none}
-    .content{padding:20px 16px 32px}
-    .topbar{padding:0 16px}
-    .kpis{grid-template-columns:repeat(2,1fr)}
+    .main{margin-left:0!important;width:100%;min-width:0}
+    .content{padding:16px 12px 30px}
+    .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .core{grid-template-columns:1fr}
     .hero{grid-template-columns:1fr}
-    .image-box{border-left:0;border-top:1px solid var(--border)}
+    .hero-info{padding:20px 18px}
+    .hero-info h2{font-size:23px}
+    .image-box{min-height:260px;border-left:0;border-top:1px solid var(--border)}
+    .dashboard-media,.image-box img{min-height:260px}
+    .side-analytics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .four{grid-template-columns:repeat(2,minmax(0,1fr))}
     .lower,.bottom-grid{grid-template-columns:1fr}
+    .chart-body{height:290px}
+    .page-head{flex-direction:column;align-items:flex-start;gap:12px}
+    .head-actions{width:100%}
+    .head-actions .btn{flex:1}
 }
 @media(max-width:560px){
     .kpis,.four,.side-analytics{grid-template-columns:1fr}
-    .page-head{flex-direction:column;align-items:flex-start;gap:12px}
-    .head-actions{width:100%}.head-actions .btn{flex:1}
-    .page-head h1{font-size:23px}
-    .hero-info h2{font-size:23px}
     .hero-stats{grid-template-columns:1fr 1fr}
-    .branch{display:none}
-    .top-right{gap:5px}
+    .hero-info p{font-size:11px}
+    .image-box{min-height:230px}
+    .dashboard-media,.image-box img{min-height:230px}
+    .visual-admin-panel{position:static;margin:10px;border-radius:9px}
+    .visual-upload-form,.visual-remove-form{width:100%}
+    .visual-file-label,.visual-btn{flex:1;justify-content:center}
 }
+
 @media print{
     .sidebar,.topbar,.head-actions{display:none!important}
     .main{margin-left:0}
@@ -603,6 +782,21 @@ a{text-decoration:none;color:inherit}
             <button class="btn primary" onclick="location.reload()"><i class="fas fa-arrows-rotate"></i> Sync Data</button>
         </div>
     </div>
+    <?php if ($dashboard_media_message): ?>
+        <div class="dashboard-alert success">
+            <i class="fas fa-circle-check"></i>
+            <span><?php echo htmlspecialchars($dashboard_media_message); ?></span>
+            <button type="button" onclick="this.parentElement.remove()">Ã—</button>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($dashboard_media_error): ?>
+        <div class="dashboard-alert error">
+            <i class="fas fa-circle-exclamation"></i>
+            <span><?php echo htmlspecialchars($dashboard_media_error); ?></span>
+            <button type="button" onclick="this.parentElement.remove()">Ã—</button>
+        </div>
+    <?php endif; ?>
 
     <div class="kpis">
         <div class="kpi">
@@ -632,7 +826,7 @@ a{text-decoration:none;color:inherit}
         <section class="reference-panel">
             <div class="panel-top">
                 <b>Central POS Intelligence</b>
-                <span><?php echo date('d M Y'); ?> Ã‚Â· Live database view</span>
+                <span><?php echo date('d M Y'); ?> Ãƒâ€šÃ‚Â· Live database view</span>
             </div>
 
             <div class="hero">
@@ -665,29 +859,71 @@ a{text-decoration:none;color:inherit}
                 </div>
 
                 <div class="image-box">
-                    <?php
-                    /* IMAGE SLOT
-                       Put your own admin visual here:
-                       /uploads/admin/admin_dashboard.jpg
-                       From dashboard/admin_dashboard.php the URL is:
-                       ../uploads/admin/admin_dashboard.jpg
-                    */
-                    $admin_image_url = '../uploads/admin/admin_dashboard.jpg';
-                    $admin_image_file = dirname(__DIR__) . '/uploads/admin/admin_dashboard.jpg';
-                    ?>
-                    <?php if (is_file($admin_image_file)): ?>
-                        <img src="<?php echo htmlspecialchars($admin_image_url); ?>" alt="EchoTech POS analytics">
+                    <?php if ($current_dashboard_media && $current_dashboard_media['kind'] === 'video'): ?>
+                        <video
+                            class="dashboard-media"
+                            src="<?php echo htmlspecialchars($current_dashboard_media['url']); ?>"
+                            autoplay
+                            muted
+                            loop
+                            playsinline
+                            controls
+                        ></video>
                         <div class="image-label">
                             <b>POS Command View</b>
-                            <span>Network performance visual</span>
+                            <span>Admin-managed animation</span>
+                        </div>
+                    <?php elseif ($current_dashboard_media && $current_dashboard_media['kind'] === 'image'): ?>
+                        <img
+                            class="dashboard-media"
+                            src="<?php echo htmlspecialchars($current_dashboard_media['url']); ?>"
+                            alt="EchoTech POS dashboard visual"
+                        >
+                        <div class="image-label">
+                            <b>POS Command View</b>
+                            <span>Admin-managed visual</span>
                         </div>
                     <?php else: ?>
                         <div class="image-empty">
                             <div class="image-empty-inner">
                                 <i class="fas fa-image"></i>
                                 <b>ADMIN VISUAL AREA</b>
-                                <span>Add admin_dashboard.jpg to<br>/uploads/admin/</span>
+                                <span>Add a photo, GIF or animation/video from the admin controls.</span>
                             </div>
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if ($user_role === 'Admin'): ?>
+                        <div class="visual-admin-panel">
+                            <form method="post" enctype="multipart/form-data" class="visual-upload-form">
+                                <input type="hidden" name="dashboard_media_action" value="upload">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($dashboard_media_csrf); ?>">
+
+                                <label class="visual-file-label">
+                                    <i class="fas fa-cloud-arrow-up"></i>
+                                    <span><?php echo $current_dashboard_media ? 'Change Visual' : 'Add Visual'; ?></span>
+                                    <input
+                                        type="file"
+                                        name="dashboard_media"
+                                        accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"
+                                        required
+                                    >
+                                </label>
+
+                                <button class="visual-btn" type="submit">
+                                    <i class="fas fa-upload"></i> Save
+                                </button>
+                            </form>
+
+                            <?php if ($current_dashboard_media): ?>
+                                <form method="post" class="visual-remove-form" onsubmit="return confirm('Remove the current dashboard visual?');">
+                                    <input type="hidden" name="dashboard_media_action" value="remove">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($dashboard_media_csrf); ?>">
+                                    <button class="visual-btn danger" type="submit">
+                                        <i class="fas fa-trash"></i> Remove
+                                    </button>
+                                </form>
+                            <?php endif; ?>
                         </div>
                     <?php endif; ?>
                 </div>
