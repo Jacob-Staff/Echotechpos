@@ -649,6 +649,17 @@ if ($userDisplayName === '') {
     $userDisplayName = 'Administrator';
 }
 ?>
+
+<?php
+/* Shared Admin shell variables */
+$pharmacy_name = $pharmacyName;
+$user_role = $userRole;
+$user_display_name = $userDisplayName;
+$branch_count = count($branches);
+$total_orders = $totalOrders;
+$current_admin_page = 'staff_management.php';
+$admin_page_title = 'Staff Management';
+?>
 <!doctype html>
 <html lang="en">
 <head>
@@ -658,79 +669,22 @@ if ($userDisplayName === '') {
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 <style>
+
 :root{
  --c:#202831;--c2:#29343f;--bg:#f4f6f8;--white:#fff;--text:#1e2933;
  --muted:#71808d;--border:#dfe5ea;--blue:#246bfe;--green:#159a68;
  --red:#d94d61;--yellow:#e3a329;--shadow:0 5px 20px rgba(31,40,49,.07);
- --side:250px
+ 
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Inter,Arial,sans-serif}
-.admin-aside{
  position:fixed;left:0;top:0;bottom:0;width:250px;background:#202831;color:#fff;
  border-right:1px solid #161d24;z-index:1000;padding:18px 14px 115px;overflow:auto;
 }
-.admin-aside .admin-brand{height:54px;display:flex;align-items:center;gap:12px;padding:0 9px;margin-bottom:18px;color:#fff;text-decoration:none}
-.admin-aside .admin-brand-mark{width:38px;height:38px;border-radius:10px;background:#246bfe;display:grid;place-items:center}
-.admin-aside .admin-brand-mark i{font-size:17px;color:#fff}
-.admin-aside .admin-brand strong{display:block;font-size:15px;font-weight:800;letter-spacing:.2px}
-.admin-aside .admin-brand small{display:block;color:#aeb8c2;font-size:9px;text-transform:uppercase;letter-spacing:1.2px;margin-top:3px}
-.admin-aside .admin-caption{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:#8f9ba7;font-weight:800;padding:12px 11px 7px}
-.admin-aside .admin-nav{display:flex;flex-direction:column;gap:3px}
-.admin-aside .admin-nav a,.admin-aside .admin-nav .admin-parent{min-height:42px;border-radius:8px;color:#bdc6cf;display:flex;align-items:center;gap:11px;padding:0 12px;font-size:13px;font-weight:600;border:1px solid transparent;text-decoration:none;background:transparent}
-.admin-aside .admin-nav a i,.admin-aside .admin-nav .admin-parent>i:first-child{width:18px;text-align:center;color:#8996a3;font-size:13px}
-.admin-aside .admin-nav a:hover,.admin-aside .admin-nav .admin-parent:hover{background:#2a3541;color:#fff}
-.admin-aside .admin-nav a.active,.admin-aside .admin-nav .admin-parent.active{background:#344253;border-color:#405166;color:#fff;box-shadow:inset 3px 0 #246bfe}
-.admin-aside .admin-nav a.active i,.admin-aside .admin-nav .admin-parent.active>i:first-child{color:#70a0ff}
-.admin-aside .admin-badge{margin-left:auto;background:#465363;color:#e5eaf0;border-radius:12px;padding:3px 7px;font-size:10px}
-.admin-aside .admin-separator{height:1px;background:#3a444e;margin:14px 8px}
-.admin-aside .admin-group{display:flex;flex-direction:column;gap:2px}
-.admin-aside .admin-parent{width:100%;cursor:pointer;text-align:left}
-.admin-aside .admin-parent .admin-chevron{margin-left:auto;width:auto!important;color:#8996a3;font-size:10px;transition:transform .18s ease}
-.admin-aside .admin-parent.open .admin-chevron{transform:rotate(180deg)}
-.admin-aside .admin-subnav{display:flex;flex-direction:column;gap:2px;margin:0 0 3px 29px;padding-left:9px;border-left:1px solid #3a4652}
-.admin-aside .admin-subnav a{min-height:35px;padding:0 10px;font-size:11px;border-radius:7px}
-.admin-aside .admin-subnav a i{font-size:11px;width:15px}
-.admin-aside .admin-subnav a.active{background:#2c3947;border-color:#3b4a5a;box-shadow:inset 2px 0 #246bfe}
-.admin-aside .admin-mini{margin:14px 7px 0;background:#18212a;border:1px solid #35414d;border-radius:9px;padding:12px}
-.admin-aside .admin-mini-title{font-size:11px;font-weight:800;color:#edf1f5;margin-bottom:9px}
-.admin-aside .admin-mini-line{display:flex;justify-content:space-between;color:#a3adb8;font-size:10px;margin:7px 0}
-.admin-aside .admin-mini-line b{color:#f0f3f6}
-.admin-aside .admin-mini-progress{height:4px;background:#303b47;border-radius:4px;overflow:hidden}
-.admin-aside .admin-mini-progress span{display:block;height:100%;border-radius:4px;background:#246bfe}
-.admin-aside .admin-side-user{position:absolute;left:14px;right:14px;bottom:13px;border-top:1px solid #3a444e;padding-top:11px;background:#202831}
-.admin-aside .admin-user{display:flex;align-items:center;gap:9px;padding:9px;background:#18212a;border:1px solid #35414d;border-radius:9px}
-.admin-aside .admin-avatar{width:32px;height:32px;border-radius:50%;background:#3b4857;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff}
-.admin-aside .admin-user-copy{min-width:0;flex:1}
-.admin-aside .admin-user-copy b{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff}
-.admin-aside .admin-user-copy span{display:block;color:#9ba7b3;font-size:9px;margin-top:3px}
-.admin-aside .admin-user i{color:#84909d;font-size:11px}
-.admin-aside .admin-signout{display:flex;align-items:center;gap:9px;color:#f17a8b;text-decoration:none;font-size:11px;font-weight:700;padding:9px}
-@media(max-width:1000px){.admin-aside{transform:translateX(-100%);transition:.2s;box-shadow:15px 0 35px rgba(0,0,0,.22)}.admin-aside.open{transform:none}}
 
-.sidebar{position:fixed;inset:0 auto 0 0;width:var(--side);background:var(--c);color:#fff;
  padding:18px 14px;display:flex;flex-direction:column;z-index:1000}
-.brand{display:flex;gap:10px;align-items:center;color:#fff;text-decoration:none;margin-bottom:20px}
-.brandmark{width:38px;height:38px;border-radius:10px;background:#fff;color:var(--c);
  display:grid;place-items:center;font-size:17px}
-.brand b{display:block;font-size:15px}.brand small{color:#9aa7b3;font-size:12px}
-.side-user{display:flex;gap:10px;align-items:center;background:#151d25;border-radius:10px;padding:10px;margin-bottom:17px}
-.avatar{width:34px;height:34px;border-radius:50%;background:#344250;display:grid;place-items:center;font-weight:800}
-.side-user b{display:block;font-size:13px}.side-user span{display:block;color:#9aa7b3;font-size:11px}
-.cap{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#71808d;margin:8px 9px}
-.nav a{display:flex;align-items:center;gap:10px;color:#aeb9c3;text-decoration:none;padding:10px 11px;border-radius:8px;font-size:13px}
-.nav a:hover,.nav a.active{background:#303c48;color:#fff}
-.nav i{width:18px;text-align:center}
-.logout{margin-top:auto!important;color:#ffb2bd!important}
-.main{margin-left:var(--side);min-height:100vh}
-.hr-sidebar + .main{margin-left:250px}
-@media(max-width:950px){.hr-sidebar + .main{margin-left:0}}
-.top{height:64px;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;
  justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:900}
-.top-title b{display:block;font-size:16px}.top-title span{font-size:12px;color:var(--muted)}
-.top-right{display:flex;align-items:center;gap:9px}
-.search{width:190px;border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:13px;outline:none}
-.branch{font-size:12px;color:var(--muted);padding:7px 10px;border:1px solid var(--border);border-radius:8px}
 .content{padding:24px;max-width:1600px;margin:auto}
 .head{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:18px}
 .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--blue);font-weight:800}
@@ -772,86 +726,17 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 .toastx{position:fixed;right:20px;bottom:20px;background:#202831;color:#fff;padding:13px 16px;border-radius:10px;
  box-shadow:0 12px 30px rgba(0,0,0,.18);z-index:3000;font-size:13px}
 .toastx.err{background:#a83349}
-@media(max-width:1000px){.sidebar{transform:translateX(-100%);transition:.2s}.sidebar.open{transform:none}.main{margin-left:0}.cards{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:650px){.content{padding:14px}.top{padding:0 14px}.search,.branch{display:none}.head{align-items:flex-start;flex-direction:column}.cards{grid-template-columns:1fr 1fr}.actions{width:100%}.actions>*{flex:1}}
+.admin-main{margin-left:var(--sidebar);min-height:100vh}
+.admin-main .content{padding:24px;max-width:1600px;margin:0 auto}
+@media(max-width:900px){.admin-main{margin-left:0}.admin-main .content{padding:14px}}
+@media(max-width:650px){.admin-main .content{padding:14px}.head{align-items:flex-start;flex-direction:column}.actions{width:100%}.actions>*{flex:1}}
+
 </style>
 </head>
 <body>
-
-<aside class="admin-aside" id="adminAside">
-    <a class="admin-brand" href="admin_dashboard.php">
-        <span class="admin-brand-mark"><i class="fa-solid fa-capsules"></i></span>
-        <span><strong><?=eh($pharmacyName)?></strong><small>POS ADMIN CONTROL</small></span>
-    </a>
-
-    <div class="admin-caption">Workspace</div>
-    <nav class="admin-nav">
-        <a class="<?= $currentAdminPage === 'admin_dashboard.php' ? 'active' : '' ?>" href="admin_dashboard.php"><i class="fa-solid fa-chart-pie"></i>Dashboard</a>
-        <a class="active" href="staff_management.php"><i class="fa-solid fa-users"></i>Staff Management</a>
-        <a href="manage_setup.php"><i class="fa-solid fa-sliders"></i>System Setup</a>
-        <?php $payrollNavOpen = in_array($currentAdminPage, ['payroll.php','loans_advances.php'], true); ?>
-        <div class="admin-group">
-            <button type="button" class="admin-parent <?= $payrollNavOpen ? 'open active' : '' ?>" id="payrollNavParent" aria-expanded="<?= $payrollNavOpen ? 'true' : 'false' ?>">
-                <i class="fa-solid fa-file-invoice-dollar"></i><span>Payroll</span><i class="fa-solid fa-chevron-down admin-chevron"></i>
-            </button>
-            <div class="admin-subnav" id="payrollNavSubnav" style="<?= $payrollNavOpen ? '' : 'display:none;' ?>">
-                <a class="<?= $currentAdminPage === 'payroll.php' ? 'active' : '' ?>" href="payroll.php"><i class="fa-solid fa-file-invoice"></i>Payroll Register</a>
-                <a class="<?= $currentAdminPage === 'loans_advances.php' ? 'active' : '' ?>" href="loans_advances.php"><i class="fa-solid fa-hand-holding-dollar"></i>Loans &amp; Advances</a>
-            </div>
-        </div>
-        <a href="sales_report.php"><i class="fa-solid fa-chart-line"></i>Sales Analytics</a>
-        <a href="today_transactions.php"><i class="fa-solid fa-receipt"></i>Transactions <span class="admin-badge"><?=number_format($totalOrders)?></span></a>
-        <a href="online_orders.php"><i class="fa-solid fa-bag-shopping"></i>Online Orders</a>
-        <a href="pharmacy_stock.php"><i class="fa-solid fa-boxes-stacked"></i>Inventory</a>
-        <a href="suppliers.php"><i class="fa-solid fa-truck"></i>Suppliers</a>
-        <a href="customers.php"><i class="fa-solid fa-user-group"></i>Customers</a>
-    </nav>
-
-    <div class="admin-separator"></div>
-    <div class="admin-caption">Network</div>
-    <nav class="admin-nav">
-        <a href="branches.php"><i class="fa-solid fa-store"></i>Branches <span class="admin-badge"><?=count($branches)?></span></a>
-        <a href="purchase_orders.php"><i class="fa-solid fa-file-invoice-dollar"></i>Purchase Orders</a>
-        <a href="audit_logs.php"><i class="fa-solid fa-shield-halved"></i>Audit &amp; Security</a>
-        <a href="settings.php"><i class="fa-solid fa-gear"></i>Configuration</a>
-    </nav>
-
-    <div class="admin-mini">
-        <div class="admin-mini-title">Network Health</div>
-        <div class="admin-mini-line"><span>Database</span><b>Online</b></div>
-        <div class="admin-mini-progress"><span style="width:92%"></span></div>
-        <div class="admin-mini-line"><span>Active branches</span><b><?=count($branches)?></b></div>
-        <div class="admin-mini-progress"><span style="width:78%"></span></div>
-        <div class="admin-mini-line"><span>Sales records</span><b><?=number_format($totalOrders)?></b></div>
-        <div class="admin-mini-progress"><span style="width:66%"></span></div>
-    </div>
-
-    <div class="admin-side-user">
-        <div class="admin-user">
-            <div class="admin-avatar"><?=eh(strtoupper(substr((string)$userDisplayName,0,1)))?></div>
-            <div class="admin-user-copy"><b><?=eh($userDisplayName)?></b><span><?=eh($userRole)?> Â· Administrator</span></div>
-            <i class="fa-solid fa-ellipsis"></i>
-        </div>
-        <a class="admin-signout" href="../logout.php"><i class="fa-solid fa-right-from-bracket"></i>Sign out</a>
-    </div>
-</aside>
-
-<main class="main">
-<header class="top">
-    <div class="top-title">
-        <b><?=eh($pharmacyName)?> â€” Staff &amp; Access Control</b>
-        <span>Accounts, roles, page access and functions</span>
-    </div>
-    <div class="top-right">
-        <input id="globalSearch" class="search" placeholder="Search staff...">
-        <div class="branch">
-            <i class="fa-solid fa-building me-1"></i>
-            <?=count($branches).' branch'.(count($branches)===1?'':'es')?>
-        </div>
-        <button class="btn-smx" type="button" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
-    </div>
-</header>
-
+<?php require __DIR__ . '/actions/admin_aside.php'; ?>
+<div class="admin-main">
+<?php require __DIR__ . '/actions/admin_header.php'; ?>
 <section class="content">
 <div class="head">
     <div>
@@ -982,7 +867,6 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 </section>
 <?php endif; ?>
 </section>
-</main>
 
 <div class="modal fade" id="addStaff" tabindex="-1">
 <div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content">
@@ -1002,7 +886,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <div class="col-12">
     <div class="alert alert-light border mb-0 small">
         <i class="fa-solid fa-circle-info text-primary me-1"></i>
-        Staff salary is managed exclusively from <strong>Payroll Ã¢â€ â€™ Salary Setup</strong>.
+        Staff salary is managed exclusively from <strong>Payroll â†’ Salary Setup</strong>.
         New staff accounts start with a salary of <strong>K0.00</strong> until Payroll sets the salary.
     </div>
 </div>
@@ -1018,12 +902,6 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <script>
 (function(){
 'use strict';
-
-window.toggleSidebar=function(){
- const admin=document.getElementById('adminAside');
- const hr=document.getElementById('sidebar');
- (admin || hr)?.classList.toggle('open');
-};
 
 const payrollParent=document.getElementById('payrollNavParent');
 const payrollSub=document.getElementById('payrollNavSubnav');
@@ -1082,5 +960,9 @@ document.querySelectorAll('.permission-form').forEach(form=>{
 setTimeout(()=>document.getElementById('notice')?.remove(),4500);
 })();
 </script>
+</body>
+</html>
+
+</div>
 </body>
 </html>
