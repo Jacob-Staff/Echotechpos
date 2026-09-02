@@ -255,10 +255,51 @@ a{text-decoration:none;color:inherit}
         </div>
         <?php endif; ?>
 
-        <a href="sales_report.php"><i class="fas fa-chart-line"></i>Sales Analytics</a>
-        <a href="today_transactions.php"><i class="fas fa-receipt"></i>Transactions <span class="nav-badge"><?php echo (int)$total_orders; ?></span></a>
+        <?php
+            /*
+             * Admin reporting navigation.
+             * These pages are pharmacy-wide reports with optional
+             * branch filters, so keep them grouped under Reports.
+             */
+            $reportsNavOpen = in_array($current_admin_page, [
+                'sales_report.php',
+                'today_transactions.php',
+                'pharmacy_stock.php'
+            ], true);
+        ?>
+        <div class="nav-group">
+            <button type="button"
+                    class="nav-parent <?= $reportsNavOpen ? 'open active' : '' ?>"
+                    id="reportsNavParent"
+                    aria-expanded="<?= $reportsNavOpen ? 'true' : 'false' ?>">
+                <i class="fas fa-chart-column"></i>
+                <span>Reports</span>
+                <i class="fas fa-chevron-down nav-chevron"></i>
+            </button>
+
+            <div class="nav-subnav"
+                 id="reportsNavSubnav"
+                 style="<?= $reportsNavOpen ? '' : 'display:none;' ?>">
+
+                <a class="<?= $current_admin_page === 'sales_report.php' ? 'active' : '' ?>"
+                   href="sales_report.php">
+                    <i class="fas fa-chart-line"></i>Sales Report
+                </a>
+
+                <a class="<?= $current_admin_page === 'today_transactions.php' ? 'active' : '' ?>"
+                   href="today_transactions.php">
+                    <i class="fas fa-receipt"></i>Transactions
+                    <span class="nav-badge"><?php echo (int)$total_orders; ?></span>
+                </a>
+
+                <a class="<?= $current_admin_page === 'pharmacy_stock.php' ? 'active' : '' ?>"
+                   href="pharmacy_stock.php">
+                    <i class="fas fa-boxes-stacked"></i>Stock Report
+                </a>
+            </div>
+        </div>
+
         <a href="online_orders.php"><i class="fas fa-bag-shopping"></i>Online Orders</a>
-        <a href="pharmacy_stock.php"><i class="fas fa-boxes-stacked"></i>Inventory</a>
         <a href="suppliers.php"><i class="fas fa-truck"></i>Suppliers</a>
         <a href="customers.php"><i class="fas fa-user-group"></i>Customers</a>
     </nav>
@@ -314,5 +355,6 @@ a{text-decoration:none;color:inherit}
 
     setupNavGroup('payrollNavParent','payrollNavSubnav');
     setupNavGroup('complianceNavParent','complianceNavSubnav');
+    setupNavGroup('reportsNavParent','reportsNavSubnav');
 })();
 </script>
