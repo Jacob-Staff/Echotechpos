@@ -46,9 +46,30 @@ button{cursor:pointer}
 a{text-decoration:none;color:inherit}
 .admin-aside{
     position:fixed;left:0;top:0;bottom:0;width:var(--sidebar);
+    height:100vh;height:100dvh;
     background:var(--charcoal);border-right:1px solid #161d24;
-    z-index:1000;padding:18px 14px 115px;overflow:auto;
+    z-index:1000;
+    padding:18px 14px 0;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
 }
+.admin-aside-scroll{
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    overflow-x:hidden;
+    padding-right:2px;
+    scrollbar-width:thin;
+    scrollbar-color:#465363 transparent;
+}
+.admin-aside-scroll::-webkit-scrollbar{width:6px}
+.admin-aside-scroll::-webkit-scrollbar-track{background:transparent}
+.admin-aside-scroll::-webkit-scrollbar-thumb{
+    background:#465363;border-radius:8px
+}
+.admin-aside-scroll::-webkit-scrollbar-thumb:hover{background:#5a6878}
+
 .admin-aside .brand{
     height:54px;display:flex;align-items:center;gap:12px;
     padding:0 9px;margin-bottom:18px;color:#fff;
@@ -95,11 +116,18 @@ a{text-decoration:none;color:inherit}
 .admin-aside .mini-progress{height:4px;background:#303b47;border-radius:4px;overflow:hidden}
 .admin-aside .mini-progress span{display:block;height:100%;border-radius:4px;background:var(--blue)}
 .admin-aside .side-user{
-    position:absolute;left:14px;right:14px;bottom:13px;
-    border-top:1px solid #3a444e;padding-top:11px;background:var(--charcoal)
+    position:relative;
+    flex:0 0 auto;
+    left:auto;right:auto;bottom:auto;
+    border-top:1px solid #3a444e;
+    padding:11px 0 12px;
+    margin-top:10px;
+    background:var(--charcoal);
+    z-index:5;
 }
 .admin-aside .user{
     display:flex;align-items:center;gap:9px;padding:9px;
+    min-width:0;
     background:#18212a;border:1px solid #35414d;border-radius:9px
 }
 .admin-aside .avatar{
@@ -115,7 +143,12 @@ a{text-decoration:none;color:inherit}
 .admin-aside .user i{color:#84909d;font-size:11px}
 .admin-aside .side-user .nav-link{
     display:flex;align-items:center;gap:9px;color:#f17a8b;
-    font-size:11px;font-weight:700;padding:9px
+    font-size:11px;font-weight:700;padding:9px 10px;
+    border-radius:7px;
+    margin-top:3px;
+}
+.admin-aside .side-user .nav-link:hover{
+    background:#2a3541;color:#ff9aaa;
 }
 .admin-aside .nav-group{display:flex;flex-direction:column;gap:2px}
 .admin-aside .nav-parent{width:100%;border:1px solid transparent;background:transparent;font:inherit;text-align:left;cursor:pointer}
@@ -131,6 +164,8 @@ a{text-decoration:none;color:inherit}
         box-shadow:15px 0 35px rgba(0,0,0,.22)
     }
     .admin-aside.open{transform:translateX(0)}
+    .admin-aside-scroll{padding-bottom:4px}
+    .admin-aside .side-user{padding-bottom:14px}
 }
 
 </style>
@@ -144,6 +179,7 @@ a{text-decoration:none;color:inherit}
         </span>
     </a>
 
+    <div class="admin-aside-scroll">
     <div class="side-caption">Workspace</div>
     <nav class="nav">
         <a class="<?= $current_admin_page === 'admin_dashboard.php' ? 'active' : '' ?>" href="admin_dashboard.php"><i class="fas fa-chart-pie"></i>Dashboard</a>
@@ -244,6 +280,7 @@ a{text-decoration:none;color:inherit}
         <div class="mini-progress"><span style="width:78%"></span></div>
         <div class="mini-line"><span>Sales records</span><b><?php echo number_format((int)$total_orders); ?></b></div>
         <div class="mini-progress"><span style="width:66%"></span></div>
+    </div>
     </div>
 
     <div class="side-user">
