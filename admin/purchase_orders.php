@@ -1,56 +1,55 @@
 <?php
-/* Admin page DB bootstrap: uses the project's existing connection file. */
-if (session_status() !== PHP_SESSION_ACTIVE) { session_start(); }
+/**
+ * EchoTech POS - Admin page bootstrap
+ * Uses the SAME authentication and database connection as the Admin Dashboard.
+ */
 
-$__admin_db_candidates = [
-    __DIR__ . '/../config/db.php',
-    __DIR__ . '/../config/database.php',
-    __DIR__ . '/../includes/db.php',
-    __DIR__ . '/../includes/database.php',
-    __DIR__ . '/../db.php',
-];
-foreach ($__admin_db_candidates as $__f) {
-    if (is_file($__f)) { require_once $__f; break; }
-}
-unset($__f, $__admin_db_candidates);
+require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/conn.php';
 
-$adminDb = null;
-foreach (['conn','mysqli','db'] as $__v) {
-    if (isset($$__v) && $$__v instanceof mysqli) { $adminDb = $$__v; break; }
-}
-if (!$adminDb && function_exists('get_db_connection')) {
-    $adminDb = get_db_connection();
-}
-if (!$adminDb && function_exists('db_connect')) {
-    $adminDb = db_connect();
-}
-if (!$adminDb || !($adminDb instanceof mysqli)) {
-    http_response_code(500);
-    die('Database connection was not found. Keep the existing POS database connection file in config/ or includes/.');
-}
-$adminDb->set_charset('utf8mb4');
+require_admin();
 
-$adminPharmacyId = 0;
-foreach (['pharmacy_id','admin_pharmacy_id'] as $__k) {
-    if (!empty($_SESSION[$__k])) { $adminPharmacyId = (int)$_SESSION[$__k]; break; }
-}
-if (!$adminPharmacyId && isset($_SESSION['user']) && is_array($_SESSION['user'])) {
-    $adminPharmacyId = (int)($_SESSION['user']['pharmacy_id'] ?? 0);
-}
-if (!$adminPharmacyId && isset($_SESSION['admin']) && is_array($_SESSION['admin'])) {
-    $adminPharmacyId = (int)($_SESSION['admin']['pharmacy_id'] ?? 0);
-}
-if (!$adminPharmacyId && isset($_SESSION['logged_in_user']) && is_array($_SESSION['logged_in_user'])) {
-    $adminPharmacyId = (int)($_SESSION['logged_in_user']['pharmacy_id'] ?? 0);
-}
-if (!$adminPharmacyId && isset($_SESSION['user_id'])) {
-    $uid=(int)$_SESSION['user_id'];
-    $st=$adminDb->prepare('SELECT pharmacy_id FROM users WHERE id=? LIMIT 1');
-    if($st){$st->bind_param('i',$uid);$st->execute();$r=$st->get_result()->fetch_assoc();$adminPharmacyId=(int)($r['pharmacy_id']??0);$st->close();}
-}
+$adminDb = $conn;
+$adminPharmacyId = (int) (current_pharmacy() ?? 0);
+
 if ($adminPharmacyId <= 0) {
-    http_response_code(403);
-    die('Admin pharmacy context was not found in the current session.');
+    header('Location: ../index.php?error=session_expired');
+    exit;
+}
+
+$user_role = current_role() ?? 'Admin';
+$user_display_name = current_user();
+
+$pharmacy_name = 'EchoTech POS';
+$stmt = $conn->prepare('SELECT name FROM pharmacies WHERE id = ? LIMIT 1');
+if ($stmt) {
+    $stmt->bind_param('i', $adminPharmacyId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    if ($row && !empty($row['name'])) {
+        $pharmacy_name = $row['name'];
+    }
+    $stmt->close();
+}
+
+$branch_count = 0;
+$stmt = $conn->prepare('SELECT COUNT(*) AS c FROM branches WHERE pharmacy_id = ?');
+if ($stmt) {
+    $stmt->bind_param('i', $adminPharmacyId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $branch_count = (int) ($row['c'] ?? 0);
+    $stmt->close();
+}
+
+$total_orders = 0;
+$stmt = $conn->prepare('SELECT COUNT(*) AS c FROM sales WHERE pharmacy_id = ?');
+if ($stmt) {
+    $stmt->bind_param('i', $adminPharmacyId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $total_orders = (int) ($row['c'] ?? 0);
+    $stmt->close();
 }
 
 function admin_h($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
@@ -109,13 +108,13 @@ require_once __DIR__.'/actions/admin_aside.php';
 </style>
 <div class="top"><div><h1>Purchase Orders</h1><p>Group-wide supplier purchasing and stock receiving.</p></div></div>
 <?php if($notice):?><div class="toast ok"><?=admin_h($notice)?></div><?php endif;?><?php if($error):?><div class="toast err"><?=admin_h($error)?></div><?php endif;?>
-<div class="grid"><div class="card"><div class="head"><h2>Create Purchase Order</h2></div><div class="body"><form method="post" id="poForm"><input type="hidden" name="csrf" value="<?=admin_h($csrf)?>"><input type="hidden" name="action" value="create_po"><div class="formgrid"><div class="field"><label>Supplier *</label><select name="supplier_id" required><option value="">Select supplier</option><?php foreach($suppliers as $s):?><option value="<?=$s['id']?>"><?=admin_h($s['name'])?></option><?php endforeach;?></select></div><div class="field"><label>Branch *</label><select name="branch_id" id="branch" required><option value="">Select branch</option><?php foreach($branches as $b):?><option value="<?=$b['id']?>"><?=admin_h($b['branch_name'])?></option><?php endforeach;?></select></div><div class="field"><label>Expected Date</label><input type="date" name="expected_date"></div><div class="field full"><label>Notes</label><textarea name="notes" placeholder="Optional notes"></textarea></div></div><div style="margin:18px 0 8px;font-weight:800">Order Items</div><div id="items"></div><button type="button" class="btn light" onclick="addItem()">＋ Add Item</button><div class="total">Total: <span id="grand">K0.00</span></div><div style="margin-top:15px"><button class="btn primary">Create Purchase Order</button></div></form></div></div>
+<div class="grid"><div class="card"><div class="head"><h2>Create Purchase Order</h2></div><div class="body"><form method="post" id="poForm"><input type="hidden" name="csrf" value="<?=admin_h($csrf)?>"><input type="hidden" name="action" value="create_po"><div class="formgrid"><div class="field"><label>Supplier *</label><select name="supplier_id" required><option value="">Select supplier</option><?php foreach($suppliers as $s):?><option value="<?=$s['id']?>"><?=admin_h($s['name'])?></option><?php endforeach;?></select></div><div class="field"><label>Branch *</label><select name="branch_id" id="branch" required><option value="">Select branch</option><?php foreach($branches as $b):?><option value="<?=$b['id']?>"><?=admin_h($b['branch_name'])?></option><?php endforeach;?></select></div><div class="field"><label>Expected Date</label><input type="date" name="expected_date"></div><div class="field full"><label>Notes</label><textarea name="notes" placeholder="Optional notes"></textarea></div></div><div style="margin:18px 0 8px;font-weight:800">Order Items</div><div id="items"></div><button type="button" class="btn light" onclick="addItem()">ï¼‹ Add Item</button><div class="total">Total: <span id="grand">K0.00</span></div><div style="margin-top:15px"><button class="btn primary">Create Purchase Order</button></div></form></div></div>
 <div class="card"><div class="head"><h2>Quick Status</h2></div><div class="body"><p style="margin:0 0 10px;color:#718096;font-size:13px">Use the register below to view, cancel, or receive orders. Receiving updates the corresponding branch stock.</p><div class="detail-grid"><div class="detail"><small>Orders</small><strong><?=count($orders)?></strong></div><div class="detail"><small>Ordered Value</small><strong><?=admin_money(array_sum(array_column($orders,'total_cost')))?></strong></div></div></div></div></div>
 <div class="card"><div class="head"><h2>Purchase Order Register</h2><span style="font-size:12px;color:#788495"><?=count($orders)?> result(s)</span></div><form class="filters" method="get"><input name="q" value="<?=admin_h($search)?>" placeholder="PO number or supplier"><select name="supplier_id"><option value="0">All suppliers</option><?php foreach($suppliers as $s):?><option value="<?=$s['id']?>" <?=($supplierFilter===$s['id'])?'selected':''?>><?=admin_h($s['name'])?></option><?php endforeach;?></select><select name="branch_id"><option value="0">All branches</option><?php foreach($branches as $b):?><option value="<?=$b['id']?>" <?=($branchFilter===$b['id'])?'selected':''?>><?=admin_h($b['branch_name'])?></option><?php endforeach;?></select><select name="status"><option value="">All statuses</option><?php foreach(['draft','ordered','partial','received','cancelled'] as $st):?><option value="<?=$st?>" <?=($statusFilter===$st)?'selected':''?>><?=ucfirst($st)?></option><?php endforeach;?></select><button class="btn primary">Filter</button><a class="btn light" href="purchase_orders.php">Reset</a></form><div class="table-wrap"><table class="table"><thead><tr><th>PO</th><th>Supplier</th><th>Branch</th><th>Date</th><th>Status</th><th>Units</th><th>Total</th><th>Actions</th></tr></thead><tbody><?php if(!$orders):?><tr><td colspan="8" class="empty">No purchase orders found.</td></tr><?php else:foreach($orders as $o):?><tr><td><strong><?=admin_h($o['po_number']?:('#'.$o['id']))?></strong><div style="font-size:11px;color:#788495">by <?=admin_h($o['created_name']?:'Unknown')?></div></td><td><?=admin_h($o['supplier_name'])?></td><td><?=admin_h($o['branch_name'])?></td><td><?=admin_h(date('d M Y H:i',strtotime($o['po_date'])))?></td><td><span class="badge <?=admin_h($o['status'])?>"><?=ucfirst($o['status'])?></span></td><td><?=$o['received_units']?> / <?=$o['ordered_units']?></td><td><?=admin_money($o['total_cost'])?></td><td><div style="display:flex;gap:6px;flex-wrap:wrap"><a class="btn light" href="?view=<?=$o['id']?>">View</a><?php if(in_array($o['status'],['ordered','partial'],true)):?><form method="post"><input type="hidden" name="csrf" value="<?=admin_h($csrf)?>"><input type="hidden" name="action" value="receive_po"><input type="hidden" name="id" value="<?=$o['id']?>"><button class="btn primary" onclick="return confirm('Receive all outstanding quantities for this purchase order? Stock will be increased.')">Receive</button></form><form method="post"><input type="hidden" name="csrf" value="<?=admin_h($csrf)?>"><input type="hidden" name="action" value="cancel_po"><input type="hidden" name="id" value="<?=$o['id']?>"><button class="btn danger" onclick="return confirm('Cancel this purchase order?')">Cancel</button></form><?php endif;?></div></td></tr><?php endforeach;endif;?></tbody></table></div></div>
-<?php if($view):?><div class="card"><div class="head"><h2><?=admin_h($view['po_number']?:('#'.$view['id']))?></h2><a class="btn light" href="purchase_orders.php">Close</a></div><div class="body"><div class="detail-grid"><div class="detail"><small>Supplier</small><strong><?=admin_h($view['supplier_name'])?></strong><small><?=admin_h($view['supplier_phone']?:'')?></small></div><div class="detail"><small>Branch</small><strong><?=admin_h($view['branch_name'])?></strong></div><div class="detail"><small>Status</small><strong><?=ucfirst($view['status'])?></strong></div><div class="detail"><small>Total</small><strong><?=admin_money($view['total_cost'])?></strong></div></div><div class="table-wrap" style="margin-top:18px"><table class="table" style="min-width:700px"><thead><tr><th>Product</th><th>Barcode</th><th>Ordered</th><th>Received</th><th>Unit Cost</th><th>Line Total</th><th>Expiry</th><th>Batch</th></tr></thead><tbody><?php foreach($viewItems as $it):?><tr><td><?=admin_h($it['item_name'])?></td><td><?=admin_h($it['barcode']?:'—')?></td><td><?=$it['quantity']?></td><td><?=$it['qty_received']?></td><td><?=admin_money($it['unit_price'])?></td><td><?=admin_money($it['unit_price']*$it['quantity'])?></td><td><?=admin_h($it['expiry_date']?:'—')?></td><td><?=admin_h($it['batch_no']?:'—')?></td></tr><?php endforeach;?></tbody></table></div></div></div><?php endif;?>
+<?php if($view):?><div class="card"><div class="head"><h2><?=admin_h($view['po_number']?:('#'.$view['id']))?></h2><a class="btn light" href="purchase_orders.php">Close</a></div><div class="body"><div class="detail-grid"><div class="detail"><small>Supplier</small><strong><?=admin_h($view['supplier_name'])?></strong><small><?=admin_h($view['supplier_phone']?:'')?></small></div><div class="detail"><small>Branch</small><strong><?=admin_h($view['branch_name'])?></strong></div><div class="detail"><small>Status</small><strong><?=ucfirst($view['status'])?></strong></div><div class="detail"><small>Total</small><strong><?=admin_money($view['total_cost'])?></strong></div></div><div class="table-wrap" style="margin-top:18px"><table class="table" style="min-width:700px"><thead><tr><th>Product</th><th>Barcode</th><th>Ordered</th><th>Received</th><th>Unit Cost</th><th>Line Total</th><th>Expiry</th><th>Batch</th></tr></thead><tbody><?php foreach($viewItems as $it):?><tr><td><?=admin_h($it['item_name'])?></td><td><?=admin_h($it['barcode']?:'â€”')?></td><td><?=$it['quantity']?></td><td><?=$it['qty_received']?></td><td><?=admin_money($it['unit_price'])?></td><td><?=admin_money($it['unit_price']*$it['quantity'])?></td><td><?=admin_h($it['expiry_date']?:'â€”')?></td><td><?=admin_h($it['batch_no']?:'â€”')?></td></tr><?php endforeach;?></tbody></table></div></div></div><?php endif;?>
 <script>
 const products=<?=json_encode($products,JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_AMP|JSON_HEX_QUOT)?>;let row=0;
-function addItem(){const wrap=document.getElementById('items'),el=document.createElement('div');el.className='item-row';el.dataset.row=row++;let opts='<option value="">Select product</option>';products.forEach(p=>opts+=`<option value="${p.id}" data-cost="${Number(p.cost||0)}">${esc(p.item_name)}${p.barcode?' — '+esc(p.barcode):''}</option>`);el.innerHTML=`<select name="product_id[]" required onchange="calc()">${opts}</select><input type="number" name="quantity[]" min="1" value="1" required oninput="calc()"><input type="number" name="unit_price[]" min="0" step="0.01" value="0.00" required oninput="calc()"><button type="button" class="remove" onclick="this.parentElement.remove();calc()">×</button>`;wrap.appendChild(el);calc()}
+function addItem(){const wrap=document.getElementById('items'),el=document.createElement('div');el.className='item-row';el.dataset.row=row++;let opts='<option value="">Select product</option>';products.forEach(p=>opts+=`<option value="${p.id}" data-cost="${Number(p.cost||0)}">${esc(p.item_name)}${p.barcode?' â€” '+esc(p.barcode):''}</option>`);el.innerHTML=`<select name="product_id[]" required onchange="calc()">${opts}</select><input type="number" name="quantity[]" min="1" value="1" required oninput="calc()"><input type="number" name="unit_price[]" min="0" step="0.01" value="0.00" required oninput="calc()"><button type="button" class="remove" onclick="this.parentElement.remove();calc()">Ã—</button>`;wrap.appendChild(el);calc()}
 function calc(){let total=0;document.querySelectorAll('#items .item-row').forEach(r=>{let q=Number(r.querySelector('[name="quantity[]"]').value||0),p=Number(r.querySelector('[name="unit_price[]"]').value||0);total+=q*p});document.getElementById('grand').textContent='K'+total.toFixed(2)}
 function esc(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 addItem();
