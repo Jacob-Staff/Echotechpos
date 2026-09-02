@@ -299,18 +299,69 @@ a{text-decoration:none;color:inherit}
             </div>
         </div>
 
-        <a href="online_orders.php"><i class="fas fa-bag-shopping"></i>Online Orders</a>
-        <a href="suppliers.php"><i class="fas fa-truck"></i>Suppliers</a>
-        <a href="customers.php"><i class="fas fa-user-group"></i>Customers</a>
+        <?php
+            /*
+             * Operations navigation.
+             * These pages manage the group's commercial records:
+             * online orders, suppliers, customers and purchase orders.
+             */
+            $operationsNavOpen = in_array($current_admin_page, [
+                'online_orders.php',
+                'suppliers.php',
+                'customers.php',
+                'purchase_orders.php'
+            ], true);
+        ?>
+        <div class="nav-group">
+            <button type="button"
+                    class="nav-parent <?= $operationsNavOpen ? 'open active' : '' ?>"
+                    id="operationsNavParent"
+                    aria-expanded="<?= $operationsNavOpen ? 'true' : 'false' ?>">
+                <i class="fas fa-layer-group"></i>
+                <span>Operations</span>
+                <i class="fas fa-chevron-down nav-chevron"></i>
+            </button>
+
+            <div class="nav-subnav"
+                 id="operationsNavSubnav"
+                 style="<?= $operationsNavOpen ? '' : 'display:none;' ?>">
+
+                <a class="<?= $current_admin_page === 'online_orders.php' ? 'active' : '' ?>"
+                   href="online_orders.php">
+                    <i class="fas fa-bag-shopping"></i>Online Orders
+                </a>
+
+                <a class="<?= $current_admin_page === 'suppliers.php' ? 'active' : '' ?>"
+                   href="suppliers.php">
+                    <i class="fas fa-truck"></i>Suppliers
+                </a>
+
+                <a class="<?= $current_admin_page === 'purchase_orders.php' ? 'active' : '' ?>"
+                   href="purchase_orders.php">
+                    <i class="fas fa-file-invoice-dollar"></i>Purchase Orders
+                </a>
+
+                <a class="<?= $current_admin_page === 'customers.php' ? 'active' : '' ?>"
+                   href="customers.php">
+                    <i class="fas fa-user-group"></i>Customers
+                </a>
+            </div>
+        </div>
     </nav>
 
     <div class="separator"></div>
     <div class="side-caption">Network</div>
     <nav class="nav">
-        <a href="branches.php"><i class="fas fa-store"></i>Branches <span class="nav-badge"><?php echo (int)$branch_count; ?></span></a>
-        <a href="purchase_orders.php"><i class="fas fa-file-invoice-dollar"></i>Purchase Orders</a>
-        <a href="audit_logs.php"><i class="fas fa-shield-halved"></i>Audit &amp; Security</a>
-        <a href="settings.php"><i class="fas fa-gear"></i>Configuration</a>
+        <a class="<?= $current_admin_page === 'branches.php' ? 'active' : '' ?>" href="branches.php">
+            <i class="fas fa-store"></i>Branches
+            <span class="nav-badge"><?php echo (int)$branch_count; ?></span>
+        </a>
+        <a class="<?= $current_admin_page === 'audit_logs.php' ? 'active' : '' ?>" href="audit_logs.php">
+            <i class="fas fa-shield-halved"></i>Audit &amp; Security
+        </a>
+        <a class="<?= $current_admin_page === 'settings.php' ? 'active' : '' ?>" href="settings.php">
+            <i class="fas fa-gear"></i>Configuration
+        </a>
     </nav>
 
     <div class="sidebar-mini">
@@ -356,5 +407,6 @@ a{text-decoration:none;color:inherit}
     setupNavGroup('payrollNavParent','payrollNavSubnav');
     setupNavGroup('complianceNavParent','complianceNavSubnav');
     setupNavGroup('reportsNavParent','reportsNavSubnav');
+    setupNavGroup('operationsNavParent','operationsNavSubnav');
 })();
 </script>
