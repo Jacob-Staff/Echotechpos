@@ -14,15 +14,100 @@ if ($pharmacy_id <= 0) {
     exit();
 }
 
-/* ---------- Admin-managed dashboard visual ---------- */
-function dashboard_media_path(): string
+/* ---------- Persistent admin-managed dashboard visual ----------
+ * Dashboard media is stored in the database, not inside the deployed app
+ * filesystem. This keeps each pharmacy's image/GIF/video intact when the
+ * application is redeployed from GitHub/Render.
+ */
+function dashboard_media_ensure_table(mysqli $db): void
 {
-    return dirname(__DIR__) . '/uploads/admin/';
+    $sql = "CREATE TABLE IF NOT EXISTS admin_dashboard_media (
+        pharmacy_id INT NOT NULL PRIMARY KEY,
+        mime_type VARCHAR(100) NOT NULL,
+        original_name VARCHAR(255) NOT NULL,
+        file_size BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        media_data LONGBLOB NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    if (!$db->query($sql)) {
+        throw new RuntimeException('Dashboard media storage could not be initialized.');
+    }
 }
 
-function dashboard_media_current(): ?string
+function dashboard_media_fetch(mysqli $db, int $pharmacyId): ?array
 {
-    $dir = dashboard_media_path();
+    $stmt = $db->prepare(
+        "SELECT mime_type, original_name, file_size, media_data, updated_at
+         FROM admin_dashboard_media
+         WHERE pharmacy_id = ?
+         LIMIT 1"
+    );
+    if (!$stmt) return null;
+
+    $stmt->bind_param('i', $pharmacyId);
+    if (!$stmt->execute()) {
+        $stmt->close();
+        return null;
+    }
+
+    $result = $stmt->get_result();
+    $row = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+
+    return $row ?: null;
+}
+
+function dashboard_media_save(mysqli $db, int $pharmacyId, string $mime, string $originalName, int $fileSize, string $data): void
+{
+    $stmt = $db->prepare(
+        "INSERT INTO admin_dashboard_media
+            (pharmacy_id, mime_type, original_name, file_size, media_data)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+            mime_type = VALUES(mime_type),
+            original_name = VALUES(original_name),
+            file_size = VALUES(file_size),
+            media_data = VALUES(media_data),
+            updated_at = CURRENT_TIMESTAMP"
+    );
+
+    if (!$stmt) {
+        throw new RuntimeException('Dashboard media could not be prepared for storage.');
+    }
+
+    $blob = null;
+    $stmt->bind_param('issib', $pharmacyId, $mime, $originalName, $fileSize, $blob);
+    $stmt->send_long_data(4, $data);
+
+    if (!$stmt->execute()) {
+        $error = $stmt->error;
+        $stmt->close();
+        throw new RuntimeException('Dashboard media could not be saved: ' . $error);
+    }
+
+    $stmt->close();
+}
+
+function dashboard_media_delete(mysqli $db, int $pharmacyId): void
+{
+    $stmt = $db->prepare("DELETE FROM admin_dashboard_media WHERE pharmacy_id = ?");
+    if (!$stmt) {
+        throw new RuntimeException('Dashboard media removal could not be prepared.');
+    }
+
+    $stmt->bind_param('i', $pharmacyId);
+    if (!$stmt->execute()) {
+        $error = $stmt->error;
+        $stmt->close();
+        throw new RuntimeException('Dashboard media could not be removed: ' . $error);
+    }
+    $stmt->close();
+}
+
+function dashboard_media_legacy_file(): ?string
+{
+    $dir = dirname(__DIR__) . '/uploads/admin/';
     $files = glob($dir . 'admin_dashboard.*') ?: [];
     $allowed = ['jpg','jpeg','png','webp','gif','mp4','webm'];
 
@@ -32,40 +117,93 @@ function dashboard_media_current(): ?string
             return $file;
         }
     }
-
     return null;
 }
 
-function dashboard_media_extension_for_mime(string $mime): ?string
+function dashboard_media_mime_from_extension(string $extension): ?string
 {
     return [
-        'image/jpeg' => 'jpg',
-        'image/png'  => 'png',
-        'image/webp' => 'webp',
-        'image/gif'  => 'gif',
-        'video/mp4'  => 'mp4',
-        'video/webm' => 'webm',
-    ][$mime] ?? null;
+        'jpg'  => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'png'  => 'image/png',
+        'webp' => 'image/webp',
+        'gif'  => 'image/gif',
+        'mp4'  => 'video/mp4',
+        'webm' => 'video/webm',
+    ][$extension] ?? null;
 }
 
-function dashboard_media_delete_existing(): void
+function dashboard_media_migrate_legacy(mysqli $db, int $pharmacyId): void
 {
-    $dir = dashboard_media_path();
-    $files = glob($dir . 'admin_dashboard.*') ?: [];
-    $allowed = ['jpg','jpeg','png','webp','gif','mp4','webm'];
+    if (dashboard_media_fetch($db, $pharmacyId) !== null) return;
 
-    foreach ($files as $file) {
-        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-        if (in_array($ext, $allowed, true) && is_file($file)) {
-            @unlink($file);
+    $legacy = dashboard_media_legacy_file();
+    if (!$legacy) return;
+
+    $extension = strtolower(pathinfo($legacy, PATHINFO_EXTENSION));
+    $mime = dashboard_media_mime_from_extension($extension);
+    if ($mime === null) return;
+
+    $data = @file_get_contents($legacy);
+    if ($data === false || $data === '') return;
+
+    dashboard_media_save(
+        $db,
+        $pharmacyId,
+        $mime,
+        basename($legacy),
+        (int)filesize($legacy),
+        $data
+    );
+}
+
+try {
+    dashboard_media_ensure_table($conn);
+    dashboard_media_migrate_legacy($conn, $pharmacy_id);
+} catch (Throwable $e) {
+    $mediaStorageError = $e->getMessage();
+}
+
+/* ---------- Media stream endpoint ---------- */
+if (isset($_GET['dashboard_media']) && $_GET['dashboard_media'] === '1') {
+    try {
+        dashboard_media_ensure_table($conn);
+        $media = dashboard_media_fetch($conn, $pharmacy_id);
+
+        if (!$media || empty($media['media_data']) || empty($media['mime_type'])) {
+            http_response_code(404);
+            exit();
         }
+
+        $mime = (string)$media['mime_type'];
+        $size = (int)$media['file_size'];
+        $updated = strtotime((string)($media['updated_at'] ?? '')) ?: time();
+
+        header('Content-Type: ' . $mime);
+        if ($size > 0) header('Content-Length: ' . $size);
+        header('Content-Disposition: inline; filename="' . basename((string)$media['original_name']) . '"');
+        header('Cache-Control: private, max-age=86400, must-revalidate');
+        header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $updated) . ' GMT');
+        echo $media['media_data'];
+        exit();
+    } catch (Throwable $e) {
+        http_response_code(500);
+        exit();
     }
 }
 
+/* ---------- Upload / remove ---------- */
+$mediaError = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['dashboard_media_action'])) {
     $mediaAction = (string)$_POST['dashboard_media_action'];
 
     try {
+        if ($user_role !== 'Admin') {
+            throw new RuntimeException('Only an administrator can change the dashboard visual.');
+        }
+
+        dashboard_media_ensure_table($conn);
+
         if ($mediaAction === 'upload') {
             if (
                 !isset($_FILES['dashboard_media']) ||
@@ -89,30 +227,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['dashboard_media_actio
 
             $finfo = new finfo(FILEINFO_MIME_TYPE);
             $mime = (string)$finfo->file($tmp);
-            $extension = dashboard_media_extension_for_mime($mime);
+            $allowedMime = [
+                'image/jpeg',
+                'image/png',
+                'image/webp',
+                'image/gif',
+                'video/mp4',
+                'video/webm',
+            ];
 
-            if ($extension === null) {
+            if (!in_array($mime, $allowedMime, true)) {
                 throw new RuntimeException('Unsupported file type. Use JPG, PNG, WebP, GIF, MP4 or WebM.');
             }
 
-            $uploadDir = dashboard_media_path();
-            if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
-                throw new RuntimeException('The dashboard upload directory could not be created.');
+            $data = file_get_contents($tmp);
+            if ($data === false || $data === '') {
+                throw new RuntimeException('The dashboard media could not be read.');
             }
 
-            dashboard_media_delete_existing();
-
-            $destination = $uploadDir . 'admin_dashboard.' . $extension;
-            if (!move_uploaded_file($tmp, $destination)) {
-                throw new RuntimeException('The dashboard media could not be saved.');
-            }
+            $originalName = preg_replace('/[^A-Za-z0-9._ -]/', '_', basename((string)$upload['name'])) ?: 'dashboard-media';
+            dashboard_media_save($conn, $pharmacy_id, $mime, $originalName, (int)$upload['size'], $data);
 
             header('Location: admin_dashboard.php?media=updated');
             exit();
         }
 
         if ($mediaAction === 'remove') {
-            dashboard_media_delete_existing();
+            dashboard_media_delete($conn, $pharmacy_id);
             header('Location: admin_dashboard.php?media=removed');
             exit();
         }
@@ -125,9 +266,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['dashboard_media_actio
     }
 }
 
-$dashboard_media_file = dashboard_media_current();
-$dashboard_media_url = $dashboard_media_file
-    ? '../uploads/admin/' . rawurlencode(basename($dashboard_media_file))
+$dashboard_media = null;
+try {
+    dashboard_media_ensure_table($conn);
+    $dashboard_media = dashboard_media_fetch($conn, $pharmacy_id);
+} catch (Throwable $e) {
+    $mediaStorageError = $e->getMessage();
+}
+
+$dashboard_media_url = $dashboard_media
+    ? 'admin_dashboard.php?dashboard_media=1&v=' . rawurlencode((string)($dashboard_media['updated_at'] ?? time()))
     : '';
 
 function esc($value) {
@@ -391,13 +539,13 @@ $current_admin_page = 'admin_dashboard.php';
     --surface:#ffffff;
     --surface-soft:#f8fafc;
     --charcoal:#343a40;
-    --charcoal-2:#2f3640;
-    --charcoal-3:#3d4652;
+    --charcoal-2:#3f474f;
+    --charcoal-3:#4b5560;
     --text:#1d252d;
     --muted:#6d7782;
     --border:#dfe4e9;
     --blue:#1d4ed8;
-    --blue-soft:#eaf2ff;
+    --blue-soft:#e8efff;
     --cyan:#19a9d2;
     --green:#159a68;
     --green-soft:#e8f7f0;
@@ -408,11 +556,7 @@ $current_admin_page = 'admin_dashboard.php';
     --purple:#7658e8;
     --sidebar:250px;
     --radius:12px;
-    --surface-border:#d9dee5;
-    --panel-white:#ffffff;
-    --panel-soft:#f5f7fa;
-    --primary-deep:#1d4ed8;
-    --shadow:0 4px 18px rgba(31,40,49,.07);
+    --shadow:0 4px 18px rgba(31,40,49,.06);
 }
 *{box-sizing:border-box}
 html,body{
@@ -433,7 +577,7 @@ a{text-decoration:none;color:inherit}
 .legacy-sidebar{
     position:fixed;left:0;top:0;bottom:0;width:var(--sidebar);
     background:var(--charcoal);
-    border-right:1px solid #27303a;
+    border-right:1px solid #2a3138;
     z-index:1000;padding:18px 14px 115px;
     overflow:auto;
 }
@@ -462,39 +606,39 @@ a{text-decoration:none;color:inherit}
     font-size:13px;font-weight:600;border:1px solid transparent
 }
 .nav a i{width:18px;text-align:center;color:#8996a3;font-size:13px}
-.nav a:hover{background:#303a46;color:#fff}
+.nav a:hover{background:#3d474f;color:#fff}
 .nav a.active{
-    background:#263f70;border-color:#315aa0;color:#fff;
+    background:#46515a;border-color:#59656f;color:#fff;
     box-shadow:inset 3px 0 var(--blue)
 }
 .nav a.active i{color:#70a0ff}
 .nav-badge{
-    margin-left:auto;background:#3e4a59;color:#e8edf4;
+    margin-left:auto;background:#4b5660;color:#e5eaf0;
     border-radius:12px;padding:3px 7px;font-size:10px
 }
 .nav a.danger{color:#f17a8b}.nav a.danger i{color:#f17a8b}
-.separator{height:1px;background:#3a444e;margin:14px 8px}
+.separator{height:1px;background:#4b555e;margin:14px 8px}
 
 .sidebar-mini{
-    margin:14px 7px 0;background:#252d36;border:1px solid #3b4652;
+    margin:14px 7px 0;background:#2b3239;border:1px solid #46515d;
     border-radius:9px;padding:12px;
 }
 .mini-title{font-size:11px;font-weight:800;color:#edf1f5;margin-bottom:9px}
 .mini-line{display:flex;justify-content:space-between;color:#a3adb8;font-size:10px;margin:7px 0}
 .mini-line b{color:#f0f3f6}
-.mini-progress{height:4px;background:#394552;border-radius:4px;overflow:hidden}
+.mini-progress{height:4px;background:#4a555f;border-radius:4px;overflow:hidden}
 .mini-progress span{display:block;height:100%;border-radius:4px;background:var(--blue)}
 
 .side-user{
     position:absolute;left:14px;right:14px;bottom:13px;
-    border-top:1px solid #3a444e;padding-top:11px;background:var(--charcoal)
+    border-top:1px solid #4b555e;padding-top:11px;background:var(--charcoal)
 }
 .user{
     display:flex;align-items:center;gap:9px;padding:9px;
-    background:#252d36;border:1px solid #3b4652;border-radius:9px
+    background:#2b3239;border:1px solid #46515d;border-radius:9px
 }
 .avatar{
-    width:32px;height:32px;border-radius:50%;background:#465363;
+    width:32px;height:32px;border-radius:50%;background:#4b5660;
     display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff
 }
 .user-copy{min-width:0;flex:1}
@@ -509,7 +653,7 @@ a{text-decoration:none;color:inherit}
 .main{margin-left:var(--sidebar);min-height:100vh}
 .legacy-topbar{
     height:64px;border-bottom:1px solid var(--border);
-    background:#ffffff;display:flex;align-items:center;
+    background:#fff;display:flex;align-items:center;
     justify-content:space-between;padding:0 28px;
     position:sticky;top:0;z-index:900;box-shadow:0 1px 7px rgba(0,0,0,.03)
 }
@@ -522,12 +666,12 @@ a{text-decoration:none;color:inherit}
 .crumb b{color:var(--text);font-size:14px}
 .top-right{display:flex;align-items:center;gap:8px}
 .search-mini{
-    width:230px;height:37px;background:var(--panel-white);border:1px solid var(--border);
+    width:230px;height:37px;background:#fff;border:1px solid var(--border);
     border-radius:8px;color:var(--text);font-size:12px;padding:0 12px;outline:none
 }
 .search-mini:focus{border-color:#8bb0ff;box-shadow:0 0 0 3px var(--blue-soft)}
 .top-icon{
-    width:37px;height:37px;background:var(--panel-white);border:1px solid var(--border);
+    width:37px;height:37px;background:#fff;border:1px solid var(--border);
     border-radius:8px;color:#65717d;display:grid;place-items:center
 }
 .top-icon:hover{color:var(--blue);border-color:#a9c0ec}
@@ -555,7 +699,7 @@ a{text-decoration:none;color:inherit}
 
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:14px}
 .kpi{
-    position:relative;overflow:hidden;background:var(--panel-white);border:1px solid var(--border);
+    position:relative;overflow:hidden;background:#fff;border:1px solid var(--border);
     border-radius:var(--radius);padding:17px;min-height:116px;box-shadow:var(--shadow)
 }
 .kpi:after{
@@ -579,13 +723,13 @@ a{text-decoration:none;color:inherit}
 
 .core{display:grid;grid-template-columns:minmax(0,1.55fr) 330px;gap:14px}
 .reference-panel,.donut-card,.chart-panel,.small-card,.list-panel{
-    background:var(--panel-white);border:1px solid var(--border);border-radius:var(--radius);
+    background:#fff;border:1px solid var(--border);border-radius:var(--radius);
     box-shadow:var(--shadow)
 }
 .reference-panel{overflow:hidden}
 .panel-top{
     min-height:54px;padding:0 17px;display:flex;align-items:center;
-    justify-content:space-between;background:var(--panel-white);border-bottom:1px solid var(--border)
+    justify-content:space-between;background:#fff;border-bottom:1px solid var(--border)
 }
 .panel-top b{font-size:13px;color:var(--charcoal)}
 .panel-top span{font-size:10px;color:var(--muted)}
@@ -620,7 +764,7 @@ a{text-decoration:none;color:inherit}
 .image-empty span{display:block;font-size:10px;margin-top:5px;line-height:1.5}
 .image-label{
     position:absolute;left:15px;bottom:14px;padding:9px 11px;
-    background:rgba(32,40,49,.9);color:#fff;border-radius:7px
+    background:rgba(52,58,64,.92);color:#fff;border-radius:7px
 }
 .image-label b{display:block;font-size:11px}.image-label span{display:block;color:#c1cad3;font-size:9px;margin-top:3px}
 
@@ -760,7 +904,7 @@ a{text-decoration:none;color:inherit}
     padding:0;
     border:1px solid rgba(255,255,255,.82);
     border-radius:8px;
-    background:rgba(32,40,49,.90);
+    background:rgba(52,58,64,.92);
     color:#fff;
     display:grid;
     place-items:center;
@@ -769,7 +913,7 @@ a{text-decoration:none;color:inherit}
     box-shadow:0 4px 14px rgba(10,20,30,.18);
     backdrop-filter:blur(6px);
 }
-.media-action-btn:hover{background:rgba(32,40,49,.99)}
+.media-action-btn:hover{background:rgba(52,58,64,.98)}
 .media-action-btn.danger{background:rgba(158,48,64,.92)}
 .media-action-btn.danger:hover{background:rgba(158,48,64,.99)}
 .media-action-btn input{display:none}
@@ -962,7 +1106,9 @@ a{text-decoration:none;color:inherit}
 
 <section class="content">
 
-    <?php if (isset($_GET['media']) && $_GET['media'] === 'updated'): ?>
+    <?php if (!empty($mediaStorageError)): ?>
+        <div class="dashboard-media-notice error"><i class="fas fa-circle-exclamation"></i><?php echo esc($mediaStorageError); ?></div>
+    <?php elseif (isset($_GET['media']) && $_GET['media'] === 'updated'): ?>
         <div class="dashboard-media-notice success"><i class="fas fa-circle-check"></i> Dashboard visual updated successfully.</div>
     <?php elseif (isset($_GET['media']) && $_GET['media'] === 'removed'): ?>
         <div class="dashboard-media-notice success"><i class="fas fa-circle-check"></i> Dashboard visual removed.</div>
@@ -970,7 +1116,7 @@ a{text-decoration:none;color:inherit}
         <div class="dashboard-media-notice error"><i class="fas fa-circle-exclamation"></i><?php echo esc((string)$_GET['media_error']); ?></div>
     <?php endif; ?>
 
-    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:14px;padding:10px 14px;background:var(--panel-white);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow)">
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:14px;padding:10px 14px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow)">
         <a href="admin_dashboard.php" style="font-size:12px;font-weight:800;color:var(--blue)"><i class="fas fa-house"></i> Overview</a>
         <a href="sales_report.php" style="font-size:12px;color:#66727e"><i class="fas fa-chart-line"></i> Sales</a>
         <a href="today_transactions.php" style="font-size:12px;color:#66727e"><i class="fas fa-receipt"></i> Transactions</a>
@@ -1052,11 +1198,11 @@ a{text-decoration:none;color:inherit}
                 </div>
 
                 <div class="image-box">
-                    <?php if ($dashboard_media_file): ?>
-                        <?php $dashboard_ext = strtolower(pathinfo($dashboard_media_file, PATHINFO_EXTENSION)); ?>
-                        <?php if (in_array($dashboard_ext, ['mp4','webm'], true)): ?>
+                    <?php if ($dashboard_media): ?>
+                        <?php $dashboard_mime = (string)$dashboard_media['mime_type']; ?>
+                        <?php if (strpos($dashboard_mime, 'video/') === 0): ?>
                             <video class="dashboard-media" autoplay muted loop playsinline preload="metadata">
-                                <source src="<?php echo esc($dashboard_media_url); ?>" type="<?php echo $dashboard_ext === 'mp4' ? 'video/mp4' : 'video/webm'; ?>">
+                                <source src="<?php echo esc($dashboard_media_url); ?>" type="<?php echo esc($dashboard_mime); ?>">
                             </video>
                         <?php else: ?>
                             <img class="dashboard-media" src="<?php echo esc($dashboard_media_url); ?>" alt="EchoTech POS dashboard visual">
@@ -1082,7 +1228,7 @@ a{text-decoration:none;color:inherit}
                                 <input type="hidden" name="dashboard_media_action" value="upload">
                                 <label class="media-action-btn" title="Change dashboard photo or animation">
                                     <i class="fas fa-image"></i>
-                                    <span><?php echo $dashboard_media_file ? 'Change Media' : 'Add Media'; ?></span>
+                                    <span><?php echo $dashboard_media ? 'Change Media' : 'Add Media'; ?></span>
                                     <input
                                         type="file"
                                         name="dashboard_media"
@@ -1092,7 +1238,7 @@ a{text-decoration:none;color:inherit}
                                 </label>
                             </form>
 
-                            <?php if ($dashboard_media_file): ?>
+                            <?php if ($dashboard_media): ?>
                                 <form method="post" onsubmit="return confirm('Remove the dashboard visual?');">
                                     <input type="hidden" name="dashboard_media_action" value="remove">
                                     <button type="submit" class="media-action-btn danger">
