@@ -1,56 +1,19 @@
 <?php
-/**
- * EchoTech POS - Admin page bootstrap
- * Uses the SAME authentication and database connection as the Admin Dashboard.
- */
-
+/* EchoTech Admin bootstrap â€” identical authentication/DB entry point to Admin Dashboard. */
+session_start();
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/conn.php';
-
 require_admin();
 
 $adminDb = $conn;
-$adminPharmacyId = (int) (current_pharmacy() ?? 0);
-
+$adminDb->set_charset('utf8mb4');
+$adminPharmacyId = (int)($_SESSION['pharmacy_id'] ?? 0);
 if ($adminPharmacyId <= 0) {
     header('Location: ../index.php?error=session_expired');
-    exit;
+    exit();
 }
-
-$user_role = current_role() ?? 'Admin';
-$user_display_name = current_user();
-
-$pharmacy_name = 'EchoTech POS';
-$stmt = $conn->prepare('SELECT name FROM pharmacies WHERE id = ? LIMIT 1');
-if ($stmt) {
-    $stmt->bind_param('i', $adminPharmacyId);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    if ($row && !empty($row['name'])) {
-        $pharmacy_name = $row['name'];
-    }
-    $stmt->close();
-}
-
-$branch_count = 0;
-$stmt = $conn->prepare('SELECT COUNT(*) AS c FROM branches WHERE pharmacy_id = ?');
-if ($stmt) {
-    $stmt->bind_param('i', $adminPharmacyId);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    $branch_count = (int) ($row['c'] ?? 0);
-    $stmt->close();
-}
-
-$total_orders = 0;
-$stmt = $conn->prepare('SELECT COUNT(*) AS c FROM sales WHERE pharmacy_id = ?');
-if ($stmt) {
-    $stmt->bind_param('i', $adminPharmacyId);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    $total_orders = (int) ($row['c'] ?? 0);
-    $stmt->close();
-}
+$user_role = function_exists('current_role') ? current_role() : 'Admin';
+$user_display_name = function_exists('current_user') ? current_user() : 'Administrator';
 
 function admin_h($v): string { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 function admin_money($v): string { return 'K' . number_format((float)$v, 2); }
@@ -67,14 +30,18 @@ function admin_current_user_id(): int {
     foreach (['user','admin','logged_in_user'] as $k) if (isset($_SESSION[$k]) && is_array($_SESSION[$k])) return (int)($_SESSION[$k]['id'] ?? 0);
     return 0;
 }
-function admin_q(mysqli $db,string $sql,array $types=[],array $vals=[]): array {
+function admin_q(mysqli $db,string $sql,string $types='',array $vals=[]): array {
     $st=$db->prepare($sql); if(!$st) throw new RuntimeException($db->error);
     if($types) $st->bind_param($types,...$vals); $st->execute(); $res=$st->get_result(); $rows=$res?$res->fetch_all(MYSQLI_ASSOC):[]; $st->close(); return $rows;
 }
-function admin_one(mysqli $db,string $sql,array $types=[],array $vals=[]): ?array { $r=admin_q($db,$sql,$types,$vals); return $r[0]??null; }
+function admin_one(mysqli $db,string $sql,string $types='',array $vals=[]): ?array { $r=admin_q($db,$sql,$types,$vals); return $r[0]??null; }
 
 
-$pageTitle='Purchase Orders';$csrf=admin_csrf();$notice='';$error='';
+$pageTitle='Purchase Orders';$admin_page_title='Purchase Orders';$csrf=admin_csrf();
+$branchMeta=admin_one($adminDb,'SELECT COUNT(*) c FROM branches WHERE pharmacy_id=? AND is_active=1','i',[$adminPharmacyId]);
+$branch_count=(int)($branchMeta['c']??0);
+$orderMeta=admin_one($adminDb,'SELECT COUNT(*) c FROM sales WHERE pharmacy_id=?','i',[$adminPharmacyId]);
+$total_orders=(int)($orderMeta['c']??0);$notice='';$error='';
 try{
  if($_SERVER['REQUEST_METHOD']==='POST'){
   admin_check_csrf();$action=$_POST['action']??'';
