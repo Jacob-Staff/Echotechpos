@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * EchoTech POS — Admin Configuration
+ * EchoTech POS â€” Admin Configuration
  *
  * Uses the live schema supplied for EchoTech:
  *   pharmacies
@@ -389,8 +389,8 @@ $pharmacy_name = (string)($pharmacy['name'] ?? 'PHARMACY POS');
             </div>
         </div>
 
-        <?php if ($notice !== ''): ?><div class="alert success"><i class="fas fa-circle-check"></i><span><?= cfg_h($notice) ?></span><button type="button" onclick="this.parentElement.remove()">×</button></div><?php endif; ?>
-        <?php if ($error !== ''): ?><div class="alert error"><i class="fas fa-circle-exclamation"></i><span><?= cfg_h($error) ?></span><button type="button" onclick="this.parentElement.remove()">×</button></div><?php endif; ?>
+        <?php if ($notice !== ''): ?><div class="alert success"><i class="fas fa-circle-check"></i><span><?= cfg_h($notice) ?></span><button type="button" onclick="this.parentElement.remove()">Ã—</button></div><?php endif; ?>
+        <?php if ($error !== ''): ?><div class="alert error"><i class="fas fa-circle-exclamation"></i><span><?= cfg_h($error) ?></span><button type="button" onclick="this.parentElement.remove()">Ã—</button></div><?php endif; ?>
 
         <nav class="config-tabs">
             <a class="<?= $tab==='general'?'active':'' ?>" href="settings.php?tab=general"><i class="fas fa-building"></i> Pharmacy Profile</a>
@@ -410,7 +410,7 @@ $pharmacy_name = (string)($pharmacy['name'] ?? 'PHARMACY POS');
                             <label class="field full"><span>Pharmacy / Business Name *</span><input required maxlength="255" name="name" value="<?= cfg_h($pharmacy['name']) ?>"></label>
                             <label class="field"><span>Phone</span><input maxlength="20" name="phone" value="<?= cfg_h($pharmacy['phone'] ?? '') ?>"></label>
                             <label class="field"><span>Address</span><input maxlength="255" name="address" value="<?= cfg_h($pharmacy['address'] ?? '') ?>"></label>
-                            <label class="field full"><span>Logo</span><input type="file" name="logo" accept="image/jpeg,image/png,image/webp"><small>JPG, PNG or WebP · maximum 2 MB.</small></label>
+                            <label class="field full"><span>Logo</span><input type="file" name="logo" accept="image/jpeg,image/png,image/webp"><small>JPG, PNG or WebP Â· maximum 2 MB.</small></label>
                         </div>
                         <div class="form-actions"><button class="btn primary" type="submit"><i class="fas fa-floppy-disk"></i> Save Pharmacy Profile</button></div>
                     </form>
@@ -440,12 +440,12 @@ $pharmacy_name = (string)($pharmacy['name'] ?? 'PHARMACY POS');
             </section>
 
             <section class="card">
-                <div class="card-head"><div><h2><i class="fas fa-store"></i> Branch network</h2><span><?= number_format(count($branches)) ?> total branch record(s) · <?= number_format($branch_count) ?> active</span></div><a class="btn primary small" href="branches.php"><i class="fas fa-arrow-right"></i> Manage Branches</a></div>
+                <div class="card-head"><div><h2><i class="fas fa-store"></i> Branch network</h2><span><?= number_format(count($branches)) ?> total branch record(s) Â· <?= number_format($branch_count) ?> active</span></div><a class="btn primary small" href="branches.php"><i class="fas fa-arrow-right"></i> Manage Branches</a></div>
                 <div class="branch-mini-grid">
                     <?php foreach ($branches as $branch): ?>
                         <a class="branch-mini" href="view_branch.php?id=<?= (int)$branch['id'] ?>">
                             <span class="branch-mini-icon"><i class="fas fa-store"></i></span>
-                            <div><strong><?= cfg_h($branch['branch_name']) ?></strong><small><?= cfg_h($branch['branch_code'] ?: 'No code') ?> · <?= cfg_h($branch['location'] ?: 'Location not set') ?></small></div>
+                            <div><strong><?= cfg_h($branch['branch_name']) ?></strong><small><?= cfg_h($branch['branch_code'] ?: 'No code') ?> Â· <?= cfg_h($branch['location'] ?: 'Location not set') ?></small></div>
                             <span class="mini-status <?= (int)$branch['is_active']===1?'active':'inactive' ?>"><?= (int)$branch['is_active']===1?'Active':'Inactive' ?></span>
                         </a>
                     <?php endforeach; ?>
@@ -463,7 +463,7 @@ $pharmacy_name = (string)($pharmacy['name'] ?? 'PHARMACY POS');
                         <label class="field"><span>Default Payment Method</span><select name="default_payment_method">
                             <?php foreach (['Cash','Cash on Delivery','Bank Transfer','Mobile Money'] as $payment): ?><option value="<?= cfg_h($payment) ?>" <?= $settings['default_payment_method']===$payment?'selected':'' ?>><?= cfg_h($payment) ?></option><?php endforeach; ?>
                         </select></label>
-                        <label class="field"><span>Currency</span><select name="currency"><option value="ZMW" <?= $settings['currency']==='ZMW'?'selected':'' ?>>ZMW — Zambian Kwacha</option><option value="USD" <?= $settings['currency']==='USD'?'selected':'' ?>>USD — US Dollar</option></select></label>
+                        <label class="field"><span>Currency</span><select name="currency"><option value="ZMW" <?= $settings['currency']==='ZMW'?'selected':'' ?>>ZMW â€” Zambian Kwacha</option><option value="USD" <?= $settings['currency']==='USD'?'selected':'' ?>>USD â€” US Dollar</option></select></label>
                         <label class="field"><span>System Timezone</span><select name="timezone"><option value="Africa/Lusaka" <?= $settings['timezone']==='Africa/Lusaka'?'selected':'' ?>>Africa/Lusaka</option><option value="UTC" <?= $settings['timezone']==='UTC'?'selected':'' ?>>UTC</option></select></label>
                         <label class="field"><span>Low-stock Threshold</span><input type="number" min="0" max="100000" name="low_stock_threshold" value="<?= cfg_h($settings['low_stock_threshold']) ?>"><small>Operational preference for stock warnings.</small></label>
                         <label class="field"><span>Auto-refresh Interval (seconds)</span><input type="number" min="0" max="3600" name="auto_refresh_seconds" value="<?= cfg_h($settings['auto_refresh_seconds']) ?>"><small>0 disables the configured refresh interval.</small></label>
@@ -517,7 +517,7 @@ $pharmacy_name = (string)($pharmacy['name'] ?? 'PHARMACY POS');
                         <input type="hidden" name="csrf" value="<?= cfg_h($csrf) ?>">
                         <input type="hidden" name="action" value="save_permissions">
                         <input type="hidden" name="tab" value="access">
-                        <div class="permission-toolbar"><div><strong><?= number_format(count($roles)) ?> roles</strong><span>×</span><strong><?= number_format(count($pages)) ?> pages</strong></div><div><span class="legend access"></span> Access <span class="legend action"></span> Action</div></div>
+                        <div class="permission-toolbar"><div><strong><?= number_format(count($roles)) ?> roles</strong><span>Ã—</span><strong><?= number_format(count($pages)) ?> pages</strong></div><div><span class="legend access"></span> Access <span class="legend action"></span> Action</div></div>
                         <div class="permission-wrap">
                             <table class="permission-table">
                                 <thead><tr><th>Role</th><?php foreach ($pages as $page): ?><th title="<?= cfg_h($page) ?>"><?= cfg_h($page) ?></th><?php endforeach; ?></tr></thead>
@@ -533,7 +533,7 @@ $pharmacy_name = (string)($pharmacy['name'] ?? 'PHARMACY POS');
                                             ?>
                                             <td>
                                                 <label class="perm-box"><input type="checkbox" name="access[<?= cfg_h($roleKey) ?>][<?= cfg_h($pageKey) ?>]" value="1" <?= $perm['access']===1?'checked':'' ?>><span>A</span></label>
-                                                <label class="perm-box action"><input type="checkbox" name="action_perm[<?= cfg_h($roleKey) ?>][<?= cfg_h($pageKey) ?>]" value="1" <?= $perm['action']===1?'checked':'' ?>><span>✓</span></label>
+                                                <label class="perm-box action"><input type="checkbox" name="action_perm[<?= cfg_h($roleKey) ?>][<?= cfg_h($pageKey) ?>]" value="1" <?= $perm['action']===1?'checked':'' ?>><span>âœ“</span></label>
                                             </td>
                                         <?php endforeach; ?>
                                     </tr>
