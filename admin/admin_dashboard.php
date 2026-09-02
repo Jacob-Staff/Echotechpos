@@ -387,17 +387,17 @@ $current_admin_page = 'admin_dashboard.php';
 
 <style>
 :root{
-    --bg:#f4f6f8;
+    --bg:#f4f6f9;
     --surface:#ffffff;
     --surface-soft:#f8fafc;
-    --charcoal:#202831;
-    --charcoal-2:#2b3540;
-    --charcoal-3:#374452;
+    --charcoal:#343a40;
+    --charcoal-2:#2f3640;
+    --charcoal-3:#3b4350;
     --text:#1d252d;
     --muted:#6d7782;
     --border:#dfe4e9;
-    --blue:#246bfe;
-    --blue-soft:#eaf1ff;
+    --blue:#1d4ed8;
+    --blue-soft:#eaf2ff;
     --cyan:#19a9d2;
     --green:#159a68;
     --green-soft:#e8f7f0;
@@ -458,27 +458,27 @@ a{text-decoration:none;color:inherit}
     font-size:13px;font-weight:600;border:1px solid transparent
 }
 .nav a i{width:18px;text-align:center;color:#8996a3;font-size:13px}
-.nav a:hover{background:#2a3541;color:#fff}
+.nav a:hover{background:#3d444b;color:#fff}
 .nav a.active{
-    background:#344253;border-color:#405166;color:#fff;
+    background:#3f4750;border-color:#4a5560;color:#fff;
     box-shadow:inset 3px 0 var(--blue)
 }
-.nav a.active i{color:#70a0ff}
+.nav a.active i{color:#6ea8ff}
 .nav-badge{
-    margin-left:auto;background:#465363;color:#e5eaf0;
+    margin-left:auto;background:#49515a;color:#e5eaf0;
     border-radius:12px;padding:3px 7px;font-size:10px
 }
 .nav a.danger{color:#f17a8b}.nav a.danger i{color:#f17a8b}
 .separator{height:1px;background:#3a444e;margin:14px 8px}
 
 .sidebar-mini{
-    margin:14px 7px 0;background:#18212a;border:1px solid #35414d;
+    margin:14px 7px 0;background:#252b31;border:1px solid #454d55;
     border-radius:9px;padding:12px;
 }
 .mini-title{font-size:11px;font-weight:800;color:#edf1f5;margin-bottom:9px}
 .mini-line{display:flex;justify-content:space-between;color:#a3adb8;font-size:10px;margin:7px 0}
 .mini-line b{color:#f0f3f6}
-.mini-progress{height:4px;background:#303b47;border-radius:4px;overflow:hidden}
+.mini-progress{height:4px;background:#414a53;border-radius:4px;overflow:hidden}
 .mini-progress span{display:block;height:100%;border-radius:4px;background:var(--blue)}
 
 .side-user{
@@ -487,10 +487,10 @@ a{text-decoration:none;color:inherit}
 }
 .user{
     display:flex;align-items:center;gap:9px;padding:9px;
-    background:#18212a;border:1px solid #35414d;border-radius:9px
+    background:#252b31;border:1px solid #454d55;border-radius:9px
 }
 .avatar{
-    width:32px;height:32px;border-radius:50%;background:#3b4857;
+    width:32px;height:32px;border-radius:50%;background:#46505a;
     display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff
 }
 .user-copy{min-width:0;flex:1}
@@ -602,13 +602,13 @@ a{text-decoration:none;color:inherit}
 .hero-stat span{display:block;color:#7a8590;font-size:9px;margin-top:3px}
 
 .image-box{
-    position:relative;min-height:320px;background:#edf1f5;
+    position:relative;min-height:320px;background:#eef1f5;
     overflow:hidden;border-left:1px solid var(--border)
 }
 .image-box img{width:100%;height:100%;min-height:320px;object-fit:cover;display:block}
 .image-empty{
     height:100%;min-height:320px;display:grid;place-items:center;
-    background:linear-gradient(135deg,#f7f9fb,#e9edf1)
+    background:linear-gradient(135deg,#fafbfc,#eef1f5)
 }
 .image-empty-inner{text-align:center;color:#87919c}
 .image-empty i{font-size:38px;display:block;margin-bottom:11px}
@@ -721,7 +721,7 @@ a{text-decoration:none;color:inherit}
     min-height:320px;
     object-fit:cover;
     display:block;
-    background:#e9edf1;
+    background:#eef1f5;
 }
 .image-box{
     position:relative;
@@ -1015,7 +1015,7 @@ a{text-decoration:none;color:inherit}
         <section class="reference-panel">
             <div class="panel-top">
                 <b>Central POS Intelligence</b>
-                <span><?php echo date('d M Y'); ?> Ãƒâ€šÃ‚Â· Live database view</span>
+                <span><?php echo date('d M Y'); ?> Ã‚Â· Live database view</span>
             </div>
 
             <div class="hero">
