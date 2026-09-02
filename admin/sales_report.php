@@ -241,8 +241,6 @@ try {
     error_log('ADMIN SALES CATEGORY: ' . $e->getMessage());
 }
 
-require_once __DIR__ . '/actions/admin_aside.php';
-require_once __DIR__ . '/actions/admin_header.php';
 ?>
 <!doctype html>
 <html lang="en">
@@ -267,6 +265,10 @@ require_once __DIR__ . '/actions/admin_header.php';
 </head>
 <body>
 <main class="main">
+<?php
+require_once __DIR__ . '/actions/admin_aside.php';
+require_once __DIR__ . '/actions/admin_header.php';
+?>
 <div class="page">
 <div class="heading">
 <div><h1><i class="fas fa-chart-line" style="color:var(--blue)"></i> Sales &amp; Analytics</h1><p><?= h($pharmacy_name) ?> &mdash; group-wide admin report across all branches.</p></div>
