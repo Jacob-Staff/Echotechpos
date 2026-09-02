@@ -192,7 +192,9 @@ function first_existing_column($conn, $table, $candidates) {
 /* ---------- Core sales ---------- */
 $total_sales = (float)scalar_query(
     $conn,
-    "SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE pharmacy_id = ?",
+    "SELECT COALESCE(SUM(COALESCE(NULLIF(total_amount,0), total)),0)
+     FROM sales
+     WHERE pharmacy_id = ?",
     "i", [$pharmacy_id], 0
 );
 
@@ -214,9 +216,12 @@ $avg = $total_orders > 0 ? $total_sales / $total_orders : 0;
 $b_names = [];
 $b_revenues = [];
 $branch_rows = rows_query($conn,
-    "SELECT b.branch_name, COALESCE(SUM(s.total_amount),0) AS revenue
+    "SELECT b.branch_name,
+            COALESCE(SUM(COALESCE(NULLIF(s.total_amount,0), s.total)),0) AS revenue
      FROM branches b
-     LEFT JOIN sales s ON s.branch_id=b.id AND s.pharmacy_id=?
+     LEFT JOIN sales s
+       ON s.branch_id=b.id
+      AND s.pharmacy_id=?
      WHERE b.pharmacy_id=? AND b.is_active=1
      GROUP BY b.id,b.branch_name
      ORDER BY revenue DESC",
@@ -244,12 +249,18 @@ if (column_exists($conn,'sales','payment_method')) {
 if (!$p_labels) { $p_labels=['No data']; $p_counts=[1]; }
 
 /* ---------- Date column discovery ---------- */
-$sales_date_col = first_existing_column($conn,'sales',['created_at','sale_date','transaction_date','date','created']);
+$sales_date_col = first_existing_column($conn,'sales',['sale_date','created_at','transaction_date','date','created']);
 $trend_labels=[]; $trend_revenue=[]; $trend_transactions=[];
 
 if ($sales_date_col) {
-    $sql = "SELECT DATE(`$sales_date_col`) d, COALESCE(SUM(total_amount),0) revenue, COUNT(*) transactions
-            FROM sales WHERE pharmacy_id=? GROUP BY DATE(`$sales_date_col`) ORDER BY d DESC LIMIT 14";
+    $sql = "SELECT DATE(`$sales_date_col`) d,
+                   COALESCE(SUM(COALESCE(NULLIF(total_amount,0), total)),0) revenue,
+                   COUNT(*) transactions
+            FROM sales
+            WHERE pharmacy_id=?
+            GROUP BY DATE(`$sales_date_col`)
+            ORDER BY d DESC
+            LIMIT 14";
     $trend_rows = array_reverse(rows_query($conn,$sql,"i",[$pharmacy_id]));
     foreach ($trend_rows as $r) {
         $trend_labels[] = date('d M',strtotime($r['d']));
@@ -309,29 +320,53 @@ $healthy=max($stock_total-$low_stock_count-$expired_count,0);
 $stock_data=[$healthy,$low_stock_count,$expired_count];
 
 /* ---------- Top products ---------- */
-$top_products=[];
-if (table_exists($conn,'store_items')) {
-    /*
-      Product-level sales schemas vary between POS installations.
-      We only query this panel when the sales table has a product/item reference
-      and store_items has the matching id/name fields.
-    */
-    $sale_item_col=first_existing_column($conn,'sales',['store_item_id','item_id','product_id']);
-    $item_name_col=first_existing_column($conn,'store_items',['item_name','name','product_name']);
-    if ($sale_item_col && $item_name_col && column_exists($conn,'sales','quantity')) {
-        $top_products=rows_query($conn,
-            "SELECT si.`$item_name_col` name,
-                    COALESCE(SUM(s.quantity),0) qty,
-                    COALESCE(SUM(s.total_amount),0) revenue
-             FROM sales s
-             INNER JOIN store_items si ON si.id=s.`$sale_item_col`
-             WHERE s.pharmacy_id=?
-             GROUP BY si.id,si.`$item_name_col`
-             ORDER BY revenue DESC LIMIT 5",
-            "i",[$pharmacy_id]
-        );
-    }
+/*
+ * The supplied database stores sale line-items in sales_items:
+ *   sales_items.sale_id -> sales.id
+ *   sales_items.product_id -> store_items.id
+ *   sales_items.quantity
+ *   sales_items.unit_price
+ *
+ * The sales table itself does NOT contain product_id or quantity, so the
+ * dashboard must use this relationship for product rankings.
+ */
+$top_products = [];
+
+if (
+    table_exists($conn, 'sales_items') &&
+    table_exists($conn, 'store_items') &&
+    column_exists($conn, 'sales_items', 'sale_id') &&
+    column_exists($conn, 'sales_items', 'product_id') &&
+    column_exists($conn, 'sales_items', 'quantity') &&
+    column_exists($conn, 'sales_items', 'unit_price') &&
+    column_exists($conn, 'store_items', 'id') &&
+    column_exists($conn, 'store_items', 'item_name')
+) {
+    $top_products = rows_query(
+        $conn,
+        "SELECT
+            si.product_id,
+            p.item_name AS name,
+            COALESCE(SUM(si.quantity),0) AS qty,
+            COALESCE(SUM(
+                si.quantity * COALESCE(si.unit_price, p.price, 0)
+            ),0) AS revenue
+         FROM sales_items si
+         INNER JOIN sales s
+            ON s.id=si.sale_id
+           AND s.pharmacy_id=?
+         INNER JOIN store_items p
+            ON p.id=si.product_id
+           AND p.pharmacy_id=?
+         WHERE si.pharmacy_id=?
+         GROUP BY si.product_id,p.item_name
+         ORDER BY revenue DESC, qty DESC
+         LIMIT 5",
+        "iii",
+        [$pharmacy_id,$pharmacy_id,$pharmacy_id]
+    );
 }
+
 $admin_page_title = 'Executive Overview';
 $branch_count = (int)$branch_count;
 $total_orders = (int)$total_orders;
