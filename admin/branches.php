@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * EchoTech POS — Admin Branch Management
+ * EchoTech POS â€” Admin Branch Management
  * Uses the same authentication, DB connection, header and aside architecture
  * as the working Admin Dashboard / Reports pages.
  */
@@ -589,10 +589,10 @@ $admin_page_title = 'Branch Management';
         </div>
 
         <?php if ($notice !== ''): ?>
-            <div class="alert success"><i class="fas fa-circle-check"></i><span><?= bm_h($notice) ?></span><button type="button" onclick="this.parentElement.remove()">×</button></div>
+            <div class="alert success"><i class="fas fa-circle-check"></i><span><?= bm_h($notice) ?></span><button type="button" onclick="this.parentElement.remove()">Ã—</button></div>
         <?php endif; ?>
         <?php if ($error !== ''): ?>
-            <div class="alert error"><i class="fas fa-circle-exclamation"></i><span><?= bm_h($error) ?></span><button type="button" onclick="this.parentElement.remove()">×</button></div>
+            <div class="alert error"><i class="fas fa-circle-exclamation"></i><span><?= bm_h($error) ?></span><button type="button" onclick="this.parentElement.remove()">Ã—</button></div>
         <?php endif; ?>
 
         <section class="summary-grid">
@@ -614,7 +614,7 @@ $admin_page_title = 'Branch Management';
             <div class="summary-card">
                 <div class="summary-top"><span>Stock at Cost of Sale Price</span><span class="summary-icon yellow"><i class="fas fa-boxes-stacked"></i></span></div>
                 <div class="summary-value money"><?= bm_money($networkStock) ?></div>
-                <div class="summary-sub"><?= number_format($networkStaff) ?> staff · <?= number_format($networkOnlineOrders) ?> online orders</div>
+                <div class="summary-sub"><?= number_format($networkStaff) ?> staff Â· <?= number_format($networkOnlineOrders) ?> online orders</div>
             </div>
         </section>
 
@@ -711,8 +711,8 @@ $admin_page_title = 'Branch Management';
                                 <td>
                                     <div class="metric-stack">
                                         <strong><?= number_format((int)$b['sales_count']) ?> sales</strong>
-                                        <span><?= number_format((int)$b['item_count']) ?> active items · <?= number_format((int)$b['stock_units']) ?> units</span>
-                                        <span><?= number_format((int)$b['staff_count']) ?> staff · <?= number_format((int)$b['online_count']) ?> online orders</span>
+                                        <span><?= number_format((int)$b['item_count']) ?> active items Â· <?= number_format((int)$b['stock_units']) ?> units</span>
+                                        <span><?= number_format((int)$b['staff_count']) ?> staff Â· <?= number_format((int)$b['online_count']) ?> online orders</span>
                                     </div>
                                 </td>
                                 <td>
@@ -776,7 +776,7 @@ $admin_page_title = 'Branch Management';
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="branchModalTitle">
         <div class="modal-head">
             <div><span class="modal-eyebrow">Branch setup</span><h2 id="branchModalTitle">Add Branch</h2></div>
-            <button type="button" class="modal-close" onclick="closeBranchModal()">×</button>
+            <button type="button" class="modal-close" onclick="closeBranchModal()">Ã—</button>
         </div>
         <form method="post" id="branchForm">
             <input type="hidden" name="csrf" value="<?= bm_h($csrf) ?>">
