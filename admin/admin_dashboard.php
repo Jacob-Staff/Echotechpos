@@ -392,7 +392,7 @@ $current_admin_page = 'admin_dashboard.php';
     --surface-soft:#f8fafc;
     --charcoal:#343a40;
     --charcoal-2:#2f3640;
-    --charcoal-3:#3b4350;
+    --charcoal-3:#3d4652;
     --text:#1d252d;
     --muted:#6d7782;
     --border:#dfe4e9;
@@ -408,7 +408,11 @@ $current_admin_page = 'admin_dashboard.php';
     --purple:#7658e8;
     --sidebar:250px;
     --radius:12px;
-    --shadow:0 4px 18px rgba(31,40,49,.06);
+    --surface-border:#d9dee5;
+    --panel-white:#ffffff;
+    --panel-soft:#f5f7fa;
+    --primary-deep:#1d4ed8;
+    --shadow:0 4px 18px rgba(31,40,49,.07);
 }
 *{box-sizing:border-box}
 html,body{
@@ -429,7 +433,7 @@ a{text-decoration:none;color:inherit}
 .legacy-sidebar{
     position:fixed;left:0;top:0;bottom:0;width:var(--sidebar);
     background:var(--charcoal);
-    border-right:1px solid #161d24;
+    border-right:1px solid #27303a;
     z-index:1000;padding:18px 14px 115px;
     overflow:auto;
 }
@@ -458,27 +462,27 @@ a{text-decoration:none;color:inherit}
     font-size:13px;font-weight:600;border:1px solid transparent
 }
 .nav a i{width:18px;text-align:center;color:#8996a3;font-size:13px}
-.nav a:hover{background:#3d444b;color:#fff}
+.nav a:hover{background:#303a46;color:#fff}
 .nav a.active{
-    background:#3f4750;border-color:#4a5560;color:#fff;
+    background:#263f70;border-color:#315aa0;color:#fff;
     box-shadow:inset 3px 0 var(--blue)
 }
-.nav a.active i{color:#6ea8ff}
+.nav a.active i{color:#70a0ff}
 .nav-badge{
-    margin-left:auto;background:#49515a;color:#e5eaf0;
+    margin-left:auto;background:#3e4a59;color:#e8edf4;
     border-radius:12px;padding:3px 7px;font-size:10px
 }
 .nav a.danger{color:#f17a8b}.nav a.danger i{color:#f17a8b}
 .separator{height:1px;background:#3a444e;margin:14px 8px}
 
 .sidebar-mini{
-    margin:14px 7px 0;background:#252b31;border:1px solid #454d55;
+    margin:14px 7px 0;background:#252d36;border:1px solid #3b4652;
     border-radius:9px;padding:12px;
 }
 .mini-title{font-size:11px;font-weight:800;color:#edf1f5;margin-bottom:9px}
 .mini-line{display:flex;justify-content:space-between;color:#a3adb8;font-size:10px;margin:7px 0}
 .mini-line b{color:#f0f3f6}
-.mini-progress{height:4px;background:#414a53;border-radius:4px;overflow:hidden}
+.mini-progress{height:4px;background:#394552;border-radius:4px;overflow:hidden}
 .mini-progress span{display:block;height:100%;border-radius:4px;background:var(--blue)}
 
 .side-user{
@@ -487,10 +491,10 @@ a{text-decoration:none;color:inherit}
 }
 .user{
     display:flex;align-items:center;gap:9px;padding:9px;
-    background:#252b31;border:1px solid #454d55;border-radius:9px
+    background:#252d36;border:1px solid #3b4652;border-radius:9px
 }
 .avatar{
-    width:32px;height:32px;border-radius:50%;background:#46505a;
+    width:32px;height:32px;border-radius:50%;background:#465363;
     display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff
 }
 .user-copy{min-width:0;flex:1}
@@ -505,7 +509,7 @@ a{text-decoration:none;color:inherit}
 .main{margin-left:var(--sidebar);min-height:100vh}
 .legacy-topbar{
     height:64px;border-bottom:1px solid var(--border);
-    background:#fff;display:flex;align-items:center;
+    background:#ffffff;display:flex;align-items:center;
     justify-content:space-between;padding:0 28px;
     position:sticky;top:0;z-index:900;box-shadow:0 1px 7px rgba(0,0,0,.03)
 }
@@ -518,12 +522,12 @@ a{text-decoration:none;color:inherit}
 .crumb b{color:var(--text);font-size:14px}
 .top-right{display:flex;align-items:center;gap:8px}
 .search-mini{
-    width:230px;height:37px;background:#fff;border:1px solid var(--border);
+    width:230px;height:37px;background:var(--panel-white);border:1px solid var(--border);
     border-radius:8px;color:var(--text);font-size:12px;padding:0 12px;outline:none
 }
 .search-mini:focus{border-color:#8bb0ff;box-shadow:0 0 0 3px var(--blue-soft)}
 .top-icon{
-    width:37px;height:37px;background:#fff;border:1px solid var(--border);
+    width:37px;height:37px;background:var(--panel-white);border:1px solid var(--border);
     border-radius:8px;color:#65717d;display:grid;place-items:center
 }
 .top-icon:hover{color:var(--blue);border-color:#a9c0ec}
@@ -551,7 +555,7 @@ a{text-decoration:none;color:inherit}
 
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:14px}
 .kpi{
-    position:relative;overflow:hidden;background:#fff;border:1px solid var(--border);
+    position:relative;overflow:hidden;background:var(--panel-white);border:1px solid var(--border);
     border-radius:var(--radius);padding:17px;min-height:116px;box-shadow:var(--shadow)
 }
 .kpi:after{
@@ -575,13 +579,13 @@ a{text-decoration:none;color:inherit}
 
 .core{display:grid;grid-template-columns:minmax(0,1.55fr) 330px;gap:14px}
 .reference-panel,.donut-card,.chart-panel,.small-card,.list-panel{
-    background:#fff;border:1px solid var(--border);border-radius:var(--radius);
+    background:var(--panel-white);border:1px solid var(--border);border-radius:var(--radius);
     box-shadow:var(--shadow)
 }
 .reference-panel{overflow:hidden}
 .panel-top{
     min-height:54px;padding:0 17px;display:flex;align-items:center;
-    justify-content:space-between;background:#fff;border-bottom:1px solid var(--border)
+    justify-content:space-between;background:var(--panel-white);border-bottom:1px solid var(--border)
 }
 .panel-top b{font-size:13px;color:var(--charcoal)}
 .panel-top span{font-size:10px;color:var(--muted)}
@@ -602,13 +606,13 @@ a{text-decoration:none;color:inherit}
 .hero-stat span{display:block;color:#7a8590;font-size:9px;margin-top:3px}
 
 .image-box{
-    position:relative;min-height:320px;background:#eef1f5;
+    position:relative;min-height:320px;background:#edf1f5;
     overflow:hidden;border-left:1px solid var(--border)
 }
 .image-box img{width:100%;height:100%;min-height:320px;object-fit:cover;display:block}
 .image-empty{
     height:100%;min-height:320px;display:grid;place-items:center;
-    background:linear-gradient(135deg,#fafbfc,#eef1f5)
+    background:linear-gradient(135deg,#f7f9fb,#e9edf1)
 }
 .image-empty-inner{text-align:center;color:#87919c}
 .image-empty i{font-size:38px;display:block;margin-bottom:11px}
@@ -721,7 +725,7 @@ a{text-decoration:none;color:inherit}
     min-height:320px;
     object-fit:cover;
     display:block;
-    background:#eef1f5;
+    background:#e9edf1;
 }
 .image-box{
     position:relative;
@@ -966,7 +970,7 @@ a{text-decoration:none;color:inherit}
         <div class="dashboard-media-notice error"><i class="fas fa-circle-exclamation"></i><?php echo esc((string)$_GET['media_error']); ?></div>
     <?php endif; ?>
 
-    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:14px;padding:10px 14px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow)">
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:14px;padding:10px 14px;background:var(--panel-white);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow)">
         <a href="admin_dashboard.php" style="font-size:12px;font-weight:800;color:var(--blue)"><i class="fas fa-house"></i> Overview</a>
         <a href="sales_report.php" style="font-size:12px;color:#66727e"><i class="fas fa-chart-line"></i> Sales</a>
         <a href="today_transactions.php" style="font-size:12px;color:#66727e"><i class="fas fa-receipt"></i> Transactions</a>
@@ -1015,7 +1019,7 @@ a{text-decoration:none;color:inherit}
         <section class="reference-panel">
             <div class="panel-top">
                 <b>Central POS Intelligence</b>
-                <span><?php echo date('d M Y'); ?> Ã‚Â· Live database view</span>
+                <span><?php echo date('d M Y'); ?> Â· Live database view</span>
             </div>
 
             <div class="hero">
