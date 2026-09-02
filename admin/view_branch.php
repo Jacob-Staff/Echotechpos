@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * EchoTech POS — Branch Operations Dashboard
+ * EchoTech POS â€” Branch Operations Dashboard
  * Branch-scoped detail / performance page opened from Branch Management.
  */
 
@@ -348,7 +348,7 @@ $total_orders = (int)(vb_one(
                 <input type="hidden" name="id" value="<?= $branch_id ?>">
                 <div>
                     <span class="filter-label">Performance period</span>
-                    <strong><?= vb_h(date('d M Y', strtotime($start_date))) ?> — <?= vb_h(date('d M Y', strtotime($end_date))) ?></strong>
+                    <strong><?= vb_h(date('d M Y', strtotime($start_date))) ?> â€” <?= vb_h(date('d M Y', strtotime($end_date))) ?></strong>
                 </div>
                 <label><span>From</span><input type="date" name="start_date" value="<?= vb_h($start_date) ?>"></label>
                 <label><span>To</span><input type="date" name="end_date" value="<?= vb_h($end_date) ?>"></label>
@@ -404,7 +404,7 @@ $total_orders = (int)(vb_one(
                             <div class="trend-chart">
                                 <?php foreach ($trend as $row): ?>
                                     <?php $height = $maxTrend > 0 ? max(8, ((float)$row['value'] / $maxTrend) * 150) : 8; ?>
-                                    <div class="trend-item" title="<?= vb_h($row['label']) ?> — <?= vb_money($row['value']) ?>">
+                                    <div class="trend-item" title="<?= vb_h($row['label']) ?> â€” <?= vb_money($row['value']) ?>">
                                         <div class="bar-value"><?= vb_money($row['value']) ?></div>
                                         <div class="bar" style="height:<?= number_format($height, 1, '.', '') ?>px"></div>
                                         <span><?= vb_h($row['label']) ?></span>
@@ -469,7 +469,7 @@ $total_orders = (int)(vb_one(
                         <?php else: foreach ($payment_mix as $mix): ?>
                             <?php $percent = $payment_total > 0 ? ((float)$mix['value'] / $payment_total) * 100 : 0; ?>
                             <div class="payment-row">
-                                <div class="payment-row-top"><strong><?= vb_h($mix['method']) ?></strong><span><?= number_format((float)$mix['value'], 2) ?> · <?= number_format($percent, 1) ?>%</span></div>
+                                <div class="payment-row-top"><strong><?= vb_h($mix['method']) ?></strong><span><?= number_format((float)$mix['value'], 2) ?> Â· <?= number_format($percent, 1) ?>%</span></div>
                                 <div class="progress"><span style="width:<?= number_format(min(100, $percent), 2, '.', '') ?>%"></span></div>
                                 <small><?= number_format((int)$mix['count']) ?> transaction<?= (int)$mix['count'] === 1 ? '' : 's' ?></small>
                             </div>
@@ -501,7 +501,7 @@ $total_orders = (int)(vb_one(
                         <?php else: foreach ($staff as $member): ?>
                             <div class="staff-row">
                                 <span class="avatar"><?= vb_h(strtoupper(substr(trim((string)($member['full_name'] ?: $member['username'] ?: 'U')),0,1))) ?></span>
-                                <div><strong><?= vb_h($member['full_name'] ?: $member['username'] ?: 'Staff') ?></strong><small><?= vb_h($member['role'] ?: 'User') ?> · <?= vb_h($member['mobile_number'] ?: $member['email'] ?: '') ?></small></div>
+                                <div><strong><?= vb_h($member['full_name'] ?: $member['username'] ?: 'Staff') ?></strong><small><?= vb_h($member['role'] ?: 'User') ?> Â· <?= vb_h($member['mobile_number'] ?: $member['email'] ?: '') ?></small></div>
                                 <span class="staff-status"><?= vb_h($member['status'] ?: 'Active') ?></span>
                             </div>
                         <?php endforeach; endif; ?>
@@ -526,10 +526,10 @@ $total_orders = (int)(vb_one(
                 <div class="card branch-details">
                     <div class="card-head"><div><h2>Branch Details</h2><span>Stored operational information</span></div><i class="fas fa-address-card"></i></div>
                     <div class="details">
-                        <div><small>Branch code</small><strong><?= vb_h($branch['branch_code'] ?: '—') ?></strong></div>
-                        <div><small>Phone</small><strong><?= vb_h($branch['phone'] ?: '—') ?></strong></div>
-                        <div><small>Email</small><strong><?= vb_h($branch['branch_email'] ?: '—') ?></strong></div>
-                        <div><small>Location</small><strong><?= vb_h($branch['location'] ?: '—') ?></strong></div>
+                        <div><small>Branch code</small><strong><?= vb_h($branch['branch_code'] ?: 'â€”') ?></strong></div>
+                        <div><small>Phone</small><strong><?= vb_h($branch['phone'] ?: 'â€”') ?></strong></div>
+                        <div><small>Email</small><strong><?= vb_h($branch['branch_email'] ?: 'â€”') ?></strong></div>
+                        <div><small>Location</small><strong><?= vb_h($branch['location'] ?: 'â€”') ?></strong></div>
                         <div class="full"><small>Bank details</small><p><?= nl2br(vb_h($branch['bank_details'] ?: 'Not configured')) ?></p></div>
                         <div class="full"><small>Mobile money</small><p><?= nl2br(vb_h($branch['mobile_money_details'] ?: 'Not configured')) ?></p></div>
                     </div>
