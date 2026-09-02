@@ -33,7 +33,6 @@ FROM sales s LEFT JOIN branches b ON b.id=s.branch_id AND b.pharmacy_id=s.pharma
 WHERE $whereSql ORDER BY s.id DESC LIMIT 1000";
 try{$s=$conn->prepare($sql);$bind=[$types];foreach($params as $k=>$v)$bind[]=&$params[$k];call_user_func_array([$s,'bind_param'],$bind);$s->execute();$r=$s->get_result();while($x=$r->fetch_assoc()){$rows[]=$x;$revenue+=(float)$x['total'];$s2=$conn->prepare("SELECT COALESCE(SUM(quantity),0) q FROM sales_items WHERE sale_id=?");$sid=(int)$x['id'];$s2->bind_param('i',$sid);$s2->execute();$units+=(int)($s2->get_result()->fetch_assoc()['q']??0);$s2->close();}$s->close();}catch(Throwable $e){error_log('ADMIN TX QUERY '.$e->getMessage());}
 
-require_once __DIR__.'/actions/admin_aside.php';require_once __DIR__.'/actions/admin_header.php';
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($pharmacy_name)?> - Admin Transactions</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 <style>
@@ -43,7 +42,12 @@ require_once __DIR__.'/actions/admin_aside.php';require_once __DIR__.'/actions/a
 .filters{padding:15px;margin-bottom:16px}.grid{display:grid;grid-template-columns:1fr 1fr 1fr 1.4fr auto;gap:9px;align-items:end}.field label{display:block;font-size:10px;text-transform:uppercase;font-weight:800;color:var(--muted);margin-bottom:5px}.field input,.field select{width:100%;height:40px;border:1px solid var(--border);border-radius:8px;padding:0 10px;background:#fff}.btn{height:40px;border:1px solid var(--border);background:#fff;border-radius:8px;padding:0 13px;font-weight:800;cursor:pointer}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
 .table-card{overflow:hidden}.table-head{padding:15px 17px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between}.table-head h2{margin:0;font-size:16px}.responsive{overflow:auto}table{width:100%;border-collapse:collapse;min-width:900px}th,td{padding:12px;border-bottom:1px solid #edf0f4;text-align:left;font-size:12px;vertical-align:top}th{background:#fafbfc;color:#667789;font-size:10px;text-transform:uppercase;white-space:nowrap}.num{text-align:right;font-weight:800}.badge{display:inline-block;padding:5px 8px;border-radius:999px;background:#eef2f6;color:#52606d;font-size:10px;font-weight:800}.empty{text-align:center;padding:45px;color:var(--muted)}.invoice{color:var(--blue);font-weight:800}
 @media(max-width:900px){.main{margin-left:0}.page{padding:16px}.heading{flex-direction:column}.grid{grid-template-columns:1fr 1fr}}@media(max-width:600px){.kpis{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.heading h1{font-size:23px}}@media print{.admin-aside,.admin-header,.no-print{display:none!important}.main{margin-left:0}.page{padding:0}.card{box-shadow:none}}
-</style></head><body><main class="main"><div class="page">
+</style></head><body><main class="main">
+<?php
+require_once __DIR__ . '/actions/admin_aside.php';
+require_once __DIR__ . '/actions/admin_header.php';
+?>
+<div class="page">
 <div class="heading"><div><h1><i class="fas fa-receipt" style="color:var(--blue)"></i> Transactions</h1><p><?=h($pharmacy_name)?> &mdash; all branches, <?=h(date('d M Y',strtotime($date)))?>.</p></div><button class="btn no-print" onclick="window.print()"><i class="fas fa-print"></i> Print</button></div>
 <div class="kpis"><div class="card kpi blue"><small>Total Revenue</small><strong><?=money($revenue)?></strong></div><div class="card kpi green"><small>Transactions</small><strong><?=number_format(count($rows))?></strong></div><div class="card kpi yellow"><small>Units Sold</small><strong><?=number_format($units)?></strong></div></div>
 <form class="card filters no-print"><div class="grid">
