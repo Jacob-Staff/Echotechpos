@@ -40,11 +40,11 @@ if ($branch_res && $b_row = mysqli_fetch_assoc($branch_res)) { $branch_label = $
 
             <div class="row g-4 text-center">
                 <div class="col-md-4">
-                    <div class="action-card shadow-sm" data-bs-toggle="modal" data-bs-target="#singleItemModal">
+                    <a href="add_product.php" class="action-card shadow-sm d-block text-decoration-none text-reset">
                         <div class="icon-box bg-green"><i class="mdi mdi-pill"></i></div>
                         <h5 class="fw-bold">ADD 1 PRODUCT</h5>
-                        <p class="text-muted small">Add single item with Strength details.</p>
-                    </div>
+                        <p class="text-muted small">Open the full Add Product page.</p>
+                    </a>
                 </div>
                 <div class="col-md-4">
                     <div class="action-card shadow-sm" onclick="document.getElementById('excelFile').click()">
