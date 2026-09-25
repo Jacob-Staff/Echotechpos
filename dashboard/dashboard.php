@@ -370,7 +370,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        <?= echotech_dashboard_href("expenses.php", "Expenses"); ?>
+                        href="expenses.php"
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-chart-bar me-1"></i>
