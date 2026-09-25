@@ -6,12 +6,17 @@
  */
 declare(strict_types=1);
 
+/* 24-hour rolling inactivity/session policy. */
+const ECHOTECH_SESSION_TIMEOUT = 86400;
+
 if (session_status() === PHP_SESSION_NONE) {
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443);
 
+    ini_set('session.gc_maxlifetime', (string)ECHOTECH_SESSION_TIMEOUT);
+
     session_set_cookie_params([
-        'lifetime' => 0,
+        'lifetime' => ECHOTECH_SESSION_TIMEOUT,
         'path' => '/',
         'secure' => $https,
         'httponly' => true,
@@ -93,6 +98,31 @@ function echotech_page_routes(): array
         'Add patient'           => 'add_patients.php',
         'Settings'              => 'settings.php',
     ];
+}
+
+/* ------------------------- Authentication redirect helpers ------------------------- */
+
+function echotech_is_client_request(): bool
+{
+    $script = strtolower(basename((string)($_SERVER['PHP_SELF'] ?? '')));
+    $uri = strtolower((string)($_SERVER['REQUEST_URI'] ?? ''));
+    $referer = strtolower((string)($_SERVER['HTTP_REFERER'] ?? ''));
+
+    return !empty($_SESSION['client_id']) && empty($_SESSION['user_id'])
+        || str_contains($uri, '/api/online_store.php')
+        || str_contains($uri, '/api/all_products.php')
+        || str_contains($uri, '/api/product_details.php')
+        || str_contains($uri, '/api/cart.php')
+        || str_contains($uri, '/api/upload_prescription.php')
+        || str_contains($uri, '/api/lab_results.php')
+        || str_contains($uri, '/api/register_client.php');
+}
+
+function echotech_login_url(string $error = 'session_expired'): string
+{
+    return echotech_is_client_request()
+        ? '/api/login_client.php?error=' . rawurlencode($error)
+        : '/index.php?error=' . rawurlencode($error);
 }
 
 /* ------------------------- Identity helpers ------------------------- */
@@ -200,13 +230,30 @@ function destroy_auth_session(): void
 function require_login(): void
 {
     if (!is_logged_in()) {
-        header('Location: /login_inc.php?error=session_expired');
+        header('Location: ' . echotech_login_url('session_expired'));
         exit;
+    }
+
+    /*
+     * Rolling inactivity timeout: every authenticated request refreshes the
+     * timestamp, so an actively used browser remains signed in. A session
+     * that has had no authenticated request for 24 hours is expired.
+     */
+    $lastActivity = (int)($_SESSION['last_activity'] ?? 0);
+    if ($lastActivity <= 0) {
+        $lastActivity = time();
+        $_SESSION['last_activity'] = $lastActivity;
+    } elseif ((time() - $lastActivity) >= ECHOTECH_SESSION_TIMEOUT) {
+        destroy_auth_session();
+        header('Location: ' . echotech_login_url('session_expired'));
+        exit;
+    } else {
+        $_SESSION['last_activity'] = time();
     }
 
     if (is_current_user_frozen()) {
         destroy_auth_session();
-        header('Location: /login_inc.php?error=account_frozen');
+        header('Location: ' . echotech_login_url('account_frozen'));
         exit;
     }
 
