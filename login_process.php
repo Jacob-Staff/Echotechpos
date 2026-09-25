@@ -23,6 +23,8 @@
 
 declare(strict_types=1);
 
+const ECHOTECH_SESSION_TIMEOUT = 86400;
+
 
 /*
 |--------------------------------------------------------------------------
@@ -31,6 +33,8 @@ declare(strict_types=1);
 */
 
 if (session_status() === PHP_SESSION_NONE) {
+
+    ini_set('session.gc_maxlifetime', (string) ECHOTECH_SESSION_TIMEOUT);
 
     $isHttps =
         (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
@@ -41,7 +45,7 @@ if (session_status() === PHP_SESSION_NONE) {
         );
 
     session_set_cookie_params([
-        'lifetime' => 0,
+        'lifetime' => ECHOTECH_SESSION_TIMEOUT,
         'path'     => '/',
         'secure'   => $isHttps,
         'httponly' => true,
@@ -267,6 +271,9 @@ session_regenerate_id(true);
 | Establish authenticated session
 |--------------------------------------------------------------------------
 */
+
+$_SESSION['auth_context'] = 'staff';
+$_SESSION['last_activity'] = time();
 
 $_SESSION['user_id'] = (int) $user['id'];
 
