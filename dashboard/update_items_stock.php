@@ -157,5 +157,27 @@ if ($branch_res && $b_row = mysqli_fetch_assoc($branch_res)) { $branch_label = $
 </script>
 <<?php
 $content = ob_get_clean();
-require "../includes/myheader.php"; 
+
+/*
+ * Shared POS shell.
+ * myheader.php is not part of the deployed application, so this page
+ * uses the same head/header/aside files used by the working dashboard pages.
+ */
+require_once "../includes/head.php";
 ?>
+
+<div id="main-wrapper">
+    <?php
+    if (file_exists(__DIR__ . "/../includes/header.php")) {
+        require_once __DIR__ . "/../includes/header.php";
+    }
+
+    if (file_exists(__DIR__ . "/../includes/aside.php")) {
+        require_once __DIR__ . "/../includes/aside.php";
+    }
+    ?>
+
+    <div class="page-wrapper">
+        <?php echo $content; ?>
+    </div>
+</div>
