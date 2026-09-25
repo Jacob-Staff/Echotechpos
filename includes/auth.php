@@ -6,17 +6,12 @@
  */
 declare(strict_types=1);
 
-/* 24-hour rolling inactivity/session policy. */
-const ECHOTECH_SESSION_TIMEOUT = 86400;
-
 if (session_status() === PHP_SESSION_NONE) {
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443);
 
-    ini_set('session.gc_maxlifetime', (string)ECHOTECH_SESSION_TIMEOUT);
-
     session_set_cookie_params([
-        'lifetime' => ECHOTECH_SESSION_TIMEOUT,
+        'lifetime' => 0,
         'path' => '/',
         'secure' => $https,
         'httponly' => true,
@@ -100,31 +95,6 @@ function echotech_page_routes(): array
     ];
 }
 
-/* ------------------------- Authentication redirect helpers ------------------------- */
-
-function echotech_is_client_request(): bool
-{
-    $script = strtolower(basename((string)($_SERVER['PHP_SELF'] ?? '')));
-    $uri = strtolower((string)($_SERVER['REQUEST_URI'] ?? ''));
-    $referer = strtolower((string)($_SERVER['HTTP_REFERER'] ?? ''));
-
-    return !empty($_SESSION['client_id']) && empty($_SESSION['user_id'])
-        || str_contains($uri, '/api/online_store.php')
-        || str_contains($uri, '/api/all_products.php')
-        || str_contains($uri, '/api/product_details.php')
-        || str_contains($uri, '/api/cart.php')
-        || str_contains($uri, '/api/upload_prescription.php')
-        || str_contains($uri, '/api/lab_results.php')
-        || str_contains($uri, '/api/register_client.php');
-}
-
-function echotech_login_url(string $error = 'session_expired'): string
-{
-    return echotech_is_client_request()
-        ? '/api/login_client.php?error=' . rawurlencode($error)
-        : '/index.php?error=' . rawurlencode($error);
-}
-
 /* ------------------------- Identity helpers ------------------------- */
 
 function is_logged_in(): bool
@@ -179,6 +149,38 @@ function current_branch_name(): string
 
 /* ------------------------- Frozen accounts ------------------------- */
 
+function is_current_branch_active(): bool
+{
+    global $conn;
+
+    $branchId = current_branch();
+    $pharmacyId = current_pharmacy();
+
+    /* Branch-less administrative accounts remain valid. */
+    if (!$branchId) return true;
+    if (!$pharmacyId || !isset($conn) || !($conn instanceof mysqli)) return false;
+
+    try {
+        $stmt = $conn->prepare(
+            "SELECT is_active
+             FROM branches
+             WHERE id=? AND pharmacy_id=?
+             LIMIT 1"
+        );
+        if (!$stmt) return false;
+
+        $stmt->bind_param('ii', $branchId, $pharmacyId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row !== null && (int)($row['is_active'] ?? 0) === 1;
+    } catch (Throwable $e) {
+        error_log('EchoTech active-branch check: '.$e->getMessage());
+        return false;
+    }
+}
+
 function is_current_user_frozen(): bool
 {
     global $conn;
@@ -230,30 +232,26 @@ function destroy_auth_session(): void
 function require_login(): void
 {
     if (!is_logged_in()) {
-        header('Location: ' . echotech_login_url('session_expired'));
+        header('Location: /login_inc.php?error=session_expired');
         exit;
-    }
-
-    /*
-     * Rolling inactivity timeout: every authenticated request refreshes the
-     * timestamp, so an actively used browser remains signed in. A session
-     * that has had no authenticated request for 24 hours is expired.
-     */
-    $lastActivity = (int)($_SESSION['last_activity'] ?? 0);
-    if ($lastActivity <= 0) {
-        $lastActivity = time();
-        $_SESSION['last_activity'] = $lastActivity;
-    } elseif ((time() - $lastActivity) >= ECHOTECH_SESSION_TIMEOUT) {
-        destroy_auth_session();
-        header('Location: ' . echotech_login_url('session_expired'));
-        exit;
-    } else {
-        $_SESSION['last_activity'] = time();
     }
 
     if (is_current_user_frozen()) {
         destroy_auth_session();
-        header('Location: ' . echotech_login_url('account_frozen'));
+        header('Location: /index.php?error=account_frozen');
+        exit;
+    }
+
+    /*
+     * A Super Admin can deactivate a branch globally. Once that happens,
+     * every existing staff session assigned to that branch is stopped here,
+     * before any protected POS page can render. This also closes the
+     * already-open browser session; the user cannot keep working until the
+     * branch is activated again.
+     */
+    if (!is_current_branch_active()) {
+        destroy_auth_session();
+        header('Location: /index.php?error=branch_inactive');
         exit;
     }
 
