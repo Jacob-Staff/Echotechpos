@@ -74,33 +74,27 @@ $product = $result->fetch_assoc();
 $stmt->close();
 ?>
 
-<!DOCTYPE html>
-<html dir="ltr" lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Update Product | <?php echo htmlspecialchars($pharmacy_display_name); ?></title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="dist/css/style.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body { background-color: #0f0f0f; color: #f8f9fa; font-family: 'Segoe UI', sans-serif; }
-        .page-wrapper { background-color: #0f0f0f; min-height: 100vh; }
+<?php ob_start(); ?>
+
+<style>
+
+        .update-product-content { background-color: #0f0f0f; color: #f8f9fa; font-family: 'Segoe UI', sans-serif; min-height: calc(100vh - 64px); padding: 30px 20px 40px; }
+        
         .card-form { background-color: #1a1a1a !important; border: 1px solid #333; border-radius: 15px; }
         .form-control, .form-select { background-color: #262626; border: 1px solid #444; color: #fff; padding: 12px; }
         .form-control:focus { background-color: #2d2d2d; border-color: #00ffae; color: #fff; box-shadow: 0 0 10px rgba(0, 255, 174, 0.2); }
         .btn-save { background-color: #00ffae; border: none; color: #000; font-weight: 800; text-transform: uppercase; }
         label { font-size: 0.85rem; color: #00ffae; margin-bottom: 5px; text-transform: uppercase; }
         .tax-review { background-color: #002b1e; border: 1px dashed #00ffae; padding: 15px; border-radius: 10px; color: #00ffae; }
-    </style>
-</head>
+    
+.update-product-content .card-form { max-width: 1100px; margin: 0 auto; }
+@media (max-width: 900px){ .update-product-content{padding:24px 14px 32px;} }
+@media (max-width: 600px){ .update-product-content{padding:18px 10px 28px;} .update-product-content .card-form .p-4{padding:1rem!important;} .update-product-content .card-header{gap:10px;} }
+</style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-<body>
-    <div id="main-wrapper" data-layout="vertical" data-navbarbg="skin5" data-sidebartype="full">
-        <?php require "../includes/header.php"; ?>
-        <?php require "../includes/aside.php"; ?>
+<div class="update-product-content">
 
-        <div class="page-wrapper">
             <div class="container-fluid pt-5">
                 <div class="row justify-content-center">
                     <div class="col-lg-10">
@@ -185,13 +179,13 @@ $stmt->close();
                     </div>
                 </div>
             </div>
-            <footer class="footer text-center mt-5 text-muted">© 2026 Echo Prime Ltd.</footer>
-        </div>
-    </div>
+            <footer class="footer text-center mt-5 text-muted">Â© 2026 Echo Prime Ltd.</footer>
 
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
         function calc() {
             let p = parseFloat($('#u_price').val()) || 0;
             let t = parseFloat($('#u_tax').val()) || 0;
@@ -200,7 +194,28 @@ $stmt->close();
             $('#total_disp').text('K ' + (p + taxAmt).toFixed(2));
         }
         $('#u_price, #u_tax').on('input', calc);
-        calc(); // Init on load
-    </script>
-</body>
-</html>
+        calc();
+</script>
+
+<?php
+$content = ob_get_clean();
+
+/* Shared POS shell: same header/sidebar structure as the working stock pages. */
+require_once "../includes/head.php";
+?>
+
+<div id="main-wrapper">
+    <?php
+    if (file_exists(__DIR__ . "/../includes/header.php")) {
+        require_once __DIR__ . "/../includes/header.php";
+    }
+
+    if (file_exists(__DIR__ . "/../includes/aside.php")) {
+        require_once __DIR__ . "/../includes/aside.php";
+    }
+    ?>
+
+    <div class="page-wrapper">
+        <?php echo $content; ?>
+    </div>
+</div>
