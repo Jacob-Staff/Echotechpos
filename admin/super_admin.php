@@ -284,30 +284,139 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         switch ($action) {
             case 'create_pharmacy':
+                /*
+                 * This intentionally mirrors the former register_pharmacy.php
+                 * workflow: create the pharmacy, create its first branch, then
+                 * create the linked Master Admin account in one transaction.
+                 */
                 $name = trim((string)($_POST['name'] ?? ''));
-                $address = trim((string)($_POST['address'] ?? ''));
-                $phone = trim((string)($_POST['phone'] ?? ''));
-                $branchName = trim((string)($_POST['branch_name'] ?? ''));
-                $branchCode = trim((string)($_POST['branch_code'] ?? ''));
-                $branchLocation = trim((string)($_POST['branch_location'] ?? ''));
-                if ($name === '' || $branchName === '') throw new RuntimeException('Pharmacy name and first branch name are required.');
+                $location = trim((string)($_POST['location'] ?? ''));
+                $branchName = trim((string)($_POST['first_branch_name'] ?? ''));
+                $branchCode = strtoupper(trim((string)($_POST['branch_code'] ?? '')));
+                $username = trim((string)($_POST['username'] ?? ''));
+                $email = trim((string)($_POST['email'] ?? ''));
+                $plainPassword = (string)($_POST['password'] ?? '');
+
+                if ($name === '' || $location === '' || $branchName === '' || $branchCode === '' || $username === '' || $email === '' || $plainPassword === '') {
+                    throw new RuntimeException('Pharmacy name, location, first branch, branch code, Admin username, email and password are required.');
+                }
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    throw new RuntimeException('Please enter a valid Admin email address.');
+                }
+                if (strlen($plainPassword) < 8) {
+                    throw new RuntimeException('The Master Admin password must be at least 8 characters.');
+                }
+
+                $existingUsername = sa_one($db, 'SELECT id FROM users WHERE username=? LIMIT 1', 's', [$username]);
+                if ($existingUsername) throw new RuntimeException('That Admin username is already registered.');
+                $existingEmail = sa_one($db, 'SELECT id FROM users WHERE email=? LIMIT 1', 's', [$email]);
+                if ($existingEmail) throw new RuntimeException('That Admin email is already registered.');
 
                 $db->begin_transaction();
-                $stmt = $db->prepare('INSERT INTO pharmacies (name,address,phone) VALUES (?,?,?)');
-                if (!$stmt) throw new RuntimeException($db->error);
-                $stmt->bind_param('sss', $name, $address, $phone);
-                if (!$stmt->execute()) { $e = $stmt->error; $stmt->close(); throw new RuntimeException($e); }
-                $pharmacyId = (int)$stmt->insert_id;
-                $stmt->close();
+                try {
+                    $stmt = $db->prepare('INSERT INTO pharmacies (name,address) VALUES (?,?)');
+                    if (!$stmt) throw new RuntimeException($db->error);
+                    $stmt->bind_param('ss', $name, $location);
+                    if (!$stmt->execute()) { $e = $stmt->error; $stmt->close(); throw new RuntimeException($e); }
+                    $pharmacyId = (int)$stmt->insert_id;
+                    $stmt->close();
 
-                $stmt = $db->prepare('INSERT INTO branches (pharmacy_id,branch_code,branch_name,location,is_active) VALUES (?,?,?,?,1)');
-                if (!$stmt) throw new RuntimeException($db->error);
-                $stmt->bind_param('isss', $pharmacyId, $branchCode, $branchName, $branchLocation);
-                if (!$stmt->execute()) { $e = $stmt->error; $stmt->close(); throw new RuntimeException($e); }
-                $stmt->close();
-                $db->commit();
-                sa_log($db, 'SUPER_ADMIN_CREATE_PHARMACY', 'pharmacy', $pharmacyId, 'Created pharmacy ' . $name . ' with first branch ' . $branchName . '.');
-                sa_redirect('pharmacies', 'Pharmacy created successfully.');
+                    $stmt = $db->prepare('INSERT INTO branches (pharmacy_id,branch_name,branch_code,location,is_active) VALUES (?,?,?,?,1)');
+                    if (!$stmt) throw new RuntimeException($db->error);
+                    $stmt->bind_param('isss', $pharmacyId, $branchName, $branchCode, $location);
+                    if (!$stmt->execute()) { $e = $stmt->error; $stmt->close(); throw new RuntimeException($e); }
+                    $branchId = (int)$stmt->insert_id;
+                    $stmt->close();
+
+                    $hash = password_hash($plainPassword, PASSWORD_DEFAULT);
+                    $role = 'Admin';
+                    $status = 'Active';
+                    $stmt = $db->prepare('INSERT INTO users (pharmacy_id,branch_id,username,password,email,role,status) VALUES (?,?,?,?,?,?,?)');
+                    if (!$stmt) throw new RuntimeException($db->error);
+                    $stmt->bind_param('iisssss', $pharmacyId, $branchId, $username, $hash, $email, $role, $status);
+                    if (!$stmt->execute()) { $e = $stmt->error; $stmt->close(); throw new RuntimeException($e); }
+                    $adminUserId = (int)$stmt->insert_id;
+                    $stmt->close();
+
+                    $db->commit();
+                } catch (Throwable $e) {
+                    $db->rollback();
+                    throw $e;
+                }
+
+                sa_log($db, 'SUPER_ADMIN_CREATE_PHARMACY', 'pharmacy', $pharmacyId, 'Created pharmacy ' . $name . ', first branch ' . $branchName . ', and Master Admin ' . $username . ' (user #' . $adminUserId . ').');
+                sa_redirect('pharmacies', 'Pharmacy, first branch and Master Admin account created successfully.');
+
+            case 'delete_pharmacy':
+                $pharmacyId = (int)($_POST['pharmacy_id'] ?? 0);
+                $confirmName = trim((string)($_POST['confirm_name'] ?? ''));
+                if ($pharmacyId <= 0) throw new RuntimeException('Invalid pharmacy selected.');
+
+                $pharmacy = sa_one($db, 'SELECT id,name FROM pharmacies WHERE id=? LIMIT 1', 'i', [$pharmacyId]);
+                if (!$pharmacy) throw new RuntimeException('Pharmacy not found.');
+                if ($confirmName === '' || !hash_equals((string)$pharmacy['name'], $confirmName)) {
+                    throw new RuntimeException('Deletion was not confirmed. Type the pharmacy name exactly to continue.');
+                }
+
+                /*
+                 * A pharmacy deletion is intentionally destructive. All tenant
+                 * records carrying pharmacy_id are removed, then branches and
+                 * the pharmacy itself are removed. Foreign-key checks are
+                 * disabled only for this connection while the tenant is being
+                 * purged so legacy/non-cascading constraints cannot leave a
+                 * half-deleted tenant.
+                 */
+                $db->begin_transaction();
+                $fkDisabled = false;
+                try {
+                    $branchIds = [];
+                    foreach (sa_rows($db, 'SELECT id FROM branches WHERE pharmacy_id=?', 'i', [$pharmacyId]) as $row) {
+                        $branchIds[] = (int)$row['id'];
+                    }
+
+                    $tables = [];
+                    $schemaResult = $db->query("SELECT DISTINCT c.TABLE_NAME FROM INFORMATION_SCHEMA.COLUMNS c INNER JOIN INFORMATION_SCHEMA.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=DATABASE() AND t.TABLE_TYPE='BASE TABLE' AND c.COLUMN_NAME IN ('pharmacy_id','branch_id') AND c.TABLE_NAME NOT IN ('pharmacies','echotech_super_admins','echotech_super_admin_settings') ORDER BY c.TABLE_NAME");
+                    if ($schemaResult) {
+                        while ($row = $schemaResult->fetch_assoc()) $tables[] = (string)$row['TABLE_NAME'];
+                        $schemaResult->free();
+                    }
+
+                    if (!$db->query('SET FOREIGN_KEY_CHECKS=0')) throw new RuntimeException($db->error);
+                    $fkDisabled = true;
+
+                    foreach ($tables as $table) {
+                        $safeTable = '`' . str_replace('`', '``', $table) . '`';
+                        $hasPharmacy = sa_one($db, "SELECT 1 AS x FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME='pharmacy_id' LIMIT 1", 's', [$table]);
+                        if ($hasPharmacy) {
+                            if (!$db->query("DELETE FROM {$safeTable} WHERE pharmacy_id=" . $pharmacyId)) {
+                                throw new RuntimeException('Failed deleting tenant data from ' . $table . ': ' . $db->error);
+                            }
+                        } elseif ($branchIds) {
+                            $ids = implode(',', array_map('intval', $branchIds));
+                            if (!$db->query("DELETE FROM {$safeTable} WHERE branch_id IN ({$ids})")) {
+                                throw new RuntimeException('Failed deleting branch data from ' . $table . ': ' . $db->error);
+                            }
+                        }
+                    }
+
+                    if (!$db->query('DELETE FROM branches WHERE pharmacy_id=' . $pharmacyId)) {
+                        throw new RuntimeException('Failed deleting pharmacy branches: ' . $db->error);
+                    }
+                    if (!$db->query('DELETE FROM pharmacies WHERE id=' . $pharmacyId)) {
+                        throw new RuntimeException('Failed deleting pharmacy: ' . $db->error);
+                    }
+
+                    if (!$db->query('SET FOREIGN_KEY_CHECKS=1')) throw new RuntimeException($db->error);
+                    $fkDisabled = false;
+                    $db->commit();
+                } catch (Throwable $e) {
+                    $db->rollback();
+                    if ($fkDisabled) @$db->query('SET FOREIGN_KEY_CHECKS=1');
+                    throw $e;
+                }
+
+                sa_log($db, 'SUPER_ADMIN_DELETE_PHARMACY', 'pharmacy', $pharmacyId, 'Permanently deleted pharmacy ' . $pharmacy['name'] . ' and all tenant records, including its branches and staff accounts.');
+                sa_redirect('pharmacies', 'Pharmacy and all of its branches and tenant data were permanently deleted.');
 
             case 'update_pharmacy':
                 $pharmacyId = (int)($_POST['pharmacy_id'] ?? 0);
@@ -597,9 +706,9 @@ function sa_nav_active(string $name,string $tab): string { return $name===$tab?'
 
 <?php if ($tab === 'pharmacies'): ?>
 <div class="titlebar"><div><h1>Pharmacy / Tenant Management</h1><p>Create tenants, update tenant profiles and inspect their platform footprint.</p></div></div>
-<div class="section"><div class="section-head"><h2>Create new pharmacy</h2></div><div class="section-body"><form method="post"><input type="hidden" name="action" value="create_pharmacy"><input type="hidden" name="return_tab" value="pharmacies"><input type="hidden" name="csrf" value="<?=sa_h($csrf)?>"><div class="form-grid three"><div class="field"><label>Pharmacy name *</label><input name="name" required></div><div class="field"><label>Phone</label><input name="phone"></div><div class="field"><label>Address</label><input name="address"></div><div class="field"><label>First branch name *</label><input name="branch_name" required></div><div class="field"><label>Branch code</label><input name="branch_code"></div><div class="field"><label>Branch location</label><input name="branch_location"></div></div><div style="margin-top:12px"><button class="btn btn-primary">Create pharmacy + first branch</button></div></form></div></div>
-<div class="section"><div class="section-head"><h2>All pharmacies</h2><span class="badge blue"><?=count($pharmacies)?> tenants</span></div><div class="section-body"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Pharmacy</th><th>Branches</th><th>Users</th><th>Sales</th><th>Revenue</th><th>Action</th></tr></thead><tbody><?php foreach($pharmacies as $p): ?><tr><td>#<?=sa_h($p['id'])?></td><td><strong><?=sa_h($p['name'])?></strong><br><span class="muted"><?=sa_h($p['address'] ?: 'â€”')?> Â· <?=sa_h($p['phone'] ?: 'â€”')?></span></td><td><?=sa_h($p['active_branch_count'])?> active / <?=sa_h($p['branch_count'])?></td><td><?=sa_h($p['user_count'])?></td><td><?=sa_h($p['sales_count'])?></td><td>K<?=number_format((float)$p['revenue'],2)?></td><td><button class="btn" type="button" onclick="document.getElementById('edit<?=sa_h($p['id'])?>').showModal()">Edit</button></td></tr><?php endforeach; ?></tbody></table></div></div></div>
-<?php foreach($pharmacies as $p): ?><dialog id="edit<?=sa_h($p['id'])?>" style="border:0;border-radius:14px;padding:0;max-width:560px;width:calc(100% - 30px)"><form method="post" style="padding:20px"><input type="hidden" name="action" value="update_pharmacy"><input type="hidden" name="return_tab" value="pharmacies"><input type="hidden" name="csrf" value="<?=sa_h($csrf)?>"><input type="hidden" name="pharmacy_id" value="<?=sa_h($p['id'])?>"><h3>Edit <?=sa_h($p['name'])?></h3><div class="form-grid"><div class="field full"><label>Name</label><input name="name" value="<?=sa_h($p['name'])?>" required></div><div class="field"><label>Phone</label><input name="phone" value="<?=sa_h($p['phone'])?>"></div><div class="field"><label>Address</label><input name="address" value="<?=sa_h($p['address'])?>"></div></div><div class="actions" style="margin-top:14px"><button class="btn btn-primary">Save</button><button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button></div></form></dialog><?php endforeach; ?>
+<div class="section"><div class="section-head"><h2>Create new pharmacy + Master Admin</h2><span class="badge blue">Same registration flow</span></div><div class="section-body"><form method="post"><input type="hidden" name="action" value="create_pharmacy"><input type="hidden" name="return_tab" value="pharmacies"><input type="hidden" name="csrf" value="<?=sa_h($csrf)?>"><div class="section-title" style="margin-bottom:10px">1. Brand Identity</div><div class="form-grid three"><div class="field"><label>Corporate / Pharmacy Name *</label><input name="name" required></div><div class="field"><label>Headquarters Location *</label><input name="location" required></div></div><div class="section-title" style="margin:18px 0 10px">2. Initial Branch Configuration</div><div class="form-grid three"><div class="field"><label>Branch Display Name *</label><input name="first_branch_name" required></div><div class="field"><label>Branch Code *</label><input name="branch_code" required></div></div><div class="section-title" style="margin:18px 0 10px">3. Master Admin Account</div><div class="form-grid three"><div class="field"><label>Admin Username *</label><input name="username" required></div><div class="field"><label>Business Email *</label><input name="email" type="email" required></div><div class="field"><label>Secure Password *</label><input name="password" type="password" minlength="8" required></div></div><div style="margin-top:14px"><button class="btn btn-primary">Create Pharmacy + First Branch + Master Admin</button></div></form></div></div>
+<div class="section"><div class="section-head"><h2>All pharmacies</h2><span class="badge blue"><?=count($pharmacies)?> tenants</span></div><div class="section-body"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Pharmacy</th><th>Branches</th><th>Users</th><th>Sales</th><th>Revenue</th><th>Action</th></tr></thead><tbody><?php foreach($pharmacies as $p): ?><tr><td>#<?=sa_h($p['id'])?></td><td><strong><?=sa_h($p['name'])?></strong><br><span class="muted"><?=sa_h($p['address'] ?: 'â€”')?> Â· <?=sa_h($p['phone'] ?: 'â€”')?></span></td><td><?=sa_h($p['active_branch_count'])?> active / <?=sa_h($p['branch_count'])?></td><td><?=sa_h($p['user_count'])?></td><td><?=sa_h($p['sales_count'])?></td><td>K<?=number_format((float)$p['revenue'],2)?></td><td><div class="actions"><button class="btn" type="button" onclick="document.getElementById('edit<?=sa_h($p['id'])?>').showModal()">Edit</button><button class="btn btn-danger" type="button" onclick="document.getElementById('delete<?=sa_h($p['id'])?>').showModal()">Delete</button></div></td></tr><?php endforeach; ?></tbody></table></div></div></div>
+<?php foreach($pharmacies as $p): ?><dialog id="edit<?=sa_h($p['id'])?>" style="border:0;border-radius:14px;padding:0;max-width:560px;width:calc(100% - 30px)"><form method="post" style="padding:20px"><input type="hidden" name="action" value="update_pharmacy"><input type="hidden" name="return_tab" value="pharmacies"><input type="hidden" name="csrf" value="<?=sa_h($csrf)?>"><input type="hidden" name="pharmacy_id" value="<?=sa_h($p['id'])?>"><h3>Edit <?=sa_h($p['name'])?></h3><div class="form-grid"><div class="field full"><label>Name</label><input name="name" value="<?=sa_h($p['name'])?>" required></div><div class="field"><label>Phone</label><input name="phone" value="<?=sa_h($p['phone'])?>"></div><div class="field"><label>Address</label><input name="address" value="<?=sa_h($p['address'])?>"></div></div><div class="actions" style="margin-top:14px"><button class="btn btn-primary">Save</button><button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button></div></form></dialog><dialog id="delete<?=sa_h($p['id'])?>" style="border:0;border-radius:14px;padding:0;max-width:560px;width:calc(100% - 30px)"><form method="post" style="padding:20px"><input type="hidden" name="action" value="delete_pharmacy"><input type="hidden" name="return_tab" value="pharmacies"><input type="hidden" name="csrf" value="<?=sa_h($csrf)?>"><input type="hidden" name="pharmacy_id" value="<?=sa_h($p['id'])?>"><h3 style="color:#c62828">Permanently delete <?=sa_h($p['name'])?>?</h3><p class="muted">This permanently removes the pharmacy, all branches, staff accounts, products, sales, orders, payroll, compliance records and other tenant data. This cannot be undone.</p><div class="field"><label>Type the pharmacy name to confirm</label><input name="confirm_name" autocomplete="off" required></div><div class="actions" style="margin-top:14px"><button class="btn btn-danger">Permanently Delete Pharmacy</button><button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button></div></form></dialog><?php endforeach; ?>
 <?php endif; ?>
 
 <?php if ($tab === 'branches'): ?>
