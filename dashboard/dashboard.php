@@ -370,7 +370,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        href="expenses.php"
+                        <?= echotech_dashboard_href("expenses.php", "Expenses"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-chart-bar me-1"></i>
@@ -386,7 +386,7 @@ require_once "../includes/head.php";
                     </a>
 
                     <a
-                        <?= echotech_dashboard_href("sales_trend.php", "Sales trend"); ?>
+                        <?= echotech_dashboard_href("sales_trend.php", "Expenses sales trend"); ?>
                         class="text-dark text-decoration-none small fw-semibold me-2"
                     >
                         <i class="mdi mdi-trending-up me-1"></i>
