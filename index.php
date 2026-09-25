@@ -27,6 +27,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit();
         }
 
+        // 2b. CHECK BRANCH STATUS: inactive branches cannot sign in.
+        $branchId = (int)($user['branch_id'] ?? 0);
+        if ($branchId > 0) {
+            $branchStmt = $conn->prepare(
+                "SELECT is_active
+                 FROM branches
+                 WHERE id = ? AND pharmacy_id = ?
+                 LIMIT 1"
+            );
+            $branchStmt->bind_param("ii", $branchId, $user['pharmacy_id']);
+            $branchStmt->execute();
+            $branchRow = $branchStmt->get_result()->fetch_assoc();
+            $branchStmt->close();
+
+            if (!$branchRow || (int)($branchRow['is_active'] ?? 0) !== 1) {
+                header("Location: index.php?error=branch_inactive");
+                exit();
+            }
+        }
+
         // 3. PASSWORD VERIFICATION
         if (password_verify($password, $user['password'])) {
             
@@ -41,22 +61,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['branch_id']       = $user['branch_id']; 
 
             // 6. ROLE-BASED ROUTING
-            // IMPORTANT: Human Resource must land in the HR portal,
-            // not the normal POS dashboard.
-            $role = trim((string)($user['role'] ?? ''));
+            $role = ucfirst(strtolower($user['role']));
 
-            if (strcasecmp($role, 'Human Resource') === 0) {
-                header("Location: admin/employee_management.php");
-                exit();
-            }
-
-            if (strcasecmp($role, 'Admin') === 0) {
+            if ($role === 'Admin') {
                 header("Location: admin/admin_dashboard.php");
-                exit();
+            } else {
+                header("Location: dashboard/dashboard.php");
             }
-
-            // All other POS staff retain the normal dashboard.
-            header("Location: dashboard/dashboard.php");
             exit();
 
         } else {
@@ -171,6 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $err = $_GET['error'];
                 if($err == "empty_fields") echo "Please fill in all fields.";
                 elseif($err == "account_frozen") echo "Account is suspended. Contact owner.";
+                elseif($err == "branch_inactive") echo "Your branch is currently inactive. Access has been disabled by the platform administrator.";
                 elseif($err == "wrong_password") echo "Incorrect password.";
                 elseif($err == "user_not_found") echo "Username not recognized.";
                 else echo "Access Denied.";
