@@ -37,7 +37,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     . rawurlencode($token);
 
                 $name = trim((string)($account['full_name'] ?? $account['username'] ?? 'there')) ?: 'there';
-                $pharmacyName = trim((string)($account['pharmacy_name'] ?? '')) ?: 'Pharmacy';
+
+                /*
+                 * Pharmacy branding is resolved separately. It cannot prevent
+                 * the reset token or Brevo email from being sent.
+                 */
+                $pharmacyName = echotech_reset_get_pharmacy_name(
+                    $conn,
+                    (int)($account['pharmacy_id'] ?? 0)
+                );
 
                 $safeName = echotech_reset_h($name);
                 $safePharmacy = echotech_reset_h($pharmacyName);
@@ -46,7 +54,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                 $subject = $pharmacyName . ' password reset';
 
                 $html = '<div style="font-family:Arial,sans-serif;max-width:600px;color:#202124">'
-                    . '<h2 style="margin-bottom:20px">' . $safeBranch . '</h2>'
+                    . '<div style="font-size:22px;font-weight:700;margin:0 0 8px">EchoTech</div>'
+                    . '<div style="font-size:18px;font-weight:600;margin:0 0 26px">'
+                    . $safePharmacy . ' password reset'
+                    . '</div>'
                     . '<p>Hello ' . $safeName . ',</p>'
                     . '<p>We received a request to reset your password.</p>'
                     . '<p>Use the button below to create a new password for your account.</p>'
@@ -58,12 +69,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     . '<p style="font-size:14px;color:#5f6368">If you did not request this, you can safely ignore this email.</p>'
                     . '</div>';
 
-                $text = "EchoTech\n{$pharmacyName} password reset\n\n"
+                $text = "EchoTech\n"
+                    . "{$pharmacyName} password reset\n\n"
                     . "Hello {$name},\n\n"
                     . "We received a request to reset your password.\n\n"
                     . "Reset your password here:\n{$url}\n\n"
                     . "This link expires in 30 minutes and can only be used once.\n"
-                    . "If you did not request this, you can safely ignore this email.\n";
+                    . "If you did not request this, you can safely ignore this email.\n\n"
+                    . "EchoTech";
 
                 $mailSent = echotech_reset_send_mail(
                     (string)$account['email'],
@@ -71,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     $subject,
                     $html,
                     $text,
-                    $pharmacyName
+                    'EchoTech'
                 );
 
                 if (!$mailSent) {
