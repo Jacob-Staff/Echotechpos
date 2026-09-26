@@ -37,7 +37,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     . rawurlencode($token);
 
                 $name = trim((string)($account['full_name'] ?? $account['username'] ?? 'there')) ?: 'there';
-                $pharmacyName = trim((string)($account['pharmacy_name'] ?? '')) ?: 'Pharmacy';
+
+                /*
+                 * Pharmacy branding is resolved separately. It cannot prevent
+                 * the reset token or Brevo email from being sent.
+                 */
+                $pharmacyName = echotech_reset_get_pharmacy_name(
+                    $conn,
+                    (int)($account['pharmacy_id'] ?? 0)
+                );
 
                 $safeName = echotech_reset_h($name);
                 $safePharmacy = echotech_reset_h($pharmacyName);
