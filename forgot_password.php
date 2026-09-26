@@ -37,13 +37,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     . rawurlencode($token);
 
                 $name = trim((string)($account['full_name'] ?? $account['username'] ?? 'there')) ?: 'there';
-                $pharmacyName = trim((string)($account['pharmacy_name'] ?? '')) ?: 'Your Pharmacy';
+                $branchName = trim((string)($account['branch_name'] ?? '')) ?: 'Branch';
 
                 $safeName = echotech_reset_h($name);
-                $safePharmacy = echotech_reset_h($pharmacyName);
+                $safeBranch = echotech_reset_h($branchName);
                 $safeUrl = echotech_reset_h($url);
 
-                $subject = $pharmacyName . ' â€” Password Reset';
+                $subject = $branchName . ' password reset';
 
                 $html = '<div style="font-family:Arial,sans-serif;max-width:600px;color:#202124">'
                     . '<h2 style="margin-bottom:20px">' . $safePharmacy . '</h2>'
@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     . '<p style="font-size:14px;color:#5f6368">If you did not request this, you can safely ignore this email.</p>'
                     . '</div>';
 
-                $text = "{$pharmacyName} â€” Password Reset\n\n"
+                $text = "EchoTech\n{$branchName} password reset\n\n"
                     . "Hello {$name},\n\n"
                     . "We received a request to reset your password.\n\n"
                     . "Reset your password here:\n{$url}\n\n"
@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     $subject,
                     $html,
                     $text,
-                    $pharmacyName
+                    $branchName
                 );
 
                 if (!$mailSent) {
