@@ -70,7 +70,7 @@ function echotech_reset_find_account(mysqli $db,string $type,string $identifier)
             $stmt=$db->prepare("SELECT id, full_name, email FROM clients WHERE LOWER(TRIM(email))=LOWER(TRIM(?)) LIMIT 1");
             if(!$stmt)return null; $stmt->bind_param('s',$identifier);
         }else{
-            $stmt=$db->prepare("SELECT u.id,u.full_name,u.username,u.email,u.status,u.is_frozen,u.pharmacy_id,u.branch_id,COALESCE(NULLIF(TRIM(b.branch_name),''),'Branch') AS branch_name FROM users u LEFT JOIN branches b ON b.id=u.branch_id AND b.pharmacy_id=u.pharmacy_id WHERE LOWER(TRIM(u.email))=LOWER(TRIM(?)) OR LOWER(TRIM(u.username))=LOWER(TRIM(?)) LIMIT 1");
+            $stmt=$db->prepare("SELECT u.id,u.full_name,u.username,u.email,u.status,u.is_frozen,u.pharmacy_id,COALESCE(NULLIF(TRIM(p.name),''),'Pharmacy') AS pharmacy_name FROM users u LEFT JOIN pharmacies p ON p.id=u.pharmacy_id WHERE LOWER(TRIM(u.email))=LOWER(TRIM(?)) OR LOWER(TRIM(u.username))=LOWER(TRIM(?)) LIMIT 1");
             if(!$stmt)return null; $stmt->bind_param('ss',$identifier,$identifier);
         }
         $stmt->execute(); $row=$stmt->get_result()->fetch_assoc()?:null; $stmt->close(); return $row;
