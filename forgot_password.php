@@ -75,8 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     . "We received a request to reset your password.\n\n"
                     . "Reset your password here:\n{$url}\n\n"
                     . "This link expires in 30 minutes and can only be used once.\n"
-                    . "If you did not request this, you can safely ignore this email.\n\n"
-                    . "EchoTech";
+                    . "If you did not request this, you can safely ignore this email.";
 
                 $mailSent = echotech_reset_send_mail(
                     (string)$account['email'],
