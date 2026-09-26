@@ -70,12 +70,65 @@ function echotech_reset_find_account(mysqli $db,string $type,string $identifier)
             $stmt=$db->prepare("SELECT id, full_name, email FROM clients WHERE LOWER(TRIM(email))=LOWER(TRIM(?)) LIMIT 1");
             if(!$stmt)return null; $stmt->bind_param('s',$identifier);
         }else{
-            $stmt=$db->prepare("SELECT u.id,u.full_name,u.username,u.email,u.status,u.is_frozen,u.pharmacy_id,COALESCE(NULLIF(TRIM(p.name),''),'Pharmacy') AS pharmacy_name FROM users u LEFT JOIN pharmacies p ON p.id=u.pharmacy_id WHERE LOWER(TRIM(u.email))=LOWER(TRIM(?)) OR LOWER(TRIM(u.username))=LOWER(TRIM(?)) LIMIT 1");
+            $stmt=$db->prepare("SELECT id,full_name,username,email,status,is_frozen,pharmacy_id FROM users WHERE LOWER(TRIM(email))=LOWER(TRIM(?)) OR LOWER(TRIM(username))=LOWER(TRIM(?)) LIMIT 1");
             if(!$stmt)return null; $stmt->bind_param('ss',$identifier,$identifier);
         }
         $stmt->execute(); $row=$stmt->get_result()->fetch_assoc()?:null; $stmt->close(); return $row;
     } catch(Throwable $e){echotech_reset_log('Account lookup failed: '.$e->getMessage());return null;}
 }
+function echotech_reset_get_pharmacy_name(mysqli $db, int $pharmacyId): string
+{
+    if ($pharmacyId <= 0) {
+        return 'Pharmacy';
+    }
+
+    try {
+        /*
+         * Resolve the actual pharmacy display-name column without making the
+         * password-reset user lookup depend on the pharmacy table structure.
+         * Common EchoTech schemas use name; pharmacy_name is supported too.
+         */
+        $columns = [];
+        $result = $db->query("SHOW COLUMNS FROM pharmacies");
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $columns[] = strtolower((string)($row['Field'] ?? ''));
+            }
+            $result->free();
+        }
+
+        $candidate = null;
+        foreach (['name', 'pharmacy_name', 'business_name'] as $column) {
+            if (in_array($column, $columns, true)) {
+                $candidate = $column;
+                break;
+            }
+        }
+
+        if ($candidate === null) {
+            echotech_reset_log('Could not identify pharmacy name column.');
+            return 'Pharmacy';
+        }
+
+        $sql = "SELECT `$candidate` AS pharmacy_name FROM pharmacies WHERE id=? LIMIT 1";
+        $stmt = $db->prepare($sql);
+        if (!$stmt) {
+            return 'Pharmacy';
+        }
+
+        $stmt->bind_param('i', $pharmacyId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc() ?: [];
+        $stmt->close();
+
+        $name = trim((string)($row['pharmacy_name'] ?? ''));
+        return $name !== '' ? $name : 'Pharmacy';
+    } catch (Throwable $e) {
+        echotech_reset_log('Pharmacy name lookup failed: ' . $e->getMessage());
+        return 'Pharmacy';
+    }
+}
+
 function echotech_reset_allowed(mysqli $db,string $type,int $accountId,string $email,string $ip): bool {
     try{
         $stmt=$db->prepare("SELECT COUNT(*) AS total FROM password_reset_tokens WHERE account_type=? AND account_id=? AND created_at>=(NOW()-INTERVAL 1 MINUTE)"); if(!$stmt)return false; $stmt->bind_param('si',$type,$accountId); $stmt->execute(); $recent=(int)($stmt->get_result()->fetch_assoc()['total']??0); $stmt->close(); if($recent>0)return false;
