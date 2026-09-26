@@ -78,65 +78,55 @@ function echotech_reset_find_account(mysqli $db,string $type,string $identifier)
 }
 function echotech_reset_get_pharmacy_name(mysqli $db, int $pharmacyId): string
 {
+    /*
+     * IMPORTANT TENANCY RULE:
+     * The pharmacy belongs to users.pharmacy_id.
+     * branch_id is NEVER used to determine the pharmacy name.
+     * There is deliberately no PHARMANOVA, branch name, or other tenant
+     * hardcoded anywhere in this function.
+     */
     if ($pharmacyId <= 0) {
-        return 'Your Pharmacy';
+        echotech_reset_log('Invalid pharmacy_id while resolving pharmacy name.');
+        return 'Pharmacy';
     }
 
     try {
         /*
-         * The tenant comes from users.pharmacy_id.
-         * branch_id is deliberately NOT used here.
-         *
-         * The live EchoTech schema has used more than one possible display
-         * column over time, so discover the real column instead of hardcoding
-         * PHARMANOVA or any other pharmacy name.
+         * The existing EchoTech POS schema uses the pharmacies table and
+         * its display name is `name` (the same tenant lookup used by the
+         * existing Payroll implementation). Keep this lookup simple and
+         * deterministic instead of trying to derive the name from branches.
          */
-        $result = $db->query("SHOW COLUMNS FROM pharmacies");
-        if (!$result) {
-            return 'Your Pharmacy';
+        $stmt = $db->prepare(
+            'SELECT name AS pharmacy_display_name
+             FROM pharmacies
+             WHERE id = ?
+             LIMIT 1'
+        );
+
+        if (!$stmt) {
+            echotech_reset_log('Could not prepare pharmacy name lookup for pharmacy_id ' . $pharmacyId . '.');
+            return 'Pharmacy';
         }
 
-        $columns = [];
-        while ($row = $result->fetch_assoc()) {
-            $field = trim((string)($row['Field'] ?? ''));
-            if ($field !== '') {
-                $columns[strtolower($field)] = $field;
-            }
-        }
-        $result->free();
+        $stmt->bind_param('i', $pharmacyId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc() ?: [];
+        $stmt->close();
 
-        foreach (['pharmacy_name', 'business_name', 'name'] as $wanted) {
-            if (!isset($columns[$wanted])) {
-                continue;
-            }
+        $name = trim((string)($row['pharmacy_display_name'] ?? ''));
 
-            $actualColumn = $columns[$wanted];
-            $sql = "SELECT `$actualColumn` AS pharmacy_display_name
-                    FROM pharmacies
-                    WHERE id = ?
-                    LIMIT 1";
-
-            $stmt = $db->prepare($sql);
-            if (!$stmt) {
-                continue;
-            }
-
-            $stmt->bind_param('i', $pharmacyId);
-            $stmt->execute();
-            $row = $stmt->get_result()->fetch_assoc() ?: [];
-            $stmt->close();
-
-            $name = trim((string)($row['pharmacy_display_name'] ?? ''));
-            if ($name !== '') {
-                return $name;
-            }
+        if ($name === '') {
+            echotech_reset_log('Pharmacy name is empty for pharmacy_id ' . $pharmacyId . '.');
+            return 'Pharmacy';
         }
 
-        echotech_reset_log('No pharmacy display name found for pharmacy_id ' . $pharmacyId . '.');
-        return 'Your Pharmacy';
+        return $name;
     } catch (Throwable $e) {
-        echotech_reset_log('Pharmacy name lookup failed: ' . $e->getMessage());
-        return 'Your Pharmacy';
+        echotech_reset_log(
+            'Pharmacy name lookup failed for pharmacy_id ' . $pharmacyId . ': ' . $e->getMessage()
+        );
+        return 'Pharmacy';
     }
 }
 
