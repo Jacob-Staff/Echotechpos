@@ -878,7 +878,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <div class="col-md-6"><label class="form-label small fw-bold">Full Name</label><input name="full_name" class="form-control" required></div>
 <div class="col-md-6"><label class="form-label small fw-bold">Username</label><input name="username" class="form-control" required></div>
 <div class="col-md-6"><label class="form-label small fw-bold">Email</label><input name="email" type="email" class="form-control" required></div>
-<div class="col-md-6"><label class="form-label small fw-bold">Password</label><input name="password" type="password" class="form-control" required minlength="6"></div>
+<div class="col-md-6"><label class="form-label small fw-bold">Password</label><input name="password" type="password" class="form-control" required minlength="2"></div>
 <div class="col-md-6"><label class="form-label small fw-bold">Role</label><select name="role" class="form-select" required><?php foreach($roles as $r):?><option><?=eh($r)?></option><?php endforeach;?></select></div>
 <div class="col-md-6"><label class="form-label small fw-bold">Branch</label><select name="branch_id" class="form-select" required><option value="">Select branch</option><?php foreach($branches as $b):?><option value="<?=$b['id']?>"><?=eh($b['branch_name'])?></option><?php endforeach;?></select></div>
 <div class="col-md-6"><label class="form-label small fw-bold">Monthly Salary</label><input name="salary" type="number" min="0" step="0.01" class="form-control" value="0"></div>
