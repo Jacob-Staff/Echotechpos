@@ -101,9 +101,39 @@ ensure_column($conn, 'users', 'is_online_visible', 'TINYINT(1) NOT NULL DEFAULT 
 
     $columnType = (string)($row['COLUMN_TYPE'] ?? '');
 
-    if (stripos($columnType, 'enum(') !== 0) {
+    /*
+     * Roles are application-defined strings, not a fixed database ENUM.
+     * Older installations used ENUM, which causes MySQL error 1265
+     * (Data truncated for column 'role') whenever a new valid EchoTech
+     * role is not present in that ENUM. Convert legacy ENUM/SET columns
+     * to VARCHAR while preserving every existing stored role value.
+     */
+    if (stripos($columnType, 'enum(') !== 0 && stripos($columnType, 'set(') !== 0) {
         return;
     }
+
+    $nullable = strtoupper((string)$row['IS_NULLABLE']) === 'YES' ? 'NULL' : 'NOT NULL';
+    $defaultSql = '';
+    if ($row['COLUMN_DEFAULT'] !== null) {
+        $defaultSql = " DEFAULT '" . $conn->real_escape_string((string)$row['COLUMN_DEFAULT']) . "'";
+    }
+
+    $charsetSql = '';
+    if (!empty($row['CHARACTER_SET_NAME'])) {
+        $charsetSql = " CHARACTER SET " . preg_replace('/[^a-zA-Z0-9_]/', '', (string)$row['CHARACTER_SET_NAME']);
+    }
+
+    $collationSql = '';
+    if (!empty($row['COLLATION_NAME'])) {
+        $collationSql = " COLLATE " . preg_replace('/[^a-zA-Z0-9_]/', '', (string)$row['COLLATION_NAME']);
+    }
+
+    $conn->query(
+        "ALTER TABLE `users` MODIFY COLUMN `role` VARCHAR(100)" .
+        $charsetSql . $collationSql . " {$nullable}{$defaultSql}"
+    );
+
+    return;
 
     /* Parse existing ENUM values without losing any legacy roles. */
     preg_match_all("/'((?:[^'\\\\]|\\\\.)*)'/", $columnType, $matches);
@@ -777,7 +807,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
  $search=strtolower(($u['full_name']??'').' '.($u['username']??'').' '.($u['email']??'').' '.($u['role']??''));
 ?>
 <tr class="staffrow" data-search="<?=eh($search)?>" data-role="<?=eh($u['role'])?>" data-branch="<?=eh($u['branch_id'])?>">
-<td><div class="staff-name"><?=eh($u['full_name'] ?: $u['username'])?></div><div class="muted"><?=eh($u['username'])?> Â· <?=eh($u['email'])?></div></td>
+<td><div class="staff-name"><?=eh($u['full_name'] ?: $u['username'])?></div><div class="muted"><?=eh($u['username'])?> Ã‚Â· <?=eh($u['email'])?></div></td>
 <td><span class="badge-role"><?=eh($u['role'] ?: 'General')?></span></td>
 <td><?=eh($u['branch_name'] ?: 'Unassigned')?></td>
 <td><?php if(strcasecmp((string)$u['status'],'Active')===0):?><span class="badge-role badge-green">Active</span><?php else:?><span class="badge-role badge-red"><?=eh($u['status'])?></span><?php endif;?></td>
@@ -886,7 +916,7 @@ h1{font-size:27px;margin:3px 0 3px;font-weight:800}.head p{margin:0;color:var(--
 <div class="col-12">
     <div class="alert alert-light border mb-0 small">
         <i class="fa-solid fa-circle-info text-primary me-1"></i>
-        Staff salary is managed exclusively from <strong>Payroll â†’ Salary Setup</strong>.
+        Staff salary is managed exclusively from <strong>Payroll Ã¢â€ â€™ Salary Setup</strong>.
         New staff accounts start with a salary of <strong>K0.00</strong> until Payroll sets the salary.
     </div>
 </div>
