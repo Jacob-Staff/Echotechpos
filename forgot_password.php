@@ -37,15 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     . rawurlencode($token);
 
                 $name = trim((string)($account['full_name'] ?? $account['username'] ?? 'there')) ?: 'there';
-
-                /*
-                 * Pharmacy branding is resolved separately. It cannot prevent
-                 * the reset token or Brevo email from being sent.
-                 */
-                $pharmacyName = echotech_reset_get_pharmacy_name(
-                    $conn,
-                    (int)($account['pharmacy_id'] ?? 0)
-                );
+                $pharmacyName = trim((string)($account['pharmacy_name'] ?? '')) ?: 'Pharmacy';
 
                 $safeName = echotech_reset_h($name);
                 $safePharmacy = echotech_reset_h($pharmacyName);
@@ -54,8 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                 $subject = $pharmacyName . ' password reset';
 
                 $html = '<div style="font-family:Arial,sans-serif;max-width:600px;color:#202124">'
-                    . '<h2 style="margin:0 0 6px">EchoTech</h2>'
-                    . '<h3 style="margin:0 0 24px">' . $safePharmacy . ' password reset</h3>'
+                    . '<h2 style="margin-bottom:20px">' . $safeBranch . '</h2>'
                     . '<p>Hello ' . $safeName . ',</p>'
                     . '<p>We received a request to reset your password.</p>'
                     . '<p>Use the button below to create a new password for your account.</p>'
@@ -80,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     $subject,
                     $html,
                     $text,
-                    'EchoTech'
+                    $pharmacyName
                 );
 
                 if (!$mailSent) {
