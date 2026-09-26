@@ -89,51 +89,18 @@ function echotech_reset_base_url(): string
 
 function echotech_reset_mail_config(): array
 {
+    /*
+     * EchoTech uses Brevo's HTTPS transactional-email API.
+     * This is intentional: Render deployments can block/restrict outbound
+     * SMTP ports, while HTTPS/443 is the normal application egress path.
+     */
     return [
-        'host'       => trim((string)(getenv('MAIL_HOST') ?: '')),
-        'port'       => (int)(getenv('MAIL_PORT') ?: 587),
-        'username'   => trim((string)(getenv('MAIL_USERNAME') ?: '')),
-        'password'   => (string)(getenv('MAIL_PASSWORD') ?: ''),
+        'api_key'    => trim((string)(getenv('BREVO_API_KEY') ?: '')),
         'from_email' => trim((string)(getenv('MAIL_FROM_EMAIL') ?: '')),
         'from_name'  => trim((string)(getenv('MAIL_FROM_NAME') ?: 'EchoTech POS')),
-        'encryption' => strtolower(trim((string)(getenv('MAIL_ENCRYPTION') ?: 'tls'))),
         'timeout'    => max(5, min(60, (int)(getenv('MAIL_TIMEOUT') ?: 20))),
+        'api_url'    => 'https://api.brevo.com/v3/smtp/email',
     ];
-}
-
-function echotech_reset_smtp_read($fp, int $timeout): string
-{
-    stream_set_timeout($fp, $timeout);
-    $data = '';
-
-    while (!feof($fp)) {
-        $line = fgets($fp, 515);
-        if ($line === false) {
-            break;
-        }
-        $data .= $line;
-        if (isset($line[3]) && $line[3] === ' ') {
-            break;
-        }
-    }
-
-    return trim($data);
-}
-
-function echotech_reset_smtp_expect($fp, array $codes, int $timeout): bool
-{
-    $response = echotech_reset_smtp_read($fp, $timeout);
-    if ($response === '') {
-        return false;
-    }
-
-    return in_array((int)substr($response, 0, 3), $codes, true);
-}
-
-function echotech_reset_smtp_command($fp, string $command, array $codes, int $timeout): bool
-{
-    return fwrite($fp, $command . "\r\n") !== false
-        && echotech_reset_smtp_expect($fp, $codes, $timeout);
 }
 
 function echotech_reset_send_mail(
@@ -145,126 +112,147 @@ function echotech_reset_send_mail(
 ): bool {
     $cfg = echotech_reset_mail_config();
 
-    if ($cfg['host'] === '' || $cfg['username'] === '' || $cfg['password'] === '' || $cfg['from_email'] === '') {
-        echotech_reset_log('SMTP is not configured.');
+    if ($cfg['api_key'] === '' || $cfg['from_email'] === '') {
+        echotech_reset_log('Brevo email configuration is incomplete. BREVO_API_KEY and MAIL_FROM_EMAIL are required.');
+        return false;
+    }
+
+    if (!filter_var($cfg['from_email'], FILTER_VALIDATE_EMAIL)) {
+        echotech_reset_log('Configured MAIL_FROM_EMAIL is invalid.');
         return false;
     }
 
     if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
-        echotech_reset_log('Invalid recipient email supplied.');
+        echotech_reset_log('Password reset recipient email is invalid.');
         return false;
     }
 
-    $remote = ($cfg['encryption'] === 'ssl' || $cfg['port'] === 465)
-        ? 'ssl://' . $cfg['host'] . ':' . $cfg['port']
-        : $cfg['host'] . ':' . $cfg['port'];
+    $safeName = trim(preg_replace('/[\r\n]+/', ' ', $name));
+    $safeSubject = trim(preg_replace('/[\r\n]+/', ' ', $subject));
 
-    $errno = 0;
-    $errstr = '';
-    $fp = @stream_socket_client(
-        $remote,
-        $errno,
-        $errstr,
-        $cfg['timeout'],
-        STREAM_CLIENT_CONNECT
+    $payload = [
+        'sender' => [
+            'name' => $cfg['from_name'] !== '' ? $cfg['from_name'] : 'EchoTech POS',
+            'email' => $cfg['from_email'],
+        ],
+        'to' => [[
+            'email' => $to,
+            'name' => $safeName !== '' ? $safeName : $to,
+        ]],
+        'subject' => $safeSubject,
+        'htmlContent' => $html,
+        'textContent' => $text,
+    ];
+
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        echotech_reset_log('Could not encode Brevo password-reset request.');
+        return false;
+    }
+
+    $headers = [
+        'accept: application/json',
+        'api-key: ' . $cfg['api_key'],
+        'content-type: application/json',
+    ];
+
+    echotech_reset_log('Sending password reset through Brevo HTTPS API to ' . $to . ' from ' . $cfg['from_email'] . '.');
+
+    /* Preferred path: PHP cURL over HTTPS/443. */
+    if (function_exists('curl_init')) {
+        $ch = curl_init($cfg['api_url']);
+        if ($ch === false) {
+            echotech_reset_log('Could not initialize cURL.');
+            return false;
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $json,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => min(15, $cfg['timeout']),
+            CURLOPT_TIMEOUT => $cfg['timeout'],
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
+
+        $response = curl_exec($ch);
+        $curlError = curl_error($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($response === false) {
+            echotech_reset_log('Brevo HTTPS request failed: ' . ($curlError !== '' ? $curlError : 'unknown cURL error'));
+            return false;
+        }
+
+        $decoded = json_decode((string)$response, true);
+
+        if ($httpCode >= 200 && $httpCode < 300) {
+            $messageId = is_array($decoded) ? (string)($decoded['messageId'] ?? '') : '';
+            echotech_reset_log('Brevo accepted password-reset email. HTTP ' . $httpCode . ($messageId !== '' ? ' messageId=' . $messageId : ''));
+            return true;
+        }
+
+        $message = '';
+        if (is_array($decoded)) {
+            $message = trim((string)($decoded['message'] ?? $decoded['code'] ?? ''));
+        }
+        if ($message === '') {
+            $message = 'Brevo returned HTTP ' . $httpCode . '.';
+        }
+
+        echotech_reset_log('Brevo rejected password-reset email: ' . $message);
+        return false;
+    }
+
+    /* Fallback for a PHP build without cURL. */
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => implode("\r\n", $headers) . "\r\n",
+            'content' => $json,
+            'timeout' => $cfg['timeout'],
+            'ignore_errors' => true,
+        ],
+        'ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'allow_self_signed' => false,
+        ],
+    ]);
+
+    $response = @file_get_contents($cfg['api_url'], false, $context);
+    $statusLine = (string)($http_response_header[0] ?? '');
+    $httpCode = 0;
+
+    if (preg_match('/\s(\d{3})\s/', $statusLine, $m)) {
+        $httpCode = (int)$m[1];
+    }
+
+    if ($response === false) {
+        echotech_reset_log('Brevo HTTPS fallback request failed.');
+        return false;
+    }
+
+    $decoded = json_decode((string)$response, true);
+    if ($httpCode >= 200 && $httpCode < 300) {
+        $messageId = is_array($decoded) ? (string)($decoded['messageId'] ?? '') : '';
+        echotech_reset_log('Brevo accepted password-reset email through HTTPS fallback. HTTP ' . $httpCode . ($messageId !== '' ? ' messageId=' . $messageId : ''));
+        return true;
+    }
+
+    $message = is_array($decoded)
+        ? trim((string)($decoded['message'] ?? $decoded['code'] ?? ''))
+        : '';
+
+    echotech_reset_log(
+        'Brevo HTTPS fallback rejected password-reset email: '
+        . ($message !== '' ? $message : 'HTTP ' . $httpCode)
     );
 
-    if (!$fp) {
-        echotech_reset_log('SMTP connection failed: ' . $errstr);
-        return false;
-    }
-
-    try {
-        $helo = preg_replace(
-            '/[^a-zA-Z0-9.-]/',
-            '',
-            (string)($_SERVER['SERVER_NAME'] ?? 'echotechpos.onrender.com')
-        ) ?: 'echotechpos.onrender.com';
-
-        if (!echotech_reset_smtp_expect($fp, [220], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP greeting failed');
-        }
-
-        if (!echotech_reset_smtp_command($fp, 'EHLO ' . $helo, [250], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP EHLO failed');
-        }
-
-        if ($cfg['encryption'] === 'tls' && $cfg['port'] !== 465) {
-            if (!echotech_reset_smtp_command($fp, 'STARTTLS', [220], $cfg['timeout'])) {
-                throw new RuntimeException('SMTP STARTTLS failed');
-            }
-
-            if (!@stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-                throw new RuntimeException('SMTP TLS negotiation failed');
-            }
-
-            if (!echotech_reset_smtp_command($fp, 'EHLO ' . $helo, [250], $cfg['timeout'])) {
-                throw new RuntimeException('SMTP EHLO after TLS failed');
-            }
-        }
-
-        if (!echotech_reset_smtp_command($fp, 'AUTH LOGIN', [334], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP authentication command failed');
-        }
-        if (!echotech_reset_smtp_command($fp, base64_encode($cfg['username']), [334], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP username rejected');
-        }
-        if (!echotech_reset_smtp_command($fp, base64_encode($cfg['password']), [235], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP password rejected');
-        }
-        if (!echotech_reset_smtp_command($fp, 'MAIL FROM:<' . $cfg['from_email'] . '>', [250], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP sender rejected');
-        }
-        if (!echotech_reset_smtp_command($fp, 'RCPT TO:<' . $to . '>', [250, 251], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP recipient rejected');
-        }
-        if (!echotech_reset_smtp_command($fp, 'DATA', [354], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP DATA rejected');
-        }
-
-        $safeName = trim(preg_replace('/[\r\n]+/', ' ', $name));
-        $safeSubject = trim(preg_replace('/[\r\n]+/', ' ', $subject));
-        $boundary = '=_EchoTechReset_' . bin2hex(random_bytes(12));
-
-        $headers = [
-            'Date: ' . date('r'),
-            'From: ' . $cfg['from_name'] . ' <' . $cfg['from_email'] . '>',
-            'To: ' . ($safeName !== '' ? $safeName . ' <' . $to . '>' : '<' . $to . '>'),
-            'Subject: ' . $safeSubject,
-            'MIME-Version: 1.0',
-            'Content-Type: multipart/alternative; boundary="' . $boundary . '"',
-        ];
-
-        $body = implode("\r\n", $headers) . "\r\n\r\n";
-        $body .= '--' . $boundary . "\r\n";
-        $body .= "Content-Type: text/plain; charset=UTF-8\r\n";
-        $body .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-        $body .= $text . "\r\n\r\n";
-        $body .= '--' . $boundary . "\r\n";
-        $body .= "Content-Type: text/html; charset=UTF-8\r\n";
-        $body .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-        $body .= $html . "\r\n\r\n";
-        $body .= '--' . $boundary . "--\r\n";
-
-        $body = preg_replace('/^\./m', '..', $body);
-
-        if (fwrite($fp, $body . "\r\n.\r\n") === false) {
-            throw new RuntimeException('SMTP message write failed');
-        }
-
-        if (!echotech_reset_smtp_expect($fp, [250], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP message rejected');
-        }
-
-        @fwrite($fp, "QUIT\r\n");
-        @fclose($fp);
-        return true;
-    } catch (Throwable $e) {
-        echotech_reset_log('SMTP send failed: ' . $e->getMessage());
-        @fwrite($fp, "QUIT\r\n");
-        @fclose($fp);
-        return false;
-    }
+    return false;
 }
 
 function echotech_reset_find_account(mysqli $db, string $type, string $identifier): ?array
