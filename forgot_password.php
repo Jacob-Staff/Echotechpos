@@ -46,7 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                 $subject = $pharmacyName . ' password reset';
 
                 $html = '<div style="font-family:Arial,sans-serif;max-width:600px;color:#202124">'
-                    . '<h2 style="margin-bottom:20px">' . $safeBranch . '</h2>'
+                    . '<h2 style="margin:0 0 6px">EchoTech</h2>'
+                    . '<h3 style="margin:0 0 24px">' . $safePharmacy . ' password reset</h3>'
                     . '<p>Hello ' . $safeName . ',</p>'
                     . '<p>We received a request to reset your password.</p>'
                     . '<p>Use the button below to create a new password for your account.</p>'
@@ -71,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                     $subject,
                     $html,
                     $text,
-                    $pharmacyName
+                    'EchoTech'
                 );
 
                 if (!$mailSent) {
