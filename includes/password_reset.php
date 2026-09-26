@@ -136,135 +136,21 @@ function echotech_reset_smtp_command($fp, string $command, array $codes, int $ti
         && echotech_reset_smtp_expect($fp, $codes, $timeout);
 }
 
-function echotech_reset_send_mail(
-    string $to,
-    string $name,
-    string $subject,
-    string $html,
-    string $text
-): bool {
-    $cfg = echotech_reset_mail_config();
-
-    if ($cfg['host'] === '' || $cfg['username'] === '' || $cfg['password'] === '' || $cfg['from_email'] === '') {
-        echotech_reset_log('SMTP is not configured.');
-        return false;
-    }
-
-    if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
-        echotech_reset_log('Invalid recipient email supplied.');
-        return false;
-    }
-
-    $remote = ($cfg['encryption'] === 'ssl' || $cfg['port'] === 465)
-        ? 'ssl://' . $cfg['host'] . ':' . $cfg['port']
-        : $cfg['host'] . ':' . $cfg['port'];
-
-    $errno = 0;
-    $errstr = '';
-    $fp = @stream_socket_client(
-        $remote,
-        $errno,
-        $errstr,
-        $cfg['timeout'],
-        STREAM_CLIENT_CONNECT
-    );
-
-    if (!$fp) {
-        echotech_reset_log('SMTP connection failed: ' . $errstr);
-        return false;
-    }
-
-    try {
-        $helo = preg_replace(
-            '/[^a-zA-Z0-9.-]/',
-            '',
-            (string)($_SERVER['SERVER_NAME'] ?? 'echotechpos.onrender.com')
-        ) ?: 'echotechpos.onrender.com';
-
-        if (!echotech_reset_smtp_expect($fp, [220], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP greeting failed');
-        }
-
-        if (!echotech_reset_smtp_command($fp, 'EHLO ' . $helo, [250], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP EHLO failed');
-        }
-
-        if ($cfg['encryption'] === 'tls' && $cfg['port'] !== 465) {
-            if (!echotech_reset_smtp_command($fp, 'STARTTLS', [220], $cfg['timeout'])) {
-                throw new RuntimeException('SMTP STARTTLS failed');
-            }
-
-            if (!@stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-                throw new RuntimeException('SMTP TLS negotiation failed');
-            }
-
-            if (!echotech_reset_smtp_command($fp, 'EHLO ' . $helo, [250], $cfg['timeout'])) {
-                throw new RuntimeException('SMTP EHLO after TLS failed');
-            }
-        }
-
-        if (!echotech_reset_smtp_command($fp, 'AUTH LOGIN', [334], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP authentication command failed');
-        }
-        if (!echotech_reset_smtp_command($fp, base64_encode($cfg['username']), [334], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP username rejected');
-        }
-        if (!echotech_reset_smtp_command($fp, base64_encode($cfg['password']), [235], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP password rejected');
-        }
-        if (!echotech_reset_smtp_command($fp, 'MAIL FROM:<' . $cfg['from_email'] . '>', [250], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP sender rejected');
-        }
-        if (!echotech_reset_smtp_command($fp, 'RCPT TO:<' . $to . '>', [250, 251], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP recipient rejected');
-        }
-        if (!echotech_reset_smtp_command($fp, 'DATA', [354], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP DATA rejected');
-        }
-
-        $safeName = trim(preg_replace('/[\r\n]+/', ' ', $name));
-        $safeSubject = trim(preg_replace('/[\r\n]+/', ' ', $subject));
-        $boundary = '=_EchoTechReset_' . bin2hex(random_bytes(12));
-
-        $headers = [
-            'Date: ' . date('r'),
-            'From: ' . $cfg['from_name'] . ' <' . $cfg['from_email'] . '>',
-            'To: ' . ($safeName !== '' ? $safeName . ' <' . $to . '>' : '<' . $to . '>'),
-            'Subject: ' . $safeSubject,
-            'MIME-Version: 1.0',
-            'Content-Type: multipart/alternative; boundary="' . $boundary . '"',
-        ];
-
-        $body = implode("\r\n", $headers) . "\r\n\r\n";
-        $body .= '--' . $boundary . "\r\n";
-        $body .= "Content-Type: text/plain; charset=UTF-8\r\n";
-        $body .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-        $body .= $text . "\r\n\r\n";
-        $body .= '--' . $boundary . "\r\n";
-        $body .= "Content-Type: text/html; charset=UTF-8\r\n";
-        $body .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-        $body .= $html . "\r\n\r\n";
-        $body .= '--' . $boundary . "--\r\n";
-
-        $body = preg_replace('/^\./m', '..', $body);
-
-        if (fwrite($fp, $body . "\r\n.\r\n") === false) {
-            throw new RuntimeException('SMTP message write failed');
-        }
-
-        if (!echotech_reset_smtp_expect($fp, [250], $cfg['timeout'])) {
-            throw new RuntimeException('SMTP message rejected');
-        }
-
-        @fwrite($fp, "QUIT\r\n");
-        @fclose($fp);
-        return true;
-    } catch (Throwable $e) {
-        echotech_reset_log('SMTP send failed: ' . $e->getMessage());
-        @fwrite($fp, "QUIT\r\n");
-        @fclose($fp);
-        return false;
-    }
+function echotech_reset_send_mail(string $to,string $name,string $subject,string $html,string $text): bool {
+    if (!filter_var($to, FILTER_VALIDATE_EMAIL)) { echotech_reset_log('Invalid recipient email supplied.'); return false; }
+    $apiKey=trim((string)(getenv('BREVO_API_KEY') ?: '')); $fromEmail=trim((string)(getenv('MAIL_FROM_EMAIL') ?: ''));
+    if ($apiKey==='' || $fromEmail==='') { echotech_reset_log('Brevo configuration missing BREVO_API_KEY or MAIL_FROM_EMAIL.'); return false; }
+    if (!filter_var($fromEmail,FILTER_VALIDATE_EMAIL)) { echotech_reset_log('Configured MAIL_FROM_EMAIL is invalid.'); return false; }
+    $safeName=trim(preg_replace('/[\r\n]+/',' ',$name)); $safeSubject=trim(preg_replace('/[\r\n]+/',' ',$subject));
+    $payload=['sender'=>['name'=>'EchoTech','email'=>$fromEmail],'to'=>[['email'=>$to,'name'=>$safeName!==''?$safeName:$to]],'subject'=>$safeSubject,'htmlContent'=>$html,'textContent'=>$text];
+    $json=json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); if($json===false){echotech_reset_log('Brevo request JSON encoding failed.');return false;}
+    $headers=['accept: application/json','api-key: '.$apiKey,'content-type: application/json'];
+    $ch=curl_init('https://api.brevo.com/v3/smtp/email');
+    if($ch!==false){curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$json,CURLOPT_HTTPHEADER=>$headers,CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>10,CURLOPT_TIMEOUT=>30,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2]);$response=curl_exec($ch);$curlError=curl_error($ch);$httpCode=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);curl_close($ch);if($response!==false&&$httpCode>=200&&$httpCode<300){echotech_reset_log('Brevo accepted password-reset email. HTTP '.$httpCode.'.');return true;}echotech_reset_log('Brevo HTTPS request failed. HTTP '.$httpCode.($curlError!==''?' cURL: '.$curlError:'').' Response: '.substr((string)$response,0,500));}
+    $context=stream_context_create(['http'=>['method'=>'POST','header'=>implode("\r\n",$headers),'content'=>$json,'timeout'=>30,'ignore_errors'=>true],'ssl'=>['verify_peer'=>true,'verify_peer_name'=>true]]);
+    $response=@file_get_contents('https://api.brevo.com/v3/smtp/email',false,$context); $status=(string)($http_response_header[0]??'');
+    if($response!==false&&preg_match('/\s2\d\d\s/',' '.$status)){echotech_reset_log('Brevo HTTPS fallback accepted password-reset email. '.$status);return true;}
+    echotech_reset_log('Brevo HTTPS fallback failed. '.$status.' Response: '.substr((string)$response,0,500)); return false;
 }
 
 function echotech_reset_find_account(mysqli $db, string $type, string $identifier): ?array
