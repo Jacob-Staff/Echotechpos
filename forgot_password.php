@@ -46,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $serviceReady) {
                 $subject = $branchName . ' password reset';
 
                 $html = '<div style="font-family:Arial,sans-serif;max-width:600px;color:#202124">'
-                    . '<h2 style="margin-bottom:20px">' . $safePharmacy . '</h2>'
+                    . '<h2 style="margin-bottom:20px">' . $safeBranch . '</h2>'
                     . '<p>Hello ' . $safeName . ',</p>'
                     . '<p>We received a request to reset your password.</p>'
                     . '<p>Use the button below to create a new password for your account.</p>'
