@@ -497,6 +497,34 @@ mysqli_stmt_close(
     $stmt
 );
 
+/* Itemized register: one row per sold product. */
+$itemized_data = [];
+$itemSql = "
+    SELECT s.id AS sale_id, s.invoice AS invoice_number, s.payment_method, s.sale_date,
+           COALESCE(u.username, u.full_name, s.issued_by, 'System') AS issuer,
+           si.id AS sale_item_id, si.quantity, si.unit_price,
+           COALESCE(st.item_name, 'Uncategorized Product') AS item_name,
+           (COALESCE(si.quantity,0) * COALESCE(si.unit_price,0)) AS line_total
+    FROM sales s
+    INNER JOIN sales_items si ON si.sale_id=s.id
+        AND si.pharmacy_id=s.pharmacy_id AND si.branch_id=s.branch_id
+    LEFT JOIN store_items st ON st.id=si.product_id
+    LEFT JOIN users u ON u.id=s.user_id
+    WHERE " . implode("\n AND ", $where) . "
+    ORDER BY s.id DESC, si.id ASC
+";
+$itemStmt=mysqli_prepare($conn,$itemSql);
+if ($itemStmt) {
+    $itemBindValues=[$types];
+    foreach($params as $key=>$value){$itemBindValues[]=&$params[$key];}
+    if(call_user_func_array('mysqli_stmt_bind_param',array_merge([$itemStmt],$itemBindValues)) && mysqli_stmt_execute($itemStmt)){
+        $itemResult=mysqli_stmt_get_result($itemStmt);
+        if($itemResult){while($itemRow=mysqli_fetch_assoc($itemResult)){$itemized_data[]=$itemRow;}}
+    } else { error_log('today_transactions.php itemized query failed: '.mysqli_stmt_error($itemStmt)); }
+    mysqli_stmt_close($itemStmt);
+} else { error_log('today_transactions.php itemized prepare failed: '.mysqli_error($conn)); }
+
+
 /*
 |--------------------------------------------------------------------------
 | Payment Summary
@@ -599,7 +627,7 @@ require_once "../includes/head.php";
 <meta charset="UTF-8">
 <style>
 /* =========================================================
-   ECHOTECH POS â€” TODAY'S TRANSACTIONS
+   ECHOTECH POS Ã¢â‚¬â€ TODAY'S TRANSACTIONS
    Dashboard-matched professional UI
 ========================================================= */
 
@@ -899,7 +927,7 @@ require_once "../includes/head.php";
 
 .report-table{
     width:100%;
-    min-width:980px;
+    min-width:1120px;
     border-collapse:collapse;
 }
 
@@ -1197,11 +1225,11 @@ require_once "../includes/head.php";
                                 strtoupper($display_pharm)
                             ) ?>
 
-                            <span class="mx-1">â€¢</span>
+                            <span class="mx-1">Ã¢â‚¬Â¢</span>
 
                             <?= tx_e($display_bran) ?>
 
-                            <span class="mx-1">â€¢</span>
+                            <span class="mx-1">Ã¢â‚¬Â¢</span>
 
                             <?= (int)$total_invoices ?>
                             transaction(s)
@@ -1562,121 +1590,66 @@ require_once "../includes/head.php";
                     <table class="report-table">
 
                         <thead>
-
                             <tr>
-
-                                <th class="ps-3">
-                                    Invoice
-                                </th>
-
-                                <th>
-                                    Medicines Sold
-                                </th>
-
-                                <th>
-                                    Payment
-                                </th>
-
-                                <th>
-                                    Time
-                                </th>
-
-                                <th>
-                                    Handled By
-                                </th>
-
-                                <th class="text-end">
-                                    Total (ZMW)
-                                </th>
-
-                                <th
-                                    class="text-center no-print"
-                                    style="width:95px;"
-                                >
-                                    Action
-                                </th>
-
+                                <th class="ps-3">Invoice</th>
+                                <th>Medicines Sold</th>
+                                <th>Payment</th>
+                                <th>Time</th>
+                                <th>Handled By</th>
+                                <th class="text-end">Total (ZMW)</th>
+                                <th class="text-center no-print" style="width:95px;">Action</th>
                             </tr>
-
                         </thead>
 
 
                         <tbody>
 
-                        <?php if (!empty($sales_data)): ?>
+                        <?php if (!empty($itemized_data)): ?>
 
-                            <?php foreach ($sales_data as $row): ?>
-
+                            <?php foreach ($itemized_data as $row): ?>
                                 <?php
-
-                                $saleId = (int)(
-                                    $row['id'] ?? 0
-                                );
-
-                                $invoiceNumber =
-                                    $row['invoice'] ?? '';
-
-                                $itemsSold =
-                                    $row['items_sold']
-                                    ?: 'No items recorded';
-
-                                $paymentMethod =
-                                    $row['payment_method']
-                                    ?: 'Cash';
-
-                                $createdAt =
-                                    $row['sale_date']
-                                    ?? '';
-
+                                $saleId = (int)($row['sale_id'] ?? 0);
+                                $invoiceNumber = $row['invoice_number'] ?? '';
+                                $itemName = $row['item_name'] ?: 'Uncategorized Product';
+                                $quantity = (int)($row['quantity'] ?? 0);
+                                $createdAt = $row['sale_date'] ?? '';
                                 $timeDisplay = 'N/A';
 
                                 if ($createdAt !== '') {
-
-                                    $timestamp =
-                                        strtotime($createdAt);
-
+                                    $timestamp = strtotime($createdAt);
                                     if ($timestamp !== false) {
-                                        $timeDisplay =
-                                            date(
-                                                'h:i A',
-                                                $timestamp
-                                            );
+                                        $timeDisplay = date('h:i A', $timestamp);
                                     }
                                 }
 
-                                $issuer =
-                                    $row['issuer']
-                                    ?: 'System';
+                                $paymentMethod = $row['payment_method'] ?: 'Cash';
+                                $issuer = $row['issuer'] ?: 'System';
 
-                                $saleTotal = (float)(
-                                    $row['total']
-                                    ?? $row['total_amount']
-                                    ?? 0
-                                );
+                                /*
+                                 * Keep the original Today Transactions layout.
+                                 * One sales_items record = one visible row.
+                                 * Quantity stays beside the medicine name instead
+                                 * of introducing another table column.
+                                 */
+                                $medicineDisplay =
+                                    $itemName .
+                                    ' (x' .
+                                    $quantity .
+                                    ')';
 
-                                $paymentLower =
-                                    strtolower(
-                                        trim(
-                                            $paymentMethod
-                                        )
-                                    );
+                                $lineTotal = (float)($row['line_total'] ?? 0);
 
+                                $paymentLower = strtolower(trim($paymentMethod));
                                 $paymentClass = 'cash';
-                                $paymentIcon =
-                                    'fa-money-bill-wave';
-                                $paymentLabel = 'Cash';
+                                $paymentIcon = 'fa-money-bill-wave';
+                                $paymentLabel = $paymentMethod;
 
                                 if (
-                                    $paymentLower === 'card'
-                                    || $paymentLower === 'online/bank transfer'
+                                    $paymentLower === 'card' ||
+                                    $paymentLower === 'online/bank transfer'
                                 ) {
-
                                     $paymentClass = 'card';
-                                    $paymentIcon =
-                                        'fa-credit-card';
-                                    $paymentLabel =
-                                        $paymentMethod;
-
+                                    $paymentIcon = 'fa-credit-card';
                                 } elseif (
                                     in_array(
                                         $paymentLower,
@@ -1689,133 +1662,70 @@ require_once "../includes/head.php";
                                         true
                                     )
                                 ) {
-
                                     $paymentClass = 'mobile';
-                                    $paymentIcon =
-                                        'fa-mobile-alt';
-                                    $paymentLabel =
-                                        $paymentMethod;
-
+                                    $paymentIcon = 'fa-mobile-alt';
                                 } elseif (
                                     $paymentLower === 'online/cash on delivery'
                                 ) {
-
                                     $paymentClass = 'cash';
-                                    $paymentIcon =
-                                        'fa-truck';
-                                    $paymentLabel =
-                                        $paymentMethod;
-
-                                } else {
-
-                                    $paymentLabel =
-                                        $paymentMethod;
+                                    $paymentIcon = 'fa-truck';
                                 }
 
-                                $cashierInitial =
-                                    strtoupper(
-                                        substr(
-                                            trim($issuer),
-                                            0,
-                                            1
-                                        )
-                                    );
-
+                                $cashierInitial = strtoupper(
+                                    substr(trim($issuer), 0, 1)
+                                );
                                 ?>
 
                                 <tr>
 
                                     <td class="ps-3">
-
                                         <div class="tx-invoice">
-                                            #<?= tx_e(
-                                                $invoiceNumber
-                                            ) ?>
+                                            #<?= tx_e($invoiceNumber) ?>
                                         </div>
 
                                         <div class="tx-sale-id">
                                             Sale ID <?= $saleId ?>
                                         </div>
-
                                     </td>
 
-
                                     <td>
-
                                         <div class="tx-items">
-                                            <?= tx_e(
-                                                $itemsSold
-                                            ) ?>
+                                            <?= tx_e($medicineDisplay) ?>
                                         </div>
-
                                     </td>
-
 
                                     <td>
-
                                         <span
-                                            class="tx-method <?= tx_e(
-                                                $paymentClass
-                                            ) ?>"
+                                            class="tx-method <?= tx_e($paymentClass) ?>"
                                         >
-
-                                            <i
-                                                class="fas <?= tx_e(
-                                                    $paymentIcon
-                                                ) ?>"
-                                            ></i>
-
-                                            <?= tx_e(
-                                                $paymentLabel
-                                            ) ?>
-
+                                            <i class="fas <?= tx_e($paymentIcon) ?>"></i>
+                                            <?= tx_e($paymentLabel) ?>
                                         </span>
-
                                     </td>
-
 
                                     <td class="text-nowrap">
-                                        <?= tx_e(
-                                            $timeDisplay
-                                        ) ?>
+                                        <?= tx_e($timeDisplay) ?>
                                     </td>
 
-
                                     <td>
-
                                         <div class="tx-cashier">
-
                                             <div class="tx-avatar">
-                                                <?= tx_e(
-                                                    $cashierInitial
-                                                ) ?>
+                                                <?= tx_e($cashierInitial) ?>
                                             </div>
 
                                             <span>
-                                                <?= tx_e(
-                                                    $issuer
-                                                ) ?>
+                                                <?= tx_e($issuer) ?>
                                             </span>
-
                                         </div>
-
                                     </td>
-
 
                                     <td class="text-end">
-
                                         <span class="tx-total">
-                                            K<?= number_format(
-                                                $saleTotal,
-                                                2
-                                            ) ?>
+                                            K<?= number_format($lineTotal, 2) ?>
                                         </span>
-
                                     </td>
 
-
                                     <td class="text-center no-print">
-
                                         <div class="tx-actions">
 
                                             <a
@@ -1837,7 +1747,6 @@ require_once "../includes/head.php";
                                             </a>
 
                                         </div>
-
                                     </td>
 
                                 </tr>
@@ -1847,11 +1756,7 @@ require_once "../includes/head.php";
                         <?php else: ?>
 
                             <tr>
-
-                                <td
-                                    colspan="7"
-                                    class="tx-empty"
-                                >
+                                <td colspan="7" class="tx-empty">
 
                                     <div class="tx-empty-icon">
                                         <i class="fas fa-receipt"></i>
@@ -1867,7 +1772,6 @@ require_once "../includes/head.php";
                                     </div>
 
                                 </td>
-
                             </tr>
 
                         <?php endif; ?>
